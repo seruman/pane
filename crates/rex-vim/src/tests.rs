@@ -283,3 +283,39 @@ fn escape_hides_search_matches() {
     press(&mut v, "n");
     assert!(!v.matches(TEXT).is_empty());
 }
+
+fn source(effect: Option<VimEffect>) -> (std::ops::Range<usize>, bool) {
+    match effect {
+        Some(VimEffect::CopySource { range, linewise }) => (range, linewise),
+        other => panic!("no source yank: {other:?}"),
+    }
+}
+
+#[test]
+fn gy_asks_for_the_source() {
+    let mut v = Vim::new();
+    let (range, linewise) = source(press(&mut v, "gyw"));
+    assert_eq!((&TEXT[range], linewise), ("fn ", false));
+    assert_eq!(v.message(), Some("3 characters yanked as source"));
+    let (range, linewise) = source(press(&mut v, "gyy"));
+    assert_eq!((&TEXT[range], linewise), ("fn main() {", true));
+    let (range, linewise) = source(press(&mut v, "Vjgy"));
+    assert_eq!(
+        (&TEXT[range], linewise),
+        ("fn main() {\n    let s = \"hello world\";", true)
+    );
+    // Plain `y` afterwards copies text again.
+    assert_eq!(yanked(press(&mut v, "yw")), "fn ");
+    assert_eq!(press(&mut v, "g"), Some(VimEffect::Moved));
+    assert_eq!(v.pending(), "g");
+    press(&mut v, "y");
+    assert_eq!(v.pending(), "gy");
+}
+
+#[test]
+fn gy_text_object_after_a_visual_yank() {
+    let mut v = Vim::new();
+    yanked(press(&mut v, "vey"));
+    let (range, _) = source(press(&mut v, "gyiw"));
+    assert_eq!(&TEXT[range], "fn");
+}

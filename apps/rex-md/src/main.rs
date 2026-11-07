@@ -7,7 +7,8 @@
 //! ```
 //!
 //! With no file it shows a sample. Move with `h j k l w b e 0 $ gg G { } f t %`, select with `v`
-//! and `V`, yank with `y` (`yy`, `yiw`, `ya"`, `yip`, …), search with `/` and `?`, `n` and `N`,
+//! and `V`, yank with `y` (`yy`, `yiw`, `ya"`, `yip`, …), or with `gy` to copy the Markdown
+//! source instead of the text (`gyy`, `gyip`, `V…gy`), search with `/` and `?`, `n` and `N`,
 //! `*` and `#`; Escape hides the matches. Ctrl-D and Ctrl-U page. Space on a task's line ticks
 //! it, and with a file open writes it back. Hover a code block for its copy button.
 
@@ -216,7 +217,9 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
         .child(kbd("v", &rex))
         .child(text("select").font(rex.ty.caption).color(rex.text_tertiary))
         .child(kbd("y", &rex))
-        .child(text("yank").font(rex.ty.caption).color(rex.text_tertiary));
+        .child(text("yank").font(rex.ty.caption).color(rex.text_tertiary))
+        .child(kbd("gy", &rex))
+        .child(text("as md").font(rex.ty.caption).color(rex.text_tertiary));
     let doc = Markdown::new(s.source.as_str())
         .style(style(&rex))
         .selectable(true)
@@ -316,8 +319,36 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
             tx.scroll_into_view("vim-cursor");
             true
         }
+        Some(VimEffect::CopySource { range, linewise }) => {
+            tx.copy(source_of(&s.source, &page, range, linewise));
+            tx.scroll_into_view("vim-cursor");
+            true
+        }
         None => false,
     }
+}
+
+/// The Markdown behind `range` of the page's text: from the first source byte it was drawn from
+/// to the last, as written, so a range starting inside bold text keeps its closing `**` and
+/// drops the opening one. A linewise yank takes the whole source lines, with list markers,
+/// heading hashes and code fences that fall on them.
+fn source_of(
+    source: &str,
+    page: &RenderedText,
+    range: std::ops::Range<usize>,
+    linewise: bool,
+) -> String {
+    let ranges = page.source_ranges(range);
+    let (Some(first), Some(last)) = (ranges.first(), ranges.last()) else {
+        return String::new();
+    };
+    let (mut start, mut end) = (first.start, last.end);
+    if linewise {
+        start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+        end = source[end..].find('\n').map_or(source.len(), |i| end + i);
+        return format!("{}\n", &source[start..end]);
+    }
+    source[start..end].to_owned()
 }
 
 /// Puts a copy button back to its icon once the check has shown long enough.
@@ -369,4 +400,36 @@ fn main() {
         families: ("Inter", "ui-monospace, Menlo, Inter"),
         ..AppSpec::new("Markdown", (900.0, 900.0), Doc::default, view)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SRC: &str = "## Tasks\n\nSome **bold phrase** and more.\n\n- [x] Port the shell\n- [ ] Copy\n\n```rust\nlet x = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
+
+    fn yank(text: &str, linewise: bool) -> String {
+        let page = RenderedText::new(SRC);
+        let at = page.text().find(text).expect("drawn");
+        source_of(SRC, &page, at..at + text.len(), linewise)
+    }
+
+    #[test]
+    fn linewise_takes_whole_source_lines() {
+        assert_eq!(yank("Port the shell", true), "- [x] Port the shell\n");
+        assert_eq!(
+            yank("Port the shell\nCopy", true),
+            "- [x] Port the shell\n- [ ] Copy\n"
+        );
+        assert_eq!(yank("Tasks", true), "## Tasks\n");
+        assert_eq!(yank("let x = 1;", true), "let x = 1;\n");
+        assert_eq!(yank("1\t2", true), "| 1 | 2 |\n");
+    }
+
+    #[test]
+    fn charwise_is_the_raw_source_slice() {
+        assert_eq!(yank("bold phrase", false), "bold phrase");
+        assert_eq!(yank("phrase and", false), "phrase** and");
+        assert_eq!(yank("Some bold", false), "Some **bold");
+    }
 }

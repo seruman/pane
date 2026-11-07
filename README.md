@@ -24,6 +24,7 @@ The toolchain is pinned to Rune's (`rust-toolchain.toml`); move them together.
 
 ```sh
 cargo build --release
+scripts/fmt.sh            # rustfmt; `cargo fmt --all` would also reformat the Rune checkout
 RUNE_TERMINAL=1 ./target/release/rex-md README.md
 RUNE_TERMINAL=1 ./target/release/rex-pane
 ```

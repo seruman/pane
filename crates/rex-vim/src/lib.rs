@@ -4,7 +4,8 @@
 //! a log, a file), feeds it keys, and paints [`Vim::cursor`], [`Vim::selection`] and
 //! [`Vim::matches`] back onto the page.
 //!
-//! Read-only: `y` is the one operator. Motions: `h j k l`, `w b e W B E`, `0 ^ $`, `gg G`,
+//! Read-only: `y` is the one operator, and `gy` yanks the same way but asks the app for the
+//! source behind the text ([`VimEffect::CopySource`]). Motions: `h j k l`, `w b e W B E`, `0 ^ $`, `gg G`,
 //! `{ }`, `f F t T ; ,`, `%`, Ctrl-D and Ctrl-U, with counts. Text objects after `y`, or in
 //! visual mode: `iw aw iW aW ip ap`, quotes `i" a" i' a' i` a``, brackets `i( a( ib i[ a[ i{ a{
 //! iB i< a<`. `v` and `V` select, `o` swaps the ends, `y` yanks, `yy` and `Y` yank lines. `/` and
@@ -32,6 +33,10 @@ pub enum VimEffect {
     Moved,
     /// Copy this text (a yank).
     Copy(String),
+    /// Copy the source behind this range of the text (a `gy` yank), which only the app can
+    /// find: for a rendered page, the Markdown it was drawn from. `linewise` yanks take whole
+    /// source lines.
+    CopySource { range: Range<usize>, linewise: bool },
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -72,6 +77,8 @@ pub struct Vim {
     count_was: Option<usize>,
     pending: Pending,
     yank_count: Option<usize>,
+    /// The yank under way started with `gy`, so it copies the source.
+    source_yank: bool,
     last_find: Option<(char, char)>,
     typing: String,
     query: String,
@@ -222,7 +229,7 @@ impl Vim {
             Pending::None => {}
             Pending::G => s.push('g'),
             Pending::Find(c) => s.push(c),
-            Pending::Yank => s.push('y'),
+            Pending::Yank => s.push_str(if self.source_yank { "gy" } else { "y" }),
             Pending::Object { around } => s.push_str(if around { "ya" } else { "yi" }),
         }
         s
@@ -305,6 +312,7 @@ impl Vim {
         self.pending = Pending::None;
         self.count = None;
         self.yank_count = None;
+        self.source_yank = false;
     }
 
     fn take_count(&mut self) -> usize {
@@ -317,6 +325,16 @@ impl Vim {
         match self.pending {
             Pending::G => {
                 self.pending = Pending::None;
+                // `gy` yanks like `y`, but copies the source behind the text.
+                if ch == 'y' {
+                    self.source_yank = true;
+                    if matches!(self.mode, VimMode::Visual | VimMode::VisualLine) {
+                        return self.command('y', false, text, b);
+                    }
+                    self.yank_count = self.count.take();
+                    self.pending = Pending::Yank;
+                    return Some(VimEffect::Moved);
+                }
                 if ch != 'g' {
                     self.reset_pending();
                     return Some(VimEffect::Moved);
@@ -391,7 +409,9 @@ impl Vim {
             'y' if visual => {
                 let range = self.selection(text)?;
                 let lines = self.mode == VimMode::VisualLine;
+                let source = self.source_yank;
                 self.reset_pending();
+                self.source_yank = source;
                 return Some(self.yank(range, lines, text, b));
             }
             'y' if yanking => {
@@ -585,13 +605,24 @@ impl Vim {
     fn yank(&mut self, range: Range<usize>, lines: bool, text: &str, b: &Buf) -> VimEffect {
         let yanked = text.get(range.clone()).unwrap_or_default().to_owned();
         let count = yanked.lines().count().max(1);
+        let source = std::mem::take(&mut self.source_yank);
+        let what = if source { " as source" } else { "" };
         self.message = Some(if lines || count > 1 {
-            format!("{count} line{} yanked", if count == 1 { "" } else { "s" })
+            format!(
+                "{count} line{} yanked{what}",
+                if count == 1 { "" } else { "s" }
+            )
         } else {
-            format!("{} characters yanked", yanked.chars().count())
+            format!("{} characters yanked{what}", yanked.chars().count())
         });
         self.mode = VimMode::Normal;
         self.cursor = b.byte(b.index(range.start));
+        if source {
+            return VimEffect::CopySource {
+                range,
+                linewise: lines,
+            };
+        }
         VimEffect::Copy(if lines { format!("{yanked}\n") } else { yanked })
     }
 
