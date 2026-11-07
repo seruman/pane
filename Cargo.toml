@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/rex-ui", "crates/rex-vim", "apps/rex-md", "apps/rex-pane"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+
+# The Rune fork with the terminal shell. A local checkout while we iterate; switch to
+# `git = "...", rev = "..."` once it lives somewhere.
+[workspace.dependencies]
+rune = { path = "../../../../tmp/worktrees/github.com/anomalyco/rune/terminal-shell/crates/rune" }
+rune-kit = { path = "../../../../tmp/worktrees/github.com/anomalyco/rune/terminal-shell/crates/rune-kit" }
+rex-ui = { path = "crates/rex-ui" }
+rex-vim = { path = "crates/rex-vim" }
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+codegen-units = 16
+incremental = true
+
+# The same strictness as Rune's own crates.
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+await_holding_lock = "deny"
+await_holding_refcell_ref = "deny"
+dbg_macro = "deny"
+expect_used = "warn"
+todo = "warn"
+unwrap_used = "warn"
+let_underscore_must_use = "warn"
