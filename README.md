@@ -13,9 +13,9 @@ Apps and components for programs that draw inside a terminal pane (Rex, Ghostty,
 ## Rune
 
 The workspace depends on a Rune fork that adds the terminal shell (`RUNE_TERMINAL=1`), the
-terminal's colours (`rune::terminal_colors()`), OSC 52 copy, and two Markdown hooks
-(`Markdown::code_frame`, `markdown::RenderedText`). It points at a local checkout in the root
-`Cargo.toml`; switch that to a `git` and `rev` once the fork lives somewhere. Everything else
+terminal's colours (`rune::terminal_colors()`), OSC 52 copy, and a Markdown hook
+(`markdown::RenderedText`): the `terminal-shell` branch of github.com/seruman/rune. It points at
+a local worktree of that branch in the root `Cargo.toml`; switch to `git` and `rev` once pushed. Everything else
 here is plain Rune and rune-kit.
 
 The toolchain is pinned to Rune's (`rust-toolchain.toml`); move them together.

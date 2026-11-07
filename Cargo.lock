@@ -2608,6 +2608,7 @@ dependencies = [
  "wgpu-core",
  "wgpu-hal",
  "wgpu-naga-bridge",
+ "windows",
  "windows-sys 0.59.0",
  "winit",
  "x11rb",

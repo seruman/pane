@@ -162,7 +162,7 @@ fn vim_highlights(
 fn code_frame(rex: &Rex, copied: Option<usize>) -> impl Fn(El, &CodeFrame<'_>) -> El + 'static {
     let rex = rex.clone();
     move |block, frame| {
-        let code = frame.code.to_owned();
+        let code = frame.source.to_owned();
         let index = frame.index;
         let done = copied == Some(index);
         let button = Button::icon_only(
