@@ -83,16 +83,20 @@ enum Pending<A> {
         count: Option<usize>,
         typed: Vec<Stroke>,
     },
-    /// `i` or `a`, waiting for an object; after an operator, or in Visual mode.
+    /// `i` or `a`, waiting for an object; after an operator, or in Visual mode. `opened` is
+    /// the count and keys that asked for it (`2i`), `typed` the strokes toward the object.
     Object {
         around: bool,
         op: Option<OpState<A>>,
+        opened: (Option<usize>, Vec<Stroke>),
         typed: Vec<Stroke>,
     },
     /// `f F t T`, waiting for the character; after an operator, its keys and count too.
+    /// `opened` is the count and keys that asked for it.
     Find {
         find: Find,
         op: Option<OpState<A>>,
+        opened: (Option<usize>, Vec<Stroke>),
     },
 }
 
@@ -193,7 +197,10 @@ impl<A: Clone> Vim<A> {
     pub fn pending(&self) -> String {
         let count = |n: Option<usize>| n.map(|n| n.to_string()).unwrap_or_default();
         let r = |k: &[Stroke]| self.keys.render(k);
-        let ai = |around: bool| if around { "a" } else { "i" };
+        let op_keys = |op: &Option<OpState<A>>| match op {
+            Some((_, keys, c)) => format!("{}{}", count(*c), r(keys)),
+            None => String::new(),
+        };
         match &self.pending {
             Pending::None => count(self.count),
             Pending::Keys(typed) => format!("{}{}", count(self.count), r(typed)),
@@ -204,27 +211,16 @@ impl<A: Clone> Vim<A> {
                 ..
             } => format!("{}{}{}{}", count(*c), r(keys), count(self.count), r(typed)),
             Pending::Object {
-                around,
-                op: Some((_, keys, c)),
+                op,
+                opened: (c, keys),
                 typed,
-            } => format!("{}{}{}{}", count(*c), r(keys), ai(*around), r(typed)),
-            Pending::Object {
-                around,
-                op: None,
-                typed,
-            } => format!("{}{}", ai(*around), r(typed)),
-            Pending::Find { find, op } => {
-                let f = match find {
-                    Find::To => 'f',
-                    Find::ToBack => 'F',
-                    Find::Till => 't',
-                    Find::TillBack => 'T',
-                };
-                match op {
-                    Some((_, keys, c)) => format!("{}{}{f}", count(*c), r(keys)),
-                    None => format!("{}{f}", count(self.count)),
-                }
-            }
+                ..
+            } => format!("{}{}{}{}", op_keys(op), count(*c), r(keys), r(typed)),
+            Pending::Find {
+                op,
+                opened: (c, keys),
+                ..
+            } => format!("{}{}{}", op_keys(op), count(*c), r(keys)),
         }
     }
 
@@ -357,15 +353,20 @@ impl<A: Clone> Vim<A> {
 
         // The character after `f F t T` is read, not looked up.
         if matches!(self.pending, Pending::Find { .. })
-            && let Pending::Find { find, op } = std::mem::replace(&mut self.pending, Pending::None)
+            && let Pending::Find {
+                find,
+                op,
+                opened: (count, _),
+            } = std::mem::replace(&mut self.pending, Pending::None)
         {
+            self.count = count;
             let Stroke::Char(c) = stroke else {
                 self.reset_pending();
                 return Some(VimEffect::Moved);
             };
             self.last_find = Some((find, c));
             self.last_typed_find = Some(c);
-            return self.finish_motion(Motion::Find(find), op, text, &b);
+            return self.finish_motion(Motion::Find(find), Vec::new(), op, text, &b);
         }
 
         // Counts: 1–9 start one, 0 goes on one; not inside a key sequence or object.
@@ -398,20 +399,13 @@ impl<A: Clone> Vim<A> {
                 let line_prefix = keys.starts_with(&typed);
                 match self.keys.lookup(Table::Pending, &typed) {
                     Lookup::Exact(Command::Motion(m)) => {
-                        self.finish_motion(m, Some((op, keys, count)), text, &b)
+                        self.finish_motion(m, typed, Some((op, keys, count)), text, &b)
                     }
-                    Lookup::Exact(Command::Inner) => {
+                    Lookup::Exact(c @ (Command::Inner | Command::Around)) => {
                         self.pending = Pending::Object {
-                            around: false,
+                            around: matches!(c, Command::Around),
                             op: Some((op, keys, count)),
-                            typed: Vec::new(),
-                        };
-                        Some(VimEffect::Moved)
-                    }
-                    Lookup::Exact(Command::Around) => {
-                        self.pending = Pending::Object {
-                            around: true,
-                            op: Some((op, keys, count)),
+                            opened: (self.count.take(), typed),
                             typed: Vec::new(),
                         };
                         Some(VimEffect::Moved)
@@ -443,13 +437,22 @@ impl<A: Clone> Vim<A> {
             Pending::Object {
                 around,
                 op,
+                opened,
                 mut typed,
             } => {
                 typed.push(stroke);
                 match self.keys.lookup_object(&typed) {
-                    Lookup::Exact(object) => self.finish_object(object, around, op, text, &b),
+                    Lookup::Exact(object) => {
+                        self.count = opened.0;
+                        self.finish_object(object, around, op, text, &b)
+                    }
                     Lookup::Prefix => {
-                        self.pending = Pending::Object { around, op, typed };
+                        self.pending = Pending::Object {
+                            around,
+                            op,
+                            opened,
+                            typed,
+                        };
                         Some(VimEffect::Moved)
                     }
                     Lookup::None => {
@@ -501,7 +504,7 @@ impl<A: Clone> Vim<A> {
     ) -> Option<VimEffect<A>> {
         let visual = self.visual();
         match command {
-            Command::Motion(m) => self.finish_motion(m, None, text, b),
+            Command::Motion(m) => self.finish_motion(m, keys, None, text, b),
             Command::Operator(op) if visual => {
                 let range = self.selection(text)?;
                 let lines = self.mode == VimMode::VisualLine;
@@ -526,6 +529,7 @@ impl<A: Clone> Vim<A> {
                 self.pending = Pending::Object {
                     around: matches!(command, Command::Around),
                     op: None,
+                    opened: (self.count.take(), keys),
                     typed: Vec::new(),
                 };
                 Some(VimEffect::Moved)
@@ -580,11 +584,12 @@ impl<A: Clone> Vim<A> {
         n.max(1)
     }
 
-    /// Runs motion `m`: moves the cursor, or after an operator, applies it over what the motion
-    /// covers. `f F t T` wait for their character first.
+    /// Runs motion `m`, typed as `keys`: moves the cursor, or after an operator, applies it over
+    /// what the motion covers. `f F t T` wait for their character first.
     fn finish_motion(
         &mut self,
         m: Motion,
+        keys: Vec<Stroke>,
         op: Option<OpState<A>>,
         text: &str,
         b: &Buf,
@@ -593,7 +598,11 @@ impl<A: Clone> Vim<A> {
             Motion::Find(find) => match self.last_typed_find.take() {
                 Some(c) => Some((find, c)),
                 None => {
-                    self.pending = Pending::Find { find, op };
+                    self.pending = Pending::Find {
+                        find,
+                        op,
+                        opened: (self.count.take(), keys),
+                    };
                     return Some(VimEffect::Moved);
                 }
             },
@@ -801,9 +810,10 @@ impl<A: Clone> Vim<A> {
         text: &str,
         b: &Buf,
     ) -> Option<VimEffect<A>> {
+        let count = self.count.take().unwrap_or(1) * op.as_ref().and_then(|(_, _, c)| *c).unwrap_or(1);
         self.reset_pending();
         let cur = b.index(self.cursor);
-        let Some(range) = text_object(b, cur, object, around) else {
+        let Some(range) = counted_object(b, cur, object, around, count.min(MAX_COUNT)) else {
             return Some(VimEffect::Moved);
         };
         match op {
@@ -1272,6 +1282,46 @@ fn word_at(b: &Buf, i: usize, big: bool) -> Option<Range<usize>> {
 }
 
 /// A text object at `cur`, as character indices.
+/// `count` text objects from `cur`, as Vim takes them. Words and paragraphs run on, each from the
+/// end of the one before (a space run counts as a word, a blank run as a paragraph). Brackets
+/// grow out a pair at a time. Quotes take no count.
+fn counted_object(b: &Buf, cur: usize, object: Object, around: bool, count: usize) -> Option<Range<usize>> {
+    let first = text_object(b, cur, object, around)?;
+    match object {
+        Object::Word | Object::BigWord | Object::Paragraph => {
+            let mut range = first;
+            for _ in 1..count {
+                // A paragraph ends before its newline, so the next one starts past it.
+                let from = range.end + usize::from(object == Object::Paragraph && b.at(range.end) == '\n');
+                if from >= b.n() {
+                    break;
+                }
+                let Some(next) = text_object(b, from, object, around) else {
+                    break;
+                };
+                range.end = next.end.max(range.end);
+            }
+            Some(range)
+        }
+        Object::Pair(..) => {
+            let mut range = first;
+            for _ in 1..count {
+                // The pair around this one: start looking from just outside its opening bracket.
+                let outer_at = if around { range.start } else { range.start - 1 };
+                let Some(outer) = outer_at.checked_sub(1).and_then(|at| text_object(b, at, object, around)) else {
+                    break;
+                };
+                if outer.start >= range.start {
+                    break;
+                }
+                range = outer;
+            }
+            Some(range)
+        }
+        Object::Quotes(_) => Some(first),
+    }
+}
+
 fn text_object(b: &Buf, cur: usize, object: Object, around: bool) -> Option<Range<usize>> {
     match object {
         Object::Word | Object::BigWord => {

@@ -630,3 +630,55 @@ fn search_survives_characters_whose_lowercase_changes_length() {
     );
 }
 
+
+#[test]
+fn pending_shows_the_keys_typed_with_their_counts() {
+    let mut v = Vim::default();
+    press(&mut v, "y2i");
+    assert_eq!(v.pending(), "y2i", "the count between the operator and the object");
+    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    press(&mut v, "3y2f");
+    assert_eq!(v.pending(), "3y2f");
+    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+
+    // Rebound keys show as typed, not as Vim's defaults.
+    let keys = Keymap::<NoAction>::vim()
+        .motion(&[Stroke::Char('x')], Motion::Find(Find::To), None)
+        .bind(Table::Pending, &[Stroke::Char('I')], Command::Inner, None);
+    let mut v = Vim::new(keys);
+    press(&mut v, "x");
+    assert_eq!(v.pending(), "x");
+    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    press(&mut v, "yI");
+    assert_eq!(v.pending(), "yI");
+}
+
+#[test]
+fn a_count_on_a_text_object_takes_that_many() {
+    let mut v = Vim::default();
+    assert_eq!(yanked(press(&mut v, "y2iw")), "fn ", "a space run counts as a word, as in Vim");
+    assert_eq!(yanked(press(&mut v, "y3iw")), "fn main");
+    assert_eq!(yanked(press(&mut v, "2yiw")), "fn ", "the count may come before the operator");
+    assert_eq!(yanked(press(&mut v, "y2aw")), "fn main");
+    press(&mut v, "v3iw");
+    assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "fn main");
+    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    assert_eq!(yanked(press(&mut v, "gg0y3ip")), TEXT, "both paragraphs and the blank line");
+
+    let text = "f(a, (b), c)";
+    let mut v = Vim::default();
+    press_on(&mut v, text, "fb");
+    let yank = |v: &mut Vim, keys: &str| {
+        let mut last = None;
+        for c in keys.chars() {
+            last = v.key(&KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() }, text);
+        }
+        yanked(last)
+    };
+    assert_eq!(yank(&mut v, "yi("), "b");
+    press_on(&mut v, text, "fb");
+    assert_eq!(yank(&mut v, "y2i("), "a, (b), c", "the second pair out");
+    press_on(&mut v, text, "fb");
+    assert_eq!(yank(&mut v, "y2a("), "(a, (b), c)");
+}
+
