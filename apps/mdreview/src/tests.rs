@@ -681,7 +681,10 @@ fn the_command_line_takes_one_document_and_an_output() {
 
 /// Every text the app shows, gathered from the element tree.
 fn shown(rt: &Runtime<App_>) -> Vec<String> {
-    rt.elements().into_iter().filter_map(|e| e.text.or(e.label)).collect()
+    rt.elements()
+        .into_iter()
+        .filter_map(|e| e.text.or(e.label))
+        .collect()
 }
 
 #[test]
@@ -692,9 +695,18 @@ fn the_hints_name_the_keys_that_work() {
     key(&mut rt, Key::Enter);
     press(&mut rt, "]c");
     let texts = shown(&rt).join("\n");
-    assert!(!texts.contains("dc"), "dc doesn't delete a comment any more:\n{texts}");
-    assert!(texts.contains("\\x"), "the card names the delete key:\n{texts}");
-    assert!(!texts.contains('—') && !texts.contains('–'), "no long dashes in what the app shows");
+    assert!(
+        !texts.contains("dc"),
+        "dc doesn't delete a comment any more:\n{texts}"
+    );
+    assert!(
+        texts.contains("\\x"),
+        "the card names the delete key:\n{texts}"
+    );
+    assert!(
+        !texts.contains('—') && !texts.contains('–'),
+        "no long dashes in what the app shows"
+    );
 }
 
 /// The gap above each top-level block when rune-kit draws `src` as one document, measured from
@@ -703,14 +715,31 @@ fn rune_kit_gaps(src: &str) -> Vec<f32> {
     struct Doc(String);
     fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
         let theme = Theme::current(cx.system_dark());
-        rune_kit::Markdown::new(d.0.as_str()).style(style(&theme)).build(&theme.kit)
+        rune_kit::Markdown::new(d.0.as_str())
+            .style(style(&theme))
+            .build(&theme.kit)
     }
-    let mut rt = Runtime::new(Doc(src.to_owned()), view, (800.0, 4000.0), Env { system_dark: true, scale: 1.0 });
+    let mut rt = Runtime::new(
+        Doc(src.to_owned()),
+        view,
+        (800.0, 4000.0),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
     rt.frame(0.0);
     let rects: Vec<[f32; 4]> = (0..)
-        .map_while(|i| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("b{i}"))).map(|e| e.rect))
+        .map_while(|i| {
+            rt.elements()
+                .into_iter()
+                .find(|e| e.key.as_deref() == Some(&format!("b{i}")))
+                .map(|e| e.rect)
+        })
         .collect();
-    std::iter::once(0.0).chain(rects.windows(2).map(|w| w[1][1] - (w[0][1] + w[0][3]))).collect()
+    std::iter::once(0.0)
+        .chain(rects.windows(2).map(|w| w[1][1] - (w[0][1] + w[0][3])))
+        .collect()
 }
 
 #[test]
@@ -720,7 +749,8 @@ fn block_gaps_match_what_rune_kit_draws() {
     assert_eq!(ours, rune_kit_gaps(src));
     // rune-kit splits a paragraph at each image, so these don't line up block for block.
     // Drawn mdreview's way, a block at a time, the page still comes out as tall.
-    let src = "Intro.\n\nSee ![logo](logo.png) here.\n\n![a](a.png) ![b](b.png)\n\n## Then\n\nEnd.\n";
+    let src =
+        "Intro.\n\nSee ![logo](logo.png) here.\n\n![a](a.png) ![b](b.png)\n\n## Then\n\nEnd.\n";
     assert_eq!(page_height(src, true), page_height(src, false), "{src:?}");
 }
 
@@ -730,7 +760,11 @@ fn page_height(src: &str, by_block: bool) -> f32 {
     struct Doc(String, bool);
     fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
         let theme = Theme::current(cx.system_dark());
-        let md = |m: &str| rune_kit::Markdown::new(m).style(style(&theme)).build(&theme.kit);
+        let md = |m: &str| {
+            rune_kit::Markdown::new(m)
+                .style(style(&theme))
+                .build(&theme.kit)
+        };
         let mut page = rune::col().key("doc").w_full();
         if d.1 {
             for block in Page::new(&d.0).blocks {
@@ -741,7 +775,19 @@ fn page_height(src: &str, by_block: bool) -> f32 {
         }
         page
     }
-    let mut rt = Runtime::new(Doc(src.to_owned(), by_block), view, (800.0, 4000.0), Env { system_dark: true, scale: 1.0 });
+    let mut rt = Runtime::new(
+        Doc(src.to_owned(), by_block),
+        view,
+        (800.0, 4000.0),
+        Env {
+            system_dark: true,
+            scale: 1.0,
+        },
+    );
     rt.frame(0.0);
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some("doc")).map(|e| e.rect[3]).unwrap()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("doc"))
+        .map(|e| e.rect[3])
+        .unwrap()
 }

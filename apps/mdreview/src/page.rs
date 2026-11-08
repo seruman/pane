@@ -82,7 +82,9 @@ impl Page {
         let mut only_image = None;
         let mut events = Parser::new_ext(source, options).into_offset_iter();
         for (event, range) in events.by_ref() {
-            if depth == 1 && let Some(only) = &mut only_image {
+            if depth == 1
+                && let Some(only) = &mut only_image
+            {
                 let fits = match &event {
                     Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => true,
                     Event::End(TagEnd::Paragraph) => *only,
