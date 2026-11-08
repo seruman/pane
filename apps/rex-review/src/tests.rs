@@ -297,19 +297,22 @@ fn the_comment_list_floats_and_jumps() {
     assert_eq!(rt.state.list, Some(0), "opens on the comment under the cursor");
     assert_eq!(rt.find("block-0").unwrap(), heading, "the page doesn't move");
 
-    // j and k move the list's cursor, not Vim's; the page stays put.
+    // j and k move the list's cursor, not Vim's, and the page marks that comment.
     press(&mut rt, "jj");
     assert_eq!(rt.state.list, Some(2));
+    assert_eq!(rt.state.current(), Some(2), "the page marks the list's comment");
+    assert!(rt.find(CURRENT_MARK).is_some(), "keyed, to scroll to");
     press(&mut rt, "j");
     assert_eq!(rt.state.list, Some(2), "stops at the end");
     press(&mut rt, "k");
     assert_eq!(rt.state.list, Some(1));
     assert_eq!(rt.state.cursor(), cursor);
 
-    // Escape closes it where it was.
+    // Escape closes it where it was; the mark goes back to the cursor's comment.
     key(&mut rt, Key::Escape);
     assert!(rt.find("comment-list").is_none());
     assert_eq!(rt.state.cursor(), cursor);
+    assert_eq!(rt.state.current(), Some(0));
 
     // Enter goes to the comment in the document.
     key(&mut rt, Key::Tab);
@@ -327,4 +330,39 @@ fn the_comment_list_floats_and_jumps() {
     rt.frame(1.0 / 60.0);
     assert!(rt.state.list.is_none());
     assert_eq!(rt.state.current(), Some(0));
+}
+
+#[test]
+fn moving_in_the_list_scrolls_the_page_to_the_comment() {
+    // A page far taller than the window, with a comment near its end.
+    let src: String = (0..80).map(|i| format!("Paragraph number {i} of filler.\n\n")).collect();
+    let mut rt = Runtime::new(app(&src), view, (900.0, 400.0), Env { system_dark: true, scale: 1.0 });
+    rt.on_key = Some(on_key);
+    rt.frame(0.0);
+    press(&mut rt, "Vc");
+    press(&mut rt, "top");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "GVc");
+    press(&mut rt, "bottom");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "gg");
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    let on_screen = |rt: &Runtime<App_>| rt.find(CURRENT_MARK).is_some_and(|(_, y)| (0.0..400.0).contains(&y));
+
+    key(&mut rt, Key::Tab);
+    press(&mut rt, "j");
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert_eq!(rt.state.current(), Some(1));
+    assert!(on_screen(&rt), "the page scrolled to the last comment: {:?}", rt.find(CURRENT_MARK));
+
+    // Escape scrolls back to the cursor, which stayed at the top.
+    key(&mut rt, Key::Escape);
+    for _ in 0..60 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(rt.find("vim-cursor").is_some_and(|(_, y)| (0.0..400.0).contains(&y)));
 }

@@ -145,10 +145,24 @@ impl App_ {
         start..end
     }
 
-    /// The comment Enter, `ce` and `dc` act on: the one stepped to, or the one under the
-    /// cursor.
+    /// The comment Enter, `ce` and `dc` act on, and the one the page marks: the comment list's
+    /// row while it's open, else the one stepped to, or the one under the cursor.
     fn current(&self) -> Option<usize> {
-        self.selected.filter(|n| *n < self.review.comments.len()).or_else(|| self.review.at(self.cursor()))
+        let n = self.review.comments.len();
+        if let Some(at) = self.list {
+            return (at < n).then_some(at);
+        }
+        self.selected.filter(|i| *i < n).or_else(|| self.review.at(self.cursor()))
+    }
+
+    /// Shows comment `n` on the page without moving Vim's cursor: its text centred, or for a
+    /// general comment, its card.
+    fn show(&self, n: usize, tx: &mut Tx) {
+        match self.review.comments.get(n).map(|c| c.range.is_some()) {
+            Some(true) => tx.scroll_center(CURRENT_MARK),
+            Some(false) => tx.scroll_into_view(thread_key(n)),
+            None => {}
+        }
     }
 
     fn open(&mut self, target: Target) {
@@ -227,11 +241,13 @@ impl App_ {
         self.review.feedback(&self.source, &self.page, self.name.as_deref())
     }
 
-    /// Opens the comment list on the comment picked or under the cursor, or the first.
+    /// Opens the comment list on the comment picked or under the cursor, or the first, and
+    /// shows that comment on the page.
     fn open_list(&mut self, tx: &mut Tx) {
         let at = self.current().unwrap_or(0);
         self.list = Some(at);
         tx.scroll_into_view(list_key(at));
+        self.show(at, tx);
     }
 
     /// Runs a `:` command.
@@ -250,6 +266,9 @@ impl App_ {
         }
     }
 }
+
+/// The key of the current comment's mark on the page, to scroll to.
+const CURRENT_MARK: &str = "current-comment";
 
 /// The key a comment's card is drawn under, to scroll to.
 fn thread_key(n: usize) -> String {
@@ -303,7 +322,16 @@ fn highlights(s: &App_, index: usize, rex: &Rex) -> Vec<(Vec<Range<usize>>, High
         let Some(range) = c.range.clone() else { continue };
         let mut h = Highlight::new().bg(tint(c.kind, rex));
         if current == Some(n) {
-            h = h.ring(tint(c.kind, rex).alpha(0.9), 1.0);
+            // Marked plainly while the list picks it, so it's found at a glance.
+            h = if s.list.is_some() {
+                Highlight::new().bg(tint(c.kind, rex).alpha(0.45)).ring(rex.accent, 2.0)
+            } else {
+                h.ring(tint(c.kind, rex).alpha(0.9), 1.0)
+            };
+            // Keyed in the block it starts in, for the list to scroll to.
+            if page.block_at(range.start) == index {
+                h = h.key(CURRENT_MARK);
+            }
         }
         out.push((local(range), h));
     }
@@ -1006,9 +1034,9 @@ fn vim_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-/// A key while the comment list is open: `j` `k` (or the arrows) move its cursor, Enter goes
-/// to the comment in the document and closes it, Escape, Tab or `q` close it where it was.
-/// Other keys do nothing, so the page stays put behind it.
+/// A key while the comment list is open: `j` `k` (or the arrows) move its cursor, and the page
+/// marks that comment and scrolls to it. Enter puts Vim's cursor there and closes the list;
+/// Escape, Tab or `q` close it and scroll back to the cursor, which never moved.
 fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     let Some(at) = s.list else { return };
     let n = s.review.comments.len();
@@ -1016,6 +1044,7 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     let to = match (&k.key, ch(k)) {
         (Key::Escape | Key::Tab, _) | (_, Some('q')) => {
             s.list = None;
+            tx.scroll_into_view("vim-cursor");
             return;
         }
         (Key::Enter, _) => {
@@ -1033,6 +1062,7 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     };
     s.list = Some(to);
     tx.scroll_into_view(list_key(to));
+    s.show(to, tx);
 }
 
 /// Sends the review on the way out, when `:wq` or `ZZ` asked: to the file `-o` names, or to
