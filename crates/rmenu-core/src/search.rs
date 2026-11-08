@@ -37,11 +37,14 @@ pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
     }
     chars.sort_unstable();
     chars.dedup();
-    let starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    // One walk over the text, stopping at the last match, turns character indices into bytes.
     let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
-    for c in chars {
-        let Some(&start) = starts.get(c as usize) else { continue };
-        let end = starts.get(c as usize + 1).copied().unwrap_or(text.len());
+    let mut wanted = chars.into_iter().peekable();
+    for (n, (start, ch)) in text.char_indices().enumerate() {
+        let Some(&next) = wanted.peek() else { break };
+        if n as u32 != next { continue; }
+        wanted.next();
+        let end = start + ch.len_utf8();
         match ranges.last_mut() {
             Some(last) if last.end == start => last.end = end,
             _ => ranges.push(start..end),
