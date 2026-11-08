@@ -10,14 +10,13 @@ function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, i
     set -l query (string join ' ' -- $argv)
     # One private directory for the config and everything the picker hands back.
     set -l dir (command mktemp -d -t ghqr); or return
-    command jq -n --arg fish (status fish-path) --arg helper (path resolve -- (path dirname -- (status filename))/_mmenu_git.fish) \
-        --argjson rex (_mmenu_rex_bindings) '
-        def rows($call): [$fish, "--no-config", "-c", "source $argv[1]; " + $call, $helper];
+    set -l examples (path resolve -- (path dirname -- (status filename)))
+    command jq -n --arg fish (status fish-path) --arg examples $examples --argjson rex (_mmenu_rex_bindings) '
         {
             sources: [
-                {id: "repos", label: "Repositories", prompt: "Repositories", format: "jsonl", command: rows("_mmenu_repo_rows")},
-                {id: "worktrees", label: "Worktrees", hidden: true, format: "jsonl", command: rows("_mmenu_worktree_rows \"$MMENU_VALUE\"")},
-                {id: "memos", label: "Memos", hidden: true, format: "jsonl", command: rows("_mmenu_memo_rows \"$MMENU_VALUE\"")}
+                {id: "repos", label: "Repositories", prompt: "Repositories", format: "jsonl", command: [$examples + "/repos/repos.sh"]},
+                {id: "worktrees", label: "Worktrees", hidden: true, format: "jsonl", command: [$examples + "/repos/worktrees.sh"]},
+                {id: "memos", label: "Memos", hidden: true, format: "jsonl", command: [$fish, "--no-config", "-c", "source $argv[1]; _mmenu_memo_rows \"$MMENU_VALUE\"", $examples + "/_mmenu_git.fish"]}
             ],
             bindings: [
                 {key: "ctrl+w", id: "worktrees", label: "Worktrees", action: "push", source: "worktrees", sources: ["repos"]},

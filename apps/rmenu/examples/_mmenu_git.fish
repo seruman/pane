@@ -39,34 +39,7 @@ function _mmenu_single_value --argument-names result path
     '
 end
 
-# Row producers print JSONL. They run before a standalone menu, or inside ghqm's
-# menu as pushed sources, where the parent's choice arrives as MMENU_VALUE.
-function _mmenu_repo_rows
-    set -l roots (command ghq root --all)
-    or return
-    set -l paths (command ghq list -p)
-    or return
-    # The value is the full path, so accepting needs no second ghq lookup. The ID is
-    # the root-relative name ghq uses.
-    printf '%s\n' $paths | command jq -Rc --args '
-        select(length > 0) | . as $path |
-        ([$ARGS.positional[] | select(. as $root | $path | startswith($root + "/"))] | max_by(length)) as $root |
-        (if $root then $path[($root | length) + 1:] else $path end) as $name |
-        {id: $name, title: $name, value: $path}
-    ' $roots
-end
-
-function _mmenu_worktree_rows --argument-names repo
-    set -l inventory (command git -C "$repo" wt list --json)
-    or return
-    printf '%s\n' $inventory | command jq -c '
-        if type != "array" then error("Expected git wt JSON array") else .[] end |
-        select(.bare | not) |
-        {id: .path, title: (.branch // "detached"), subtitle: .path,
-         detail: (if .current then "Current" else "" end), value: .path}
-    '
-end
-
+# Memo rows as JSONL, for ghqr's memo level, where the chosen repository arrives as MMENU_VALUE.
 function _mmenu_memo_rows --argument-names repo
     set -l scope (command git -C "$repo" memo path)
     or return

@@ -1,6 +1,11 @@
 #!/bin/sh
-# Repositories as JSONL: the ghq name as the title, the full path as the value.
-ghq list -p | while IFS= read -r p; do
-  name=${p#"$HOME"/src/}
-  printf '{"id":"%s","title":"%s","value":"%s"}\n' "$p" "$name" "$p"
-done
+# Repositories as JSONL. The title is the name under the longest ghq root, the value the full path.
+roots=$(ghq root --all) || exit
+paths=$(ghq list -p) || exit
+printf '%s\n' "$paths" | jq -Rc --arg roots "$roots" '
+	($roots | split("\n") | map(select(length > 0))) as $roots |
+	select(length > 0) | . as $path |
+	([$roots[] | select(. as $root | $path | startswith($root + "/"))] | max_by(length)) as $root |
+	(if $root then $path[($root | length) + 1:] else $path end) as $name |
+	{id: $name, title: $name, value: $path}
+'
