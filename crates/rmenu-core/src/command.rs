@@ -146,7 +146,7 @@ fn spawn(program: &CString, argv: &[String], envp: &[CString], input: bool) -> R
             libc::sigemptyset(&mut defaults);
             for signal in DEFAULT_SIGNALS { libc::sigaddset(&mut defaults, signal); }
             spawn_call(libc::posix_spawnattr_setsigdefault(&mut attrs, &defaults), "spawn signal defaults")?;
-            let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | CLOEXEC_DEFAULT;
+            let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
             spawn_call(libc::posix_spawnattr_setflags(&mut attrs, flags as libc::c_short), "spawn flags")?;
             let mut pid: libc::pid_t = 0;
             spawn_call(libc::posix_spawn(&mut pid, program.as_ptr(), &actions, &attrs, arg_ptrs.as_ptr(), env_ptrs.as_ptr()), "posix_spawn")?;
@@ -161,11 +161,8 @@ fn spawn(program: &CString, argv: &[String], envp: &[CString], input: bool) -> R
     }
 }
 
-#[cfg(target_vendor = "apple")]
-const CLOEXEC_DEFAULT: libc::c_int = libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-// Elsewhere only rmenu's own pipes are close-on-exec; macOS is where rmenu runs.
 #[cfg(not(target_vendor = "apple"))]
-const CLOEXEC_DEFAULT: libc::c_int = 0;
+compile_error!("rmenu needs POSIX_SPAWN_CLOEXEC_DEFAULT to give commands only stdio, and only Apple targets have it");
 
 /// The command's environment: ours with `env` overlaid, never rmenu's own terminal mode, which
 /// would make a Rune program it runs take the terminal too.
