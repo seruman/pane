@@ -70,3 +70,16 @@ fn the_kit_is_rune_kits_terminal_kit() {
         );
     }
 }
+
+#[test]
+fn matches_mark_the_title_even_when_lowercasing_changes_its_length() {
+    const TITLES: &[PaletteEntry] = &[
+        PaletteEntry::new("İstanbul Run"),
+        PaletteEntry::new("\u{212A}elvin Run"),
+    ];
+    for (i, range) in palette_matches(TITLES, "run") {
+        let range = range.expect("a match has a range");
+        assert_eq!(&TITLES[i].title[range], "Run", "{}", TITLES[i].title);
+    }
+    assert_eq!(palette_matches(TITLES, "run").len(), 2);
+}

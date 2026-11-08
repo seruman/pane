@@ -8,6 +8,7 @@ description = "Rex-style components for programs drawing inside a terminal pane 
 [dependencies]
 rune = { workspace = true, default-features = false }
 rune-kit.workspace = true
+vimkeys.workspace = true
 
 [lints]
 workspace = true

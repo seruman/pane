@@ -1027,21 +1027,7 @@ pub fn find_all(text: &str, query: &str) -> Vec<Range<usize>> {
         Some(q) => (true, q),
         None => (false, query),
     };
-    if query.is_empty() {
-        return Vec::new();
-    }
     let sensitive = query.chars().any(char::is_uppercase);
-    let fold = |s: &str| {
-        if sensitive {
-            s.to_owned()
-        } else {
-            s.to_lowercase()
-        }
-    };
-    let (hay, needle) = (fold(text), fold(query));
-    if hay.len() != text.len() {
-        return Vec::new();
-    }
     let boundary = |i: usize| {
         i == 0
             || !text[..i]
@@ -1049,10 +1035,53 @@ pub fn find_all(text: &str, query: &str) -> Vec<Range<usize>> {
                 .next_back()
                 .is_some_and(|c| c.is_alphanumeric() || c == '_')
     };
-    hay.match_indices(&needle)
-        .map(|(i, m)| i..i + m.len())
+    find_folded(text, query, !sensitive)
+        .into_iter()
         .filter(|r| !word || boundary(r.start))
         .collect()
+}
+
+/// The byte ranges of `text` where `query` occurs, without overlaps. With `fold`, both are
+/// compared lowercased, a character at a time, and the ranges are still `text`'s own: a
+/// character whose lowercase is longer (`İ`, `ẞ`) doesn't shift them.
+pub fn find_folded(text: &str, query: &str, fold: bool) -> Vec<Range<usize>> {
+    let lower = |c: char| -> Vec<char> {
+        if fold {
+            c.to_lowercase().collect()
+        } else {
+            vec![c]
+        }
+    };
+    let needle: Vec<char> = query.chars().flat_map(lower).collect();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    // Each folded character, with the byte range of the character of `text` it came from.
+    let hay: Vec<(char, Range<usize>)> = text
+        .char_indices()
+        .flat_map(|(at, c)| {
+            lower(c)
+                .into_iter()
+                .map(move |l| (l, at..at + c.len_utf8()))
+        })
+        .collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + needle.len() <= hay.len() {
+        let window = &hay[i..i + needle.len()];
+        // A match starts and ends on whole characters of `text`.
+        let starts_whole = i == 0 || hay[i - 1].1 != window[0].1;
+        let ends_whole = hay
+            .get(i + needle.len())
+            .is_none_or(|next| next.1 != window[needle.len() - 1].1);
+        if starts_whole && ends_whole && window.iter().map(|(c, _)| *c).eq(needle.iter().copied()) {
+            out.push(window[0].1.start..window[needle.len() - 1].1.end);
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 fn repeat(n: usize, from: usize, step: impl Fn(usize) -> usize) -> usize {

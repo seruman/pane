@@ -52,7 +52,7 @@ pub fn palette_matches(
     entries: &[PaletteEntry],
     query: &str,
 ) -> Vec<(usize, Option<Range<usize>>)> {
-    let query = query.trim().to_lowercase();
+    let query = query.trim();
     let mut sections: Vec<Option<&str>> = vec![None];
     for e in entries {
         if !sections.contains(&e.section) {
@@ -68,8 +68,11 @@ pub fn palette_matches(
         {
             if query.is_empty() {
                 out.push((i, None));
-            } else if let Some(start) = e.title.to_lowercase().find(&query) {
-                out.push((i, Some(start..start + query.len())));
+            } else if let Some(range) = vimkeys::find_folded(e.title, query, true)
+                .into_iter()
+                .next()
+            {
+                out.push((i, Some(range)));
             }
         }
     }

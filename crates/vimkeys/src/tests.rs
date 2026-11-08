@@ -585,11 +585,48 @@ fn a_huge_count_neither_panics_nor_hangs() {
     let start = std::time::Instant::now();
     press(&mut v, &"9".repeat(25));
     press(&mut v, "w");
-    assert_eq!(v.cursor(TEXT), TEXT.len() - 1..TEXT.len(), "a count past the end stops on the last character");
+    assert_eq!(
+        v.cursor(TEXT),
+        TEXT.len() - 1..TEXT.len(),
+        "a count past the end stops on the last character"
+    );
     press(&mut v, "gg");
     press(&mut v, &"9".repeat(25));
     press(&mut v, "y");
     press(&mut v, &"9".repeat(25));
-    assert_eq!(yanked(press(&mut v, "j")), format!("{TEXT}\n"), "a count past the end yanks to the last line");
-    assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    assert_eq!(
+        yanked(press(&mut v, "j")),
+        format!("{TEXT}\n"),
+        "a count past the end yanks to the last line"
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(1),
+        "took {:?}",
+        start.elapsed()
+    );
 }
+
+#[test]
+fn search_survives_characters_whose_lowercase_changes_length() {
+    // `İ` lowercases to two characters, three bytes where it had two.
+    let text = "İstanbul Hello hello";
+    let found = find_all(text, "hello");
+    let quoted: Vec<&str> = found.iter().map(|r| &text[r.clone()]).collect();
+    assert_eq!(quoted, ["Hello", "hello"]);
+    assert_eq!(
+        find_all(text, "i̇stanbul")
+            .iter()
+            .map(|r| &text[r.clone()])
+            .collect::<Vec<_>>(),
+        ["İstanbul"]
+    );
+    let text = "ẞtraße STRASSE";
+    assert_eq!(
+        find_all(text, "sse")
+            .iter()
+            .map(|r| &text[r.clone()])
+            .collect::<Vec<_>>(),
+        ["SSE"]
+    );
+}
+
