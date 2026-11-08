@@ -100,15 +100,18 @@ impl Palette {
         ]
     }
 
-    /// The terminal's theme, once it has reported its text and background colours. Colours it
-    /// leaves out come from Merino; a missing cursor falls back to ANSI blue. Only the ANSI
-    /// table and the cursor are read from it: the rest of the theme comes from
-    /// [`Kit::from_terminal`], so the two decide alike.
+    /// The terminal's theme, once it has reported its text and background colours.
     pub fn from_terminal() -> Option<Palette> {
-        let colors = rune::terminal_colors()?;
+        Palette::from_terminal_colors(rune::terminal_colors()?)
+    }
+
+    /// The palette of a terminal that reported `colors`, `None` until it has reported its text
+    /// and background. It decides what rune-kit's [`Kit::from_terminal_colors`] decides, from
+    /// the same colours. The theme is dark when the text is lighter than the background. ANSI
+    /// colours the terminal left out come from Merino. A missing cursor falls back to ANSI blue,
+    /// the bright one on a dark background.
+    pub fn from_terminal_colors(colors: TerminalColors) -> Option<Palette> {
         let (background, foreground) = (colors.background?, colors.foreground?);
-        // Dark from the colours drawn, as `Kit::from_terminal` decides it: the scheme the
-        // terminal reports can be a placeholder while a pane is set up.
         let dark = foreground.luminance() > background.luminance();
         let base = if dark {
             Palette::merino_dark()
@@ -121,14 +124,34 @@ impl Palette {
                 *slot = color;
             }
         }
+        let blue = ansi[if dark { 12 } else { 4 }];
         Some(Palette {
             name: "Terminal",
             background,
             foreground,
-            cursor: colors.cursor.unwrap_or(ansi[4]),
+            cursor: colors.cursor.unwrap_or(blue),
             ansi,
             dark,
         })
+    }
+
+    /// A palette of your own. It is dark when `foreground` is lighter than `background`.
+    pub fn new(
+        name: &'static str,
+        background: Color,
+        foreground: Color,
+        cursor: Color,
+        ansi: [Color; 16],
+    ) -> Palette {
+        let dark = foreground.luminance() > background.luminance();
+        Palette {
+            name,
+            background,
+            foreground,
+            cursor,
+            ansi,
+            dark,
+        }
     }
 
     pub fn with_cursor(mut self, cursor: Color) -> Palette {
@@ -231,18 +254,23 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// The terminal's theme inside a terminal, else Merino in `dark`'s appearance. The
-    /// rune-kit kit is [`Kit::from_terminal`]'s, so rune-kit components inside look as they do
-    /// in any terminal app.
+    /// The theme of a terminal that reported `colors`, `None` until it has reported its text
+    /// and background.
+    pub fn from_terminal_colors(colors: TerminalColors) -> Option<Theme> {
+        Palette::from_terminal_colors(colors).map(Theme::new)
+    }
+
+    /// The terminal's theme inside a terminal, else Merino in `dark`'s appearance.
     pub fn current(dark: bool) -> Theme {
-        match Palette::from_terminal() {
-            Some(palette) => Theme::with_kit(palette, Kit::from_terminal(dark)),
-            None => Theme::new(if dark {
-                Palette::merino_dark()
-            } else {
-                Palette::merino_light()
-            }),
-        }
+        rune::terminal_colors()
+            .and_then(Theme::from_terminal_colors)
+            .unwrap_or_else(|| {
+                Theme::new(if dark {
+                    Palette::merino_dark()
+                } else {
+                    Palette::merino_light()
+                })
+            })
     }
 
     /// `palette`'s theme, with the kit rune-kit derives from a terminal in those colours.
@@ -303,10 +331,10 @@ impl Theme {
                 accent
             },
             focus_ring: accent.alpha(0.9),
-            working: palette.ansi[if dark { 10 } else { 2 }],
+            working: kit.c.success.fg,
             done: accent,
-            warning: palette.ansi[if dark { 11 } else { 3 }],
-            danger: palette.ansi[if dark { 9 } else { 1 }],
+            warning: kit.c.warning.fg,
+            danger: kit.c.danger.fg,
             idle: gray(0.6, 0.66),
             shadow: black.alpha(pick(0.35, 0.08)),
             shadow_strong: black.alpha(pick(0.5, 0.18)),

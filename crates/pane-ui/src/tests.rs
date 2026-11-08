@@ -101,44 +101,118 @@ fn a11y(content: fn(&Theme) -> rune::El, key: &str) -> serde_json::Value {
         }
         v["children"].as_array()?.iter().find_map(|c| find(c, key))
     }
-    find(&rt.accessibility_json(), key).unwrap_or_else(|| panic!("no {key} in the accessibility tree"))
+    find(&rt.accessibility_json(), key)
+        .unwrap_or_else(|| panic!("no {key} in the accessibility tree"))
 }
 
 fn states(node: &serde_json::Value) -> Vec<String> {
     node["states"]
         .as_array()
-        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 #[test]
 fn an_open_select_reads_as_expanded_not_checked() {
-    let open = a11y(|t| crate::Select::new(["Light", "Dark"]).open(true).build("theme", t, &mut Vec::new()), "theme");
+    let open = a11y(
+        |t| {
+            crate::Select::new(["Light", "Dark"])
+                .open(true)
+                .build("theme", t, &mut Vec::new())
+        },
+        "theme",
+    );
     assert!(states(&open).contains(&"expanded".to_owned()), "{open}");
-    assert!(!states(&open).iter().any(|s| s.contains("checked")), "a combobox is never checked: {open}");
-    let shut = a11y(|t| crate::Select::new(["Light", "Dark"]).build("theme", t, &mut Vec::new()), "theme");
+    assert!(
+        !states(&open).iter().any(|s| s.contains("checked")),
+        "a combobox is never checked: {open}"
+    );
+    let shut = a11y(
+        |t| crate::Select::new(["Light", "Dark"]).build("theme", t, &mut Vec::new()),
+        "theme",
+    );
     assert!(states(&shut).contains(&"collapsed".to_owned()), "{shut}");
 }
 
 #[test]
 fn a_menu_item_reads_as_checked_until_checked_false() {
-    let on = a11y(|t| crate::MenuItem::new("Wrap").checked(true).build("wrap", t), "wrap");
+    let on = a11y(
+        |t| crate::MenuItem::new("Wrap").checked(true).build("wrap", t),
+        "wrap",
+    );
     assert!(states(&on).contains(&"checked".to_owned()), "{on}");
-    let off = a11y(|t| crate::MenuItem::new("Wrap").checked(true).checked(false).build("wrap", t), "wrap");
-    assert!(states(&off).contains(&"unchecked".to_owned()), "the later call wins: {off}");
+    let off = a11y(
+        |t| {
+            crate::MenuItem::new("Wrap")
+                .checked(true)
+                .checked(false)
+                .build("wrap", t)
+        },
+        "wrap",
+    );
+    assert!(
+        states(&off).contains(&"unchecked".to_owned()),
+        "the later call wins: {off}"
+    );
 }
 
 #[test]
 fn every_status_mark_has_a_name() {
     type Build = fn(&Theme) -> rune::El;
     let marks: [(crate::Status, Build); 5] = [
-        (crate::Status::Idle, |t| crate::Status::Idle.mark(t).key("mark")),
-        (crate::Status::Working, |t| crate::Status::Working.mark(t).key("mark")),
-        (crate::Status::Done, |t| crate::Status::Done.mark(t).key("mark")),
-        (crate::Status::Blocked, |t| crate::Status::Blocked.mark(t).key("mark")),
-        (crate::Status::Error, |t| crate::Status::Error.mark(t).key("mark")),
+        (crate::Status::Idle, |t| {
+            crate::Status::Idle.mark(t).key("mark")
+        }),
+        (crate::Status::Working, |t| {
+            crate::Status::Working.mark(t).key("mark")
+        }),
+        (crate::Status::Done, |t| {
+            crate::Status::Done.mark(t).key("mark")
+        }),
+        (crate::Status::Blocked, |t| {
+            crate::Status::Blocked.mark(t).key("mark")
+        }),
+        (crate::Status::Error, |t| {
+            crate::Status::Error.mark(t).key("mark")
+        }),
     ];
     for (status, mark) in marks {
         assert_eq!(a11y(mark, "mark")["name"], status.label(), "{status:?}");
     }
+}
+
+#[test]
+fn the_theme_and_its_kit_agree_on_the_terminal_colours() {
+    // A dark terminal that reports its text, background and ANSI table, but no cursor.
+    let mut colors = rune::TerminalColors::default();
+    colors.background = Some(crate::rgb(0x101010));
+    colors.foreground = Some(crate::rgb(0xe0e0e0));
+    colors.palette = Palette::merino_dark().ansi.map(Some);
+    let theme = Theme::from_terminal_colors(colors).expect("text and background are reported");
+    assert_eq!(
+        theme.accent, theme.kit.c.bg_accent,
+        "one accent when the cursor falls back"
+    );
+    assert_eq!(theme.danger, theme.kit.c.danger.fg, "one red");
+    assert_eq!(theme.warning, theme.kit.c.warning.fg, "one yellow");
+    assert_eq!(theme.working, theme.kit.c.success.fg, "one green");
+}
+
+#[test]
+fn an_app_can_build_its_own_palette() {
+    let ansi = Palette::merino_light().ansi;
+    let palette = Palette::new(
+        "Paper",
+        crate::rgb(0xffffff),
+        crate::rgb(0x202020),
+        crate::rgb(0x0066cc),
+        ansi,
+    );
+    assert!(!palette.dark, "dark comes from the colours");
+    let theme = Theme::new(palette);
+    assert_eq!(theme.accent, crate::rgb(0x0066cc));
 }
