@@ -498,6 +498,9 @@ impl Model {
 
     fn preview_visible(&self) -> bool { self.preview_enabled && self.preview_command().is_some() }
 
+    /// How many shown rows the host lists: the only rows a highlight or mark may land on.
+    fn listed(&self) -> usize { self.shown.results.len().min(self.options.list_cap) }
+
     fn highlighted(&self) -> Option<&MenuItem> {
         let row = self.shown.highlighted_row?;
         self.shown.results.get(row).map(|&o| &self.shown.items[o as usize])
@@ -514,7 +517,7 @@ impl Model {
     }
 
     fn highlight(&mut self, row: usize) {
-        if !self.can_navigate() || row >= self.shown.results.len().min(self.options.list_cap) {
+        if !self.can_navigate() || row >= self.listed() {
             return;
         }
         if self.shown.highlighted_row != Some(row) {
@@ -527,7 +530,7 @@ impl Model {
     }
 
     fn move_by(&mut self, delta: isize) {
-        let count = self.shown.results.len().min(self.options.list_cap);
+        let count = self.listed();
         if count == 0 {
             return;
         }
@@ -545,7 +548,7 @@ impl Model {
     }
 
     fn toggle_row(&mut self, row: usize) {
-        if !self.can_navigate() || !self.options.multi || row >= self.shown.results.len() {
+        if !self.can_navigate() || !self.options.multi || row >= self.listed() {
             return;
         }
         let id = self.result(row).id.clone();
@@ -785,7 +788,7 @@ impl Model {
             self.shown.selection = MenuSelection::default();
         }
         let prune_now = self.pending_prune && !self.loading;
-        let listed = self.shown.results.len().min(self.options.list_cap);
+        let listed = self.listed();
         self.shown.selection.reconcile(&self.shown.items, &self.shown.results[..listed], prune_now);
         if prune_now {
             self.pending_prune = false;

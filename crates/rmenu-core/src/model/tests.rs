@@ -1296,3 +1296,13 @@ fn a_highlight_past_the_listed_rows_moves_to_the_first() {
     let row = h.model.highlighted_row().unwrap();
     assert!(row < 2, "highlight {row} is outside the 2 listed rows");
 }
+
+#[test]
+fn a_click_past_the_listed_rows_marks_nothing() {
+    let mut o = options(json!({"sources": [src("s", json!({}))]}));
+    o.list_cap = 1;
+    let mut h = Harness::new(o);
+    h.load("a\nb\nc\n");
+    h.toggle(2);
+    assert!(h.marked().is_empty(), "row 2 is not listed, yet {:?} is marked", h.marked());
+}
