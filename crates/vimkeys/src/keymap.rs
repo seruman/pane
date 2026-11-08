@@ -246,6 +246,22 @@ pub enum Command<A> {
 }
 
 impl<A> Command<A> {
+    /// The variant's name, for a panic message.
+    fn name(&self) -> &'static str {
+        match self {
+            Command::Motion(_) => "Motion",
+            Command::Operator(_) => "Operator",
+            Command::Lines(_) => "Lines",
+            Command::Inner => "Inner",
+            Command::Around => "Around",
+            Command::Visual => "Visual",
+            Command::VisualLine => "VisualLine",
+            Command::OtherEnd => "OtherEnd",
+            Command::Search { .. } => "Search",
+            Command::App(_) => "App",
+        }
+    }
+
     /// Hints list the app's bindings first, then Vim's commands, then its motions.
     fn group(&self) -> usize {
         match self {
@@ -277,8 +293,23 @@ pub fn hint(keys: &str, what: &'static str) -> Hint {
 pub enum Table {
     Normal,
     Visual,
-    /// After an operator: motions, [`Command::Inner`] and [`Command::Around`] only.
+    /// After an operator. It holds motions, [`Command::Inner`] and [`Command::Around`] only.
     Pending,
+}
+
+impl Table {
+    /// Whether `command` means anything here. [`Command::OtherEnd`] needs a selection, so it
+    /// belongs to Visual. [`Command::Lines`] acts on the cursor's lines, which a selection
+    /// replaces, so it belongs to Normal. After an operator only what it can act over counts.
+    fn takes<A>(self, command: &Command<A>) -> bool {
+        match (self, command) {
+            (Table::Pending, c) => {
+                matches!(c, Command::Motion(_) | Command::Inner | Command::Around)
+            }
+            (Table::Normal, Command::OtherEnd) | (Table::Visual, Command::Lines(_)) => false,
+            _ => true,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -500,16 +531,12 @@ impl<A: Clone> Keymap<A> {
         command: Command<A>,
         what: impl Into<Option<&'static str>>,
     ) -> Self {
-        if table == Table::Pending {
-            assert!(
-                matches!(
-                    command,
-                    Command::Motion(_) | Command::Inner | Command::Around
-                ),
-                "{}: after an operator only motions and text objects mean anything",
-                render(keys, self.leader)
-            );
-        }
+        assert!(
+            table.takes(&command),
+            "{}: {} means nothing in the {table:?} table",
+            render(keys, self.leader),
+            command.name()
+        );
         let leader = self.leader;
         let (name, list) = match table {
             Table::Normal => ("Normal", &mut self.normal),

@@ -811,3 +811,25 @@ fn half_a_page_is_the_page_the_app_sets() {
     ctrl_d(&mut v);
     assert_eq!(line(&v), 20, "half of 40");
 }
+
+#[test]
+#[should_panic(expected = "OtherEnd")]
+fn binding_other_end_outside_visual_mode_panics() {
+    let _ = Keymap::<NoAction>::vim().bind(
+        Table::Normal,
+        &[Stroke::Char('o')],
+        Command::OtherEnd,
+        None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Lines")]
+fn binding_a_lines_operator_in_visual_mode_panics() {
+    let _ = Keymap::<NoAction>::vim().bind(
+        Table::Visual,
+        &[Stroke::Char('Y')],
+        Command::Lines(Operator::Yank),
+        None,
+    );
+}
