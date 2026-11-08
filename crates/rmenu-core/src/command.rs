@@ -204,7 +204,7 @@ pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], time
         || env.iter().any(|(k, v)| k.is_empty() || k.contains('=') || has_nul(k) || has_nul(v)) {
         return Err(CommandError::InvalidArguments);
     }
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now().checked_add(timeout);
     let (envp, path) = environment(env)?;
     let program = resolve(&argv[0], path.as_deref())?;
     let spawned = spawn(&program, argv, &envp, input.is_some())?;
@@ -254,7 +254,7 @@ impl Drop for Group {
     }
 }
 
-fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Instant, limit: usize, cancel: &Cancel)
+fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Instant>, limit: usize, cancel: &Cancel)
         -> Result<CommandResult, CommandError> {
     let mut stdin = spawned.stdin.filter(|_| !input.is_empty());
     let mut stdout = Some(spawned.stdout);
@@ -268,7 +268,7 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Instant, li
     let mut buffer = [0u8; 16_384];
     loop {
         if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
-        if Instant::now() >= deadline { return Err(CommandError::TimedOut); }
+        if deadline.is_some_and(|d| Instant::now() >= d) { return Err(CommandError::TimedOut); }
         if stdin.is_none() && stdout.is_none() && stderr.is_none() {
             if let Some(status) = group.try_wait()? {
                 return Ok(CommandResult { stdout: out, stderr: err, status });
@@ -396,6 +396,12 @@ mod tests {
         let result = quick(&["/bin/sh", "-c", "kill -PIPE $$; echo survived"]).unwrap();
         assert_eq!(result.status, 128 + libc::SIGPIPE, "stdout: {}", text(&result.stdout));
         assert_eq!(text(&result.stdout), "");
+    }
+
+    #[test]
+    fn a_timeout_too_large_for_a_deadline_means_no_deadline() {
+        let result = run_with(&["/bin/echo", "ok"], Some(b""), &[], Duration::MAX, 1 << 20).unwrap();
+        assert_eq!(text(&result.stdout), "ok\n");
     }
 
     #[test]
