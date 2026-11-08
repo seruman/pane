@@ -230,11 +230,27 @@ fn quitting() {
 }
 
 #[test]
-fn the_legend_shows_while_selecting() {
+fn which_key_shows_what_can_follow() {
     let mut rt = runtime(SRC);
-    assert!(rt.find("legend").is_none());
+    assert!(rt.find("which-key").is_none());
     press(&mut rt, "v");
-    assert!(rt.find("legend").is_some());
+    assert!(rt.find("which-key").is_some(), "a selection lists its keys");
+    let (_, groups) = pending_keys(&rt.state).unwrap();
+    assert_eq!(groups[1].len(), LABELS.len(), "every label");
     key(&mut rt, Key::Escape);
-    assert!(rt.find("legend").is_none());
+    assert!(rt.find("which-key").is_none());
+
+    press(&mut rt, "d");
+    let (prefix, groups) = pending_keys(&rt.state).unwrap();
+    assert_eq!((prefix, groups[0].len()), ("d", 1), "dc only shows on a comment");
+    key(&mut rt, Key::Escape);
+    assert!(rt.state.prefix.is_none() && rt.find("which-key").is_none(), "Escape cancels a prefix");
+    assert!(rt.state.review.comments.is_empty());
+
+    press(&mut rt, "Vc");
+    press(&mut rt, "x");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "c");
+    let (_, groups) = pending_keys(&rt.state).unwrap();
+    assert_eq!(groups[0].iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["c", "e"]);
 }

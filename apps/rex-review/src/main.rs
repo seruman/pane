@@ -650,7 +650,12 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
         .padding(24.0)
         .child(doc)
         .scroll(ScrollSpec { stick_bottom: false });
-    let mut body = row().w_full().grow(1.0).min_h(0.0).child(content.grow(1.0).min_w(0.0));
+    // The which-key panel floats over the page's bottom right, as Rex's prefix panel does.
+    let mut page_area = el().w_full().h_full().grow(1.0).min_w(0.0).child(content);
+    if let Some(keys) = which_key(s, &rex) {
+        page_area = page_area.child(keys.pin(None, None, Some(16.0), Some(16.0)));
+    }
+    let mut body = row().w_full().grow(1.0).min_h(0.0).child(page_area);
     let side = match s.side {
         Side::None => None,
         Side::Comments => Some(comments_view(s, &rex)),
@@ -659,42 +664,114 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
     if let Some(side) = side {
         body = body.child(el().w(1.0).h_full().fill(rex.separator)).child(side);
     }
-    let mut page = col()
+    col()
         .w_full()
         .h_full()
         .fill(rex.background)
         .child(bar(s, &rex))
         .child(el().h(1.0).w_full().fill(rex.separator))
-        .child(body);
-    if matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) && s.composer.is_none() {
-        page = page.child(legend(&rex));
-    }
-    page.child(status_line(s, &rex))
+        .child(body)
+        .child(status_line(s, &rex))
 }
 
-/// What a selection can become, while there is one.
-fn legend(rex: &Rex) -> El {
-    let item = |k: String, what: &str| {
-        row()
-            .gap(4.0)
-            .center_y()
-            .child(kbd(k, rex))
-            .child(text(what.to_owned()).font(rex.ty.caption).color(rex.text_secondary))
-    };
-    let mut r = row()
-        .key("legend")
-        .w_full()
-        .flex_wrap()
-        .gap(12.0)
-        .px(16.0)
-        .py(6.0)
-        .fill(rex.group)
-        .child(item("c".into(), "comment"))
-        .child(item("d".into(), "remove"));
-    for (i, l) in LABELS.iter().enumerate() {
-        r = r.child(item((i + 1).to_string(), l.text));
+/// One row of the which-key panel: what a key does, then the key, as Rex's prefix panel lists
+/// them.
+struct KeyRow {
+    what: &'static str,
+    key: String,
+}
+
+fn key_row(what: &'static str, key: impl Into<String>) -> KeyRow {
+    KeyRow { what, key: key.into() }
+}
+
+/// The keys that can follow what's been typed: a selection's (comment, remove, the labels),
+/// or a prefix's second key. `None` when no key is half typed.
+fn pending_keys(s: &App_) -> Option<(&'static str, Vec<Vec<KeyRow>>)> {
+    if s.composer.is_some() || s.cmdline.is_some() {
+        return None;
     }
-    col().w_full().child(el().h(1.0).w_full().fill(rex.separator)).child(r)
+    let on_comment = s.current().is_some();
+    let groups = match s.prefix {
+        Some(Prefix::C) => {
+            let mut g = vec![key_row("Comment on the line", "c")];
+            if on_comment {
+                g.push(key_row("Edit this comment", "e"));
+            }
+            ("c", vec![g])
+        }
+        Some(Prefix::D) => {
+            let mut g = vec![key_row("Remove the line", "d")];
+            if on_comment {
+                g.push(key_row("Delete this comment", "c"));
+            }
+            ("d", vec![g])
+        }
+        Some(Prefix::Bracket(true)) => ("]", vec![vec![key_row("Next comment", "c")]]),
+        Some(Prefix::Bracket(false)) => ("[", vec![vec![key_row("Previous comment", "c")]]),
+        Some(Prefix::Z) => ("Z", vec![vec![key_row("Send the review and quit", "Z"), key_row("Quit without sending", "Q")]]),
+        None if matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) && s.vim.pending().is_empty() => {
+            let labels = LABELS.iter().enumerate().map(|(i, l)| key_row(l.text, (i + 1).to_string())).collect();
+            (
+                if s.vim.mode() == VimMode::Visual { "visual" } else { "v-line" },
+                vec![vec![key_row("Comment", "c"), key_row("Remove this", "d"), key_row("Yank", "y")], labels],
+            )
+        }
+        None => return None,
+    };
+    Some(groups)
+}
+
+/// The keys that can follow, in a floating panel: the mode or prefix as a pill, Escape to
+/// cancel, then each key's action with the key on the right.
+fn which_key(s: &App_, rex: &Rex) -> Option<El> {
+    let (prefix, groups) = pending_keys(s)?;
+    let row_of = |r: &KeyRow| {
+        row()
+            .w_full()
+            .h(24.0)
+            .gap(24.0)
+            .center_y()
+            .child(text(r.what).font(rex.ty.caption).color(rex.text).grow(1.0).shrink())
+            .child(text(r.key.clone()).font(rex.ty.mono).color(rex.text_secondary))
+    };
+    let mut list = col().w_full();
+    for (i, group) in groups.iter().enumerate() {
+        if i > 0 {
+            list = list.child(el().h(1.0).w_full().my(6.0).fill(rex.separator));
+        }
+        for r in group {
+            list = list.child(row_of(r));
+        }
+    }
+    let pill = el()
+        .px(9.0)
+        .py(2.0)
+        .radius(9.0)
+        .fill(rex.accent_soft)
+        .child(text(prefix).font(rex.ty.label).color(rex.accent_text));
+    Some(
+        col()
+            .key("which-key")
+            .w(260.0)
+            .gap(8.0)
+            .padding(12.0)
+            .radius(rex.radius.popover)
+            .fill(rex.popover)
+            .border(1.0, rex.popover_border)
+            .shadow(12.0, 32.0, rex.shadow_strong)
+            .child(
+                row()
+                    .w_full()
+                    .gap(8.0)
+                    .center_y()
+                    .child(pill)
+                    .child(el().grow(1.0))
+                    .child(text("esc").font(rex.ty.mono).color(rex.text_tertiary))
+                    .child(text("Cancel").font(rex.ty.caption).color(rex.text_tertiary)),
+            )
+            .child(list),
+    )
 }
 
 fn bar(s: &App_, rex: &Rex) -> El {
@@ -822,6 +899,9 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
     let vim_busy = !s.vim.pending().is_empty();
 
     if let Some(prefix) = s.prefix.take() {
+        if k.key == Key::Escape {
+            return true;
+        }
         match (prefix, c) {
             (Prefix::Bracket(forward), Some('c')) => match s.review.step(s.current(), s.cursor(), !forward) {
                 Some(n) => s.jump(n, tx),
@@ -1004,6 +1084,10 @@ fn main() {
                 }
             }),
             ("help", |s| s.side = Side::Help),
+            ("prefix", |s| {
+                s.review.add(Comment::on(0..4, "x"));
+                s.prefix = Some(Prefix::C);
+            }),
         ],
         on_key: Some(on_key),
         families: ("Inter", "ui-monospace, Menlo, Inter"),
