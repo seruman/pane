@@ -177,3 +177,15 @@ fn highlights_mark_the_matched_characters_as_byte_ranges() {
     assert!(both.iter().any(|r| r.start >= 19), "every token is highlighted: {both:?}");
     assert!(both.len() >= 2);
 }
+
+#[test]
+fn highlights_cover_whole_graphemes() {
+    let marked = |query, text: &'static str| -> Vec<&str> {
+        super::highlights(query, text).into_iter().map(|r| &text[r]).collect()
+    };
+    assert_eq!(marked("b", "a\u{301}bc"), ["b"]);
+    assert_eq!(marked("x", "e\u{301}e\u{301}x"), ["x"]);
+    assert_eq!(marked("rune", "🧑\u{200d}💻 rune"), ["rune"]);
+    assert_eq!(marked("e", "e\u{301}x"), ["e\u{301}"], "a combining mark is marked with its base");
+    assert_eq!(marked("b", "a\r\nb"), ["b"]);
+}

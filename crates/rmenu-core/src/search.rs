@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32String};
+use nucleo_matcher::{Config, Matcher, Utf32Str, Utf32String};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::item::MenuItem;
 
@@ -27,27 +28,30 @@ pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
     if pattern.atoms.is_empty() { return Vec::new(); }
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut buf = Vec::new();
-    let haystack = nucleo_matcher::Utf32Str::new(text, &mut buf);
-    let mut chars = Vec::new();
+    let haystack = Utf32Str::new(text, &mut buf);
+    let mut hits = Vec::new();
     // Each token matches on its own here, so a row whose title holds only some of the
     // query's tokens still shows which ones.
     for atom in &pattern.atoms {
         let mut found = Vec::new();
-        if atom.indices(haystack, &mut matcher, &mut found).is_some() { chars.extend(found); }
+        if atom.indices(haystack, &mut matcher, &mut found).is_some() { hits.extend(found); }
     }
-    chars.sort_unstable();
-    chars.dedup();
-    // One walk over the text, stopping at the last match, turns character indices into bytes.
+    let graphemes: Vec<std::ops::Range<usize>> =
+        text.grapheme_indices(true).map(|(start, g)| start..start + g.len()).collect();
+    // `Utf32Str::new` keeps a text whose graphemes all start with ASCII as its bytes, so a hit
+    // is a byte offset there. Otherwise nucleo keeps one char per grapheme and a hit counts graphemes.
+    let mut marked: Vec<usize> = hits.into_iter().map(|hit| match haystack {
+        Utf32Str::Ascii(_) => graphemes.partition_point(|g| g.end <= hit as usize),
+        Utf32Str::Unicode(_) => hit as usize,
+    }).collect();
+    marked.sort_unstable();
+    marked.dedup();
     let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
-    let mut wanted = chars.into_iter().peekable();
-    for (n, (start, ch)) in text.char_indices().enumerate() {
-        let Some(&next) = wanted.peek() else { break };
-        if n as u32 != next { continue; }
-        wanted.next();
-        let end = start + ch.len_utf8();
+    for grapheme in marked {
+        let range = graphemes[grapheme].clone();
         match ranges.last_mut() {
-            Some(last) if last.end == start => last.end = end,
-            _ => ranges.push(start..end),
+            Some(last) if last.end == range.start => last.end = range.end,
+            _ => ranges.push(range),
         }
     }
     ranges
