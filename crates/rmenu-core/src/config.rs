@@ -26,7 +26,8 @@ pub enum MarkScope {
 #[serde(rename_all = "camelCase")]
 pub struct MenuConfiguration {
     pub prompt: Option<String>,
-    pub multi: Option<bool>,
+    #[serde(default, deserialize_with = "null_as_false")]
+    pub multi: bool,
     pub theme: Option<String>,
     #[serde(default)]
     pub sources: Vec<MenuSource>,
@@ -84,6 +85,11 @@ impl fmt::Display for ConfigurationError {
 }
 
 impl std::error::Error for ConfigurationError {}
+
+/// mmenu decodes `null` as an absent key.
+fn null_as_false<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(false))
+}
 
 fn error<T>(message: impl Into<String>) -> Result<T, ConfigurationError> { Err(ConfigurationError(message.into())) }
 
@@ -414,6 +420,14 @@ mod tests {
             "bindings":[{"key":"Shift+Cmd+R","action":"accept"},{"key":"ctrl+e","action":"accept"},{"key":"cmd+e","action":"copy"}]}"#);
         config.validate().unwrap();
         assert_eq!(config.command_chords().collect::<Vec<_>>(), ["cmd+1", "Shift+Cmd+R", "cmd+e"]);
+    }
+
+    #[test]
+    fn multi_is_off_unless_true() {
+        for (json, multi) in [("{}", false), (r#"{"multi":null}"#, false), (r#"{"multi":false}"#, false), (r#"{"multi":true}"#, true)] {
+            assert_eq!(parse(json).multi, multi, "{json}");
+        }
+        assert!(serde_json::from_str::<MenuConfiguration>(r#"{"multi":"yes"}"#).is_err());
     }
 
     #[test]

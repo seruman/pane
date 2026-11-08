@@ -102,7 +102,7 @@ impl Cli {
         if configuration.root_source().is_none() && stdin_is_tty {
             return Err("Pipe input into rmenu, or supply --config with command sources.".into());
         }
-        let multi = self.multi || configuration.multi == Some(true);
+        let multi = self.multi || configuration.multi;
         let prompt = self.prompt.or_else(|| configuration.prompt.clone()).unwrap_or_else(|| ">".into());
         let input = match self.input {
             Input::Lines => InputFormat::Lines,
