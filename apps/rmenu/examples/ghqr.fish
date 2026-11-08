@@ -39,10 +39,17 @@ function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, i
             + (if $w == "" then {} else {window_id: $w} end) + {
             layout: {block: {flavor: "com.superlogical.terminal.shell", label: "ghqr",
                              options: {command: $ARGS.positional, cwd: $cwd}}}}' -- $run)
-        set -l block (rex api call -s $REX_SESSION session.new_layer $request | command jq -r '.block_ids[0]')
+        set -l created (rex api call -s $REX_SESSION session.new_layer $request)
         or begin; command rm -f -- $config $out; return 1; end
-        rex wait $block >/dev/null
+        set -l layer (printf '%s\n' $created | command jq -r .layer_id)
+        rex wait (printf '%s\n' $created | command jq -r '.block_ids[0]') >/dev/null
         set code (cat $out.status 2>/dev/null; or echo 130)
+        # wait returns when rmenu exits, while the layer may still hold focus. Close it and
+        # focus this shell's block, so a split or tab is anchored here, not in the layer.
+        rex api call -s $REX_SESSION session.close_layer (command jq -nc --arg s $REX_SESSION --arg l $layer \
+            '{session_id: $s, layer_id: $l}') >/dev/null 2>&1
+        rex api call -s $REX_SESSION session.focus_block (command jq -nc --arg s $REX_SESSION --arg b $REX_BLOCK \
+            '{session_id: $s, block_id: $b}') >/dev/null 2>&1
     else
         command $menu --config $config --json --query=$query >$out
         set code $status
