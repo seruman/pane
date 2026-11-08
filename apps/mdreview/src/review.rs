@@ -224,7 +224,7 @@ impl Review {
             let mut place = Vec::new();
             match lines_of(source, &ranges) {
                 Some((a, b)) if a == b => place.push(format!("line {a}")),
-                Some((a, b)) => place.push(format!("lines {a}–{b}")),
+                Some((a, b)) => place.push(format!("lines {a} to {b}")),
                 None => {}
             }
             // The section the comment starts in, unless it's on that heading itself.

@@ -9,12 +9,12 @@
 //! some-agent | RUNE_TERMINAL=1 mdreview -                               # read stdin
 //! ```
 //!
-//! Read with `vimkeys`'s keys. Select with `v` or `V`, then `c` comments on the selection, `d`
-//! marks it to be removed; `cc`
-//! and `dd` do the same for the cursor's line. `C` adds a general comment, about the document
-//! as a whole. `]c` and `[c` step through the comments; on one, Enter or `ce` edits it and `dc`
-//! deletes it. `Tab` lists every comment beside the page. While keys are half typed (`y`,
-//! `gy`, `c`, a selection) a panel shows what can follow; Space shows every key.
+//! Read with `vimkeys`'s keys. `c` and `d` are operators. `c` comments on what its motion,
+//! object or selection covers, and `d` marks it to be removed. `cc` and `dd` take the cursor's
+//! line. `C` adds a general comment about the whole document. `]c` and `[c` step through the
+//! comments. On a comment, Enter or `\e` edits it and `\x` deletes it. `Tab` lists every
+//! comment beside the page. While keys are half typed (`y`, `gy`, `c`, a selection), a panel
+//! shows what can follow. `\?` shows every key.
 //!
 //! In a comment, Enter saves (Shift-Enter starts a new line) and Escape cancels. `:wq`, `:x`
 //! or `ZZ` quit and send the review; `:q` quits when there's nothing to send, `:q!` or `ZQ`
@@ -269,7 +269,7 @@ impl App_ {
             body: String::new(),
         });
         self.selected = Some(id);
-        self.note = Some("Marked to remove — Enter adds a note".into());
+        self.note = Some("Marked to remove. Enter adds a note.".into());
     }
 
     /// Deletes comment `id`, and the editor with it when it's the one being edited.
@@ -304,7 +304,7 @@ impl App_ {
         }
         self.selected = Some(id);
         self.note = Some(format!(
-            "#{} of {} · Enter edits, dc deletes",
+            "#{} of {} · Enter edits, \\x deletes",
             self.number(id),
             self.review.len()
         ));
@@ -338,7 +338,7 @@ impl App_ {
     fn command(&mut self, cmd: &str, tx: &mut Tx) {
         match cmd.trim() {
             "q" | "quit" if !self.review.is_empty() => {
-                self.note = Some("The review isn't sent: :wq sends it, :q! drops it".into());
+                self.note = Some("The review isn't sent. :wq sends it, :q! drops it.".into());
             }
             "q" | "quit" | "q!" | "quit!" => tx.quit(),
             "wq" | "x" | "wq!" | "x!" => {
@@ -574,7 +574,7 @@ fn comment_view(id: CommentId, number: usize, c: &Comment, current: bool, theme:
         .child(el().grow(1.0));
     if current {
         head = head.child(
-            text("Enter edit · dc delete")
+            text("Enter edit · \\x delete")
                 .font(theme.ty.caption)
                 .color(theme.text_tertiary),
         );
@@ -1158,7 +1158,7 @@ fn act(s: &mut App_, action: Act, tx: &mut Tx) {
         }
         Act::Edit => match s.current() {
             Some(id) => s.open(Target::Edit(id)),
-            None => s.note = Some("No comment here: v selects, c comments".into()),
+            None => s.note = Some("No comment here. v selects, c comments.".into()),
         },
         Act::Delete => match s.current() {
             Some(id) => s.delete(id),

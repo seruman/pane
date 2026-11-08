@@ -108,7 +108,7 @@ fn feedback_quotes_and_numbers_in_document_order() {
          ## 2. Comment (line 3, under `Title`)\n\n\
          On `phrase and`, written as:\n\n```markdown\nphrase** and\n```\n\n\
          > Why bold?\n> Say it plainly.\n\n\
-         ## 3. Comment (lines 5–6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\n> Verify this.\n\n\
+         ## 3. Comment (lines 5 to 6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\n> Verify this.\n\n\
          ## 4. Remove this (line 9, under `Title`)\n\n```markdown\nlet x = 1;\n```\n\n\
          I don't want this in the document.\n"
     );
@@ -677,4 +677,22 @@ fn the_command_line_takes_one_document_and_an_output() {
         args(&["a.md", "b.md"]).is_err(),
         "a second document isn't taken over the first"
     );
+}
+
+/// Every text the app shows, gathered from the element tree.
+fn shown(rt: &Runtime<App_>) -> Vec<String> {
+    rt.elements().into_iter().filter_map(|e| e.text.or(e.label)).collect()
+}
+
+#[test]
+fn the_hints_name_the_keys_that_work() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "cc");
+    press(&mut rt, "x");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "]c");
+    let texts = shown(&rt).join("\n");
+    assert!(!texts.contains("dc"), "dc doesn't delete a comment any more:\n{texts}");
+    assert!(texts.contains("\\x"), "the card names the delete key:\n{texts}");
+    assert!(!texts.contains('—') && !texts.contains('–'), "no long dashes in what the app shows");
 }
