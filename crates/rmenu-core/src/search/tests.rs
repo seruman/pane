@@ -43,16 +43,15 @@ fn tokens_are_anded_in_any_order() {
         "README.md",
     ]);
     assert_eq!(unsorted(&rows, "swift mcore srch"), [0, 2]);
-    assert_eq!(unsorted(&rows, "srch\t swift\n mcore"), [0, 2]);
     assert!(search(&rows, "swift impossible").is_empty());
     assert!(search(&rows, "ssssssssssssssss").is_empty());
 }
 
 #[test]
-fn case_and_diacritics_are_folded() {
+fn smart_case_and_diacritics() {
     let rows = index(&["CAFÉ", "Cafe\u{301}", "École/東京/🧑‍💻.swift", "àá", "cafe"]);
     assert_eq!(unsorted(&rows, "cafe"), [0, 1, 4]);
-    assert_eq!(unsorted(&rows, "CAFE"), [0, 1, 4]);
+    assert_eq!(unsorted(&rows, "CAFE"), [0], "smart case: an uppercase query matches case");
     assert_eq!(unsorted(&rows, "ecole 京 🧑‍💻"), [2]);
     assert_eq!(unsorted(&rows, "aa"), [3]);
     assert!(search(&index(&["a"]), "aa").is_empty());
@@ -82,7 +81,7 @@ fn empty_queries_append_and_snapshots() {
     assert_eq!(rows.len(), 4);
     assert_eq!(snapshot.len(), 3);
     assert_eq!(search(&rows, ""), [0, 1, 2, 3]);
-    assert_eq!(search(&rows, " \t\n"), [0, 1, 2, 3]);
+    assert_eq!(search(&rows, "   "), [0, 1, 2, 3]);
     assert_eq!(unsorted(&rows, "foo"), [0, 1, 2, 3]);
     assert_eq!(search(&snapshot, "foo"), [1, 2, 0]);
     assert!(search(&SearchIndex::default(), "anything").is_empty());

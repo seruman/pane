@@ -50,7 +50,7 @@ impl SearchIndex {
         }
     }
 
-    /// Offsets of matching rows. Whitespace-separated tokens are ANDed, ignoring case.
+    /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
     /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
     /// Blocks are matched on all cores; `cancelled` is polled on the calling thread every 0.2 ms.
     pub fn search(&self, query: &str, sorted: bool, cancelled: &dyn Fn() -> bool) -> Result<Vec<u32>, Cancelled> {
@@ -59,9 +59,7 @@ impl SearchIndex {
 
     fn ranked(&self, query: &str, sorted: bool, cancelled: &dyn Fn() -> bool) -> Result<Vec<Ranked>, Cancelled> {
         if cancelled() { return Err(Cancelled); }
-        // nucleo splits atoms on ' ' only; mmenu splits on any whitespace.
-        let query = query.split_whitespace().collect::<Vec<_>>().join(" ");
-        let pattern = Pattern::parse(&query, CaseMatching::Ignore, Normalization::Smart);
+        let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
         if pattern.atoms.is_empty() {
             return Ok((0..self.len as u32).map(|offset| Ranked { score: 0, len: 0, offset }).collect());
         }
