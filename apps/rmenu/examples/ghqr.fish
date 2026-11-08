@@ -35,7 +35,7 @@ function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, i
         set -l window (rex session inspect $REX_SESSION --json | command jq -r --arg b "$REX_BLOCK" \
             'first(.windows[] | select(any(.layers[].blocks[]; .block_id == $b)) | .window_id) // empty')
         set -l request (command jq -nc --arg s $REX_SESSION --arg w "$window" --arg cwd $PWD --args '{
-            session_id: $s, bounds: [0.18, 0.12, 0.64, 0.62], focus: true}
+            session_id: $s, bounds: [0.24, 0.16, 0.52, 0.48], focus: true}
             + (if $w == "" then {} else {window_id: $w} end) + {
             layout: {block: {flavor: "com.superlogical.terminal.shell", label: "ghqr",
                              options: {command: $ARGS.positional, cwd: $cwd}}}}' -- $run)
