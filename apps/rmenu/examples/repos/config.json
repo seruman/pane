@@ -1,0 +1,48 @@
+{
+  "multi": true,
+  "sources": [
+    {
+      "id": "repos",
+      "label": "Repositories",
+      "prompt": "Repositories",
+      "format": "jsonl",
+      "command": [
+        "./repos.sh"
+      ]
+    },
+    {
+      "id": "worktrees",
+      "label": "Worktrees",
+      "hidden": true,
+      "format": "jsonl",
+      "command": [
+        "./worktrees.sh"
+      ]
+    }
+  ],
+  "preview": [
+    "./preview.sh"
+  ],
+  "bindings": [
+    {
+      "key": "ctrl+w",
+      "id": "worktrees",
+      "label": "Worktrees",
+      "action": "push",
+      "source": "worktrees",
+      "sources": [
+        "repos"
+      ]
+    },
+    {
+      "key": "alt+p",
+      "label": "Preview",
+      "action": "togglePreview"
+    },
+    {
+      "key": "ctrl+y",
+      "label": "Copy",
+      "action": "copy"
+    }
+  ]
+}
