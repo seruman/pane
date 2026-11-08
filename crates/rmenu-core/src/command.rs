@@ -60,6 +60,21 @@ fn system(operation: &str, error: io::Error) -> CommandError {
     CommandError::System { operation: operation.to_owned(), code: error.raw_os_error().unwrap_or(libc::EIO) }
 }
 
+/// Sets close-on-exec on every descriptor above stdio this process has open. Pipes std makes
+/// for a child are already close-on-exec until they are dup'd onto its stdio.
+fn close_inherited_on_exec() {
+    let Ok(entries) = std::fs::read_dir("/dev/fd") else { return };
+    for fd in entries.flatten().filter_map(|e| e.file_name().to_str()?.parse::<RawFd>().ok()).filter(|&fd| fd > 2) {
+        // SAFETY: F_GETFD/F_SETFD only read and set a flag; a descriptor closed meanwhile fails harmlessly.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {
+                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
+    }
+}
+
 fn set_nonblocking(fd: RawFd) -> Result<(), CommandError> {
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
     if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
@@ -81,13 +96,21 @@ pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], time
         return Err(CommandError::InvalidArguments);
     }
     let deadline = Instant::now() + timeout;
-    let child = Command::new(&argv[0])
+    let mut command = Command::new(&argv[0]);
+    command
         .args(&argv[1..])
         .envs(env.iter().map(|(k, v)| (k, v)))
+        // rmenu's own terminal mode; a Rune program it runs must not take the terminal too.
+        .env_remove("RUNE_TERMINAL")
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .process_group(0)
+        .process_group(0);
+    // Only stdio reaches the command, as mmenu's POSIX_SPAWN_CLOEXEC_DEFAULT does: the host
+    // and its frameworks (Metal's shader cache) open descriptors without close-on-exec.
+    // Marking ours here keeps std on posix_spawn; a sweep in the child after fork costs 10x.
+    close_inherited_on_exec();
+    let child = command
         .spawn()
         .map_err(|e| system("posix_spawn", e))?;
     let mut group = Group { child, reaped: false };
@@ -209,6 +232,21 @@ mod tests {
 
     impl Drop for TempDir {
         fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+    }
+
+    #[test]
+    fn commands_get_only_stdio_and_never_rmenus_terminal_mode() {
+        let file = std::fs::File::open("/dev/null").unwrap();
+        // A descriptor opened without close-on-exec, as a framework inside rmenu would.
+        // A high number, so the command's own descriptors (ls opening /dev/fd) can't collide.
+        let fd = unsafe { libc::dup2(file.as_raw_fd(), 200) };
+        assert_eq!(fd, 200);
+        unsafe { std::env::set_var("RUNE_TERMINAL", "1") };
+        let result = quick(&["/bin/sh", "-c", "ls /dev/fd; echo env=${RUNE_TERMINAL-unset}"]).unwrap();
+        unsafe { libc::close(fd) };
+        let out = text(&result.stdout);
+        assert!(!out.lines().any(|l| l == fd.to_string()), "fd {fd} leaked into the command: {out}");
+        assert!(out.contains("env=unset"), "{out}");
     }
 
     #[test]
