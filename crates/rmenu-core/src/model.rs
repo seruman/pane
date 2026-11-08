@@ -183,7 +183,8 @@ enum Status {
     Ack(String),
     /// An operation is running; it changes when the operation ends.
     Running(String),
-    /// Something failed and the user has to see it: kept until the next action replaces it.
+    /// Something failed or was refused and the user has to see it: kept until the next
+    /// action replaces it.
     Error(String),
 }
 
@@ -682,7 +683,10 @@ impl Model {
     fn reload(&mut self) {
         match self.source().cloned() {
             Some(source) => self.load(&source),
-            None => self.message = Some(Status::Ack("Piped input cannot be re-run".into())),
+            None => {
+                self.message = Some(Status::Error("Piped input cannot be re-run".into()));
+                self.effects.push(Effect::Beep);
+            }
         }
     }
 
@@ -959,7 +963,7 @@ impl Model {
             // A delimiter inside a value would split it into extra records downstream.
             if items.iter().any(|i| i.value().contains(delimiter)) {
                 let hint = if self.options.print0 { "" } else { " or --print0" };
-                self.message = Some(Status::Ack(format!("A selected value contains the output delimiter; use --json{hint}")));
+                self.message = Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
                 self.effects.push(Effect::Beep);
                 return;
             }

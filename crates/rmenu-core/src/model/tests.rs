@@ -464,10 +464,12 @@ fn values_containing_the_output_delimiter_are_never_written() {
         h.nav(Nav::Accept);
         assert!(h.finished.is_none(), "an ambiguous record must not be emitted");
         assert_eq!(h.beeps, 1);
-        let message = h.model.message().unwrap();
+        let message = h.model.message().unwrap().to_owned();
         assert!(message.contains("--json"));
         assert_eq!(message.contains("--print0"), !print0);
         h.nav(Nav::Down);
+        assert_eq!(h.model.message(), Some(message.as_str()), "the refusal survives a move");
+        assert!(h.model.message_is_error());
         h.nav(Nav::Accept);
         assert_eq!(h.output(), (0, if print0 { "ok\0" } else { "ok\n" }.into()));
     }
@@ -1038,6 +1040,10 @@ fn reload_of_piped_input_says_it_cannot_be_rerun() {
     h.settle();
     h.perform(0);
     assert_eq!(h.model.message(), Some("Piped input cannot be re-run"));
+    assert_eq!(h.beeps, 1);
+    h.nav(Nav::Down);
+    assert_eq!(h.model.message(), Some("Piped input cannot be re-run"), "the refusal survives a move");
+    assert!(h.model.message_is_error());
     assert!(!h.started.iter().any(|t| t.kind() == TaskKind::Source));
 }
 
