@@ -25,7 +25,7 @@ The toolchain is pinned to Rune's (`rust-toolchain.toml`); move them together.
 
 ```sh
 cargo build --release
-scripts/fmt.sh            # rustfmt; `cargo fmt --all` would also reformat the Rune checkout
+cargo fmt                 # formats this workspace only; --all would reach the Rune checkout
 RUNE_TERMINAL=1 ./target/release/mdview README.md
 RUNE_TERMINAL=1 ./target/release/mdreview PLAN.md -o review.md
 RUNE_TERMINAL=1 ./target/release/gallery
