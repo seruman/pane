@@ -261,11 +261,10 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
 /// The status line's narrowest useful width in the footer.
 const STATUS_MIN_W: f32 = 120.0;
 
-/// A keycap button's width, from average glyph widths of its two fonts: close enough to
-/// decide what fits, and it never draws anything itself.
+/// The width `keycap_button` lays out for `label` and `key`.
 fn keycap_width(label: &str, key: &str) -> f32 {
-    let label_w = if label.is_empty() { 0.0 } else { label.chars().count() as f32 * 6.1 + 6.0 };
-    label_w + (key.chars().count() as f32 * 6.4 + 10.0).max(18.0)
+    let label_w = if label.is_empty() { 0.0 } else { rune::text::measure(label, &[], SMALL, None).0 + 6.0 };
+    label_w + (rune::text::measure(key, &[], KEYCAP, None).0 + 10.0).max(18.0)
 }
 
 fn keycap_button(label: &str, key: &str, enabled: bool, c: &Palette) -> El {
@@ -436,6 +435,15 @@ mod tests {
             ("abc\rX", "Xbc"),
         ] {
             assert_eq!(plain_text(input), expected, "{input:?}");
+        }
+    }
+
+    #[test]
+    fn a_keycap_claims_the_room_its_text_takes() {
+        for (label, key) in [("Choose", "↩"), ("", "Esc"), ("WWWWWW", "W"), ("打开文件夹", "⌃⇧O")] {
+            let label_w = if label.is_empty() { 0.0 } else { rune::text::measure(label, &[], SMALL, None).0 };
+            let key_w = rune::text::measure(key, &[], KEYCAP, None).0;
+            assert!(keycap_width(label, key) >= label_w + key_w, "{label:?} {key:?}");
         }
     }
 
