@@ -126,10 +126,8 @@ impl MenuConfiguration {
         for source in &self.sources {
             if source.id.is_empty() { return error("Source IDs cannot be empty."); }
             if !ids.insert(source.id.as_str()) { return error(format!("Duplicate source ID: {}", source.id)); }
-            if source.command.is_empty() { return error(format!("Source {} needs an argv command.", source.id)); }
-            if source.preview.as_ref().is_some_and(Vec::is_empty) {
-                return error(format!("Source {} preview command cannot be empty.", source.id));
-            }
+            check_argv(&source.command, &format!("Source {} command", source.id))?;
+            if let Some(preview) = &source.preview { check_argv(preview, &format!("Source {} preview command", source.id))?; }
             if let Some(key) = &source.key {
                 if source.hidden { return error(format!("Hidden source {} cannot have a key.", source.id)); }
                 add_key(key, &mut keys)?;
@@ -138,7 +136,7 @@ impl MenuConfiguration {
         if let Some(initial) = self.initial_source.as_deref().filter(|id| !ids.contains(id)) {
             return error(format!("Unknown initialSource: {initial}"));
         }
-        if self.preview.as_ref().is_some_and(Vec::is_empty) { return error("Preview command cannot be empty."); }
+        if let Some(preview) = &self.preview { check_argv(preview, "Preview command")?; }
         let mut binding_ids = HashSet::new();
         for binding in &self.bindings {
             let key = &binding.key;
@@ -147,8 +145,8 @@ impl MenuConfiguration {
                 if id.is_empty() { return error(format!("Binding {key} has an empty ID.")); }
                 if !binding_ids.insert(id.as_str()) { return error(format!("Duplicate binding ID: {id}")); }
             }
-            if binding.action == BindingAction::Run && binding.command.as_ref().is_none_or(Vec::is_empty) {
-                return error(format!("Run binding {key} needs a command."));
+            if binding.action == BindingAction::Run {
+                check_argv(binding.command.as_deref().unwrap_or_default(), &format!("Run binding {key} command"))?;
             }
             if matches!(binding.action, BindingAction::Source | BindingAction::Push) {
                 match binding.source.as_deref() {
@@ -172,6 +170,13 @@ impl MenuConfiguration {
         }
         Ok(())
     }
+}
+
+/// The checks `command::run` makes on an argv, made at load so the error names its entry.
+fn check_argv(argv: &[String], what: &str) -> Result<(), ConfigurationError> {
+    if argv.first().is_none_or(String::is_empty) { return error(format!("{what} needs a program to run.")); }
+    if argv.iter().any(|a| a.contains('\0')) { return error(format!("{what} contains a NUL character.")); }
+    Ok(())
 }
 
 fn add_key(raw: &str, keys: &mut HashSet<KeyChord>) -> Result<(), ConfigurationError> {
@@ -375,6 +380,24 @@ mod tests {
              "Use the cmd, ctrl, alt, or shift modifiers in hyper+r."),
             (r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#.to_owned(),
              "Duplicate binding ID: x"),
+        ] {
+            assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
+        }
+    }
+
+    #[test]
+    fn commands_without_a_runnable_program_fail_at_load() {
+        let source = |field: &str| format!(r#"{{"sources":[{{"id":"a","label":"A",{field}}}]}}"#);
+        for (json, message) in [
+            (source(r#""command":[""]"#), "Source a command needs a program to run."),
+            (source(r#""command":[]"#), "Source a command needs a program to run."),
+            (source(r#""command":["echo","a\u0000b"]"#), "Source a command contains a NUL character."),
+            (source(r#""command":["echo"],"preview":[""]"#), "Source a preview command needs a program to run."),
+            (r#"{"preview":["","x"]}"#.to_owned(), "Preview command needs a program to run."),
+            (r#"{"bindings":[{"key":"ctrl+r","action":"run","command":[""]}]}"#.to_owned(),
+             "Run binding ctrl+r command needs a program to run."),
+            (r#"{"bindings":[{"key":"ctrl+r","action":"run"}]}"#.to_owned(),
+             "Run binding ctrl+r command needs a program to run."),
         ] {
             assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
         }
