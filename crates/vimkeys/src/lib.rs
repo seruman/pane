@@ -126,6 +126,8 @@ pub struct Vim<A = NoAction> {
     matches_hidden: bool,
     /// [`Vim::skip_blank_lines`].
     skip_blank: bool,
+    /// Lines Ctrl-D and Ctrl-U move: half of [`Vim::page_lines`].
+    half_page: usize,
     message: Option<String>,
 }
 
@@ -154,6 +156,7 @@ impl<A: Clone> Vim<A> {
             anchor_search: VimMode::Normal,
             matches_hidden: false,
             skip_blank: false,
+            half_page: 15,
             message: None,
         }
     }
@@ -163,6 +166,13 @@ impl<A: Clone> Vim<A> {
     /// lines only separate blocks and draw nothing, such as a rendered page.
     pub fn skip_blank_lines(mut self, on: bool) -> Self {
         self.skip_blank = on;
+        self
+    }
+
+    /// The page Ctrl-D and Ctrl-U move half of, in lines: the app's view of the text. Without
+    /// one they move 15 lines.
+    pub fn page_lines(mut self, lines: usize) -> Self {
+        self.half_page = (lines / 2).max(1);
         self
     }
 
@@ -240,6 +250,15 @@ impl<A: Clone> Vim<A> {
                 .into(),
                 self.keys.next(Table::Visual, &[], false),
             )),
+            // A count waits for what it counts: a motion, an operator, an action.
+            Pending::None if self.count.is_some() => {
+                let table = if self.visual() {
+                    Table::Visual
+                } else {
+                    Table::Normal
+                };
+                Some((typed, self.keys.next(table, &[], true)))
+            }
             Pending::None => None,
             Pending::Keys(keys) => {
                 let table = if self.visual() {
@@ -647,7 +666,7 @@ impl<A: Clone> Vim<A> {
             (Motion::Right, _) => ((cur + n).min(b.line_last(cur)), Kind::Exclusive),
             (Motion::Down | Motion::Up | Motion::HalfPageDown | Motion::HalfPageUp, _) => {
                 let step = if matches!(m, Motion::HalfPageDown | Motion::HalfPageUp) {
-                    15 * n
+                    self.half_page * n
                 } else {
                     n
                 };
@@ -874,7 +893,11 @@ impl<A: Clone> Vim<A> {
                         if count == 1 { "" } else { "s" }
                     )
                 } else {
-                    format!("{} characters yanked{what}", yanked.chars().count())
+                    let n = yanked.chars().count();
+                    format!(
+                        "{n} character{} yanked{what}",
+                        if n == 1 { "" } else { "s" }
+                    )
                 });
                 if source {
                     return VimEffect::CopySource {

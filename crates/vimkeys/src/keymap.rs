@@ -131,7 +131,7 @@ pub enum Motion {
     /// Down a line, keeping the column.
     Down,
     Up,
-    /// Down 15 lines (Ctrl-D).
+    /// Down half a page (Ctrl-D), which is half of [`Vim::page_lines`](crate::Vim::page_lines).
     HalfPageDown,
     HalfPageUp,
     WordForward,

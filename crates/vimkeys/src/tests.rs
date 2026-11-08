@@ -752,3 +752,62 @@ fn a_typed_backslash_b_is_searched_as_typed() {
     let found: Vec<usize> = v.matches(text).iter().map(|r| r.start).collect();
     assert_eq!(found, [0], "foobar as a whole word only");
 }
+
+#[test]
+fn a_one_character_yank_says_character() {
+    let mut v = Vim::default();
+    press(&mut v, "yl");
+    assert_eq!(v.message(), Some("1 character yanked"));
+    press(&mut v, "y2l");
+    assert_eq!(v.message(), Some("2 characters yanked"));
+}
+
+#[test]
+fn hints_show_what_a_count_can_take() {
+    let mut v = Vim::default();
+    press(&mut v, "3");
+    let (typed, groups) = v.hints().expect("a count is half typed");
+    assert_eq!(typed, "3");
+    assert!(
+        groups.iter().flatten().any(|h| h.keys == "w"),
+        "motions take a count"
+    );
+    assert!(
+        groups.iter().flatten().any(|h| h.keys == "y"),
+        "so do operators"
+    );
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
+    press(&mut v, "v3");
+    assert_eq!(v.hints().expect("in visual mode too").0, "3");
+}
+
+#[test]
+fn half_a_page_is_the_page_the_app_sets() {
+    let text: String = (0..100).map(|i| format!("line {i}\n")).collect();
+    let line = |v: &Vim| text[..v.cursor(&text).start].matches('\n').count();
+    let ctrl_d = |v: &mut Vim| {
+        v.key(
+            &KeyEvent {
+                key: Key::Command('d'),
+                mods: Mods {
+                    ctrl: true,
+                    cmd: true,
+                    ..Mods::default()
+                },
+            },
+            &text,
+        );
+    };
+    let mut v = Vim::default();
+    ctrl_d(&mut v);
+    assert_eq!(line(&v), 15, "without a page height, 15 lines as before");
+    let mut v = Vim::default().page_lines(40);
+    ctrl_d(&mut v);
+    assert_eq!(line(&v), 20, "half of 40");
+}
