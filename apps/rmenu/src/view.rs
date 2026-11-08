@@ -109,11 +109,7 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
     };
     let mut line = row().h(QUERY_H).pl(5.0).pr(9.0).gap(6.0).center_y().radius(9.0).fill(c.input);
     if let Some(chip) = chip { line = line.child(chip); } else { line = line.pl(9.0); }
-    let mut field_row = line.child(field);
-    if menu.model.loading() {
-        field_row = field_row.child(text("…").font(SMALL).color(c.secondary));
-    }
-    el().w_full().padding(8.0).pb(5.0).child(field_row.w_full())
+    el().w_full().padding(8.0).pb(5.0).child(line.child(field).w_full())
 }
 
 fn source_strip(menu: &Menu, c: &Palette) -> El {
