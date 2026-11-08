@@ -1,6 +1,6 @@
 # rmenu
 
-mmenu's command line, drawn by [Rune](../worktrees/github.com/seruman/rune/rmenu-base) inside the
+mmenu's command line, drawn by Rune (its `terminal-shell` branch, a path dependency in `Cargo.toml`) inside the
 terminal (kitty graphics), so pickers work wherever a pty reaches: a remote host, a Rex floating
 layer, SSH.
 
@@ -23,3 +23,6 @@ Differences:
 Layout: `crates/core` holds the model (a reducer: events in, effects out), config, records,
 commands and search; `crates/rmenu` holds the CLI, the host that runs effects on threads, and
 the view.
+
+`examples/repos/run.sh` is a fuller example: your ghq repositories with a Worktrees level
+(Ctrl-W), a git preview (Alt-P) and marks (Tab). It needs `ghq` and `git`.
