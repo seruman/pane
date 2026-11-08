@@ -127,9 +127,19 @@ impl Cli {
     }
 }
 
+/// mmenu configs load unchanged, but their cmd chords are dead keys here.
+fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
+    configuration.command_chords()
+        .map(|raw| format!("{raw} can't fire because a terminal never sends Command. Bind it with ctrl+ instead."))
+        .collect()
+}
+
 /// Parses the process's argv; prints help, version and usage errors and exits as clap does.
+/// Prints a warning on stderr for each cmd chord.
 pub fn parse() -> Result<Launch, String> {
-    Cli::parse().launch(std::io::stdin().is_terminal())
+    let launch = Cli::parse().launch(std::io::stdin().is_terminal())?;
+    for warning in warnings(&launch.options.configuration) { eprintln!("rmenu: {warning}"); }
+    Ok(launch)
 }
 
 #[cfg(test)]
@@ -189,6 +199,13 @@ mod tests {
         assert_eq!(format!("{:?}", with.options), format!("{:?}", without.options));
         assert_eq!(with.appearance, without.appearance);
         assert!(parse(&["--width=9999"]).is_ok(), "any value, as mmenu callers may pass one rmenu has no range for");
+    }
+
+    #[test]
+    fn each_cmd_chord_gets_a_warning_that_names_it() {
+        let config: MenuConfiguration = serde_json::from_str(
+            r#"{"bindings":[{"key":"cmd+e","action":"accept"},{"key":"ctrl+d","action":"copy"}]}"#).unwrap();
+        assert_eq!(warnings(&config), ["cmd+e can't fire because a terminal never sends Command. Bind it with ctrl+ instead."]);
     }
 
     #[test]

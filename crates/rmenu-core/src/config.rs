@@ -87,8 +87,7 @@ impl std::error::Error for ConfigurationError {}
 
 fn error<T>(message: impl Into<String>) -> Result<T, ConfigurationError> { Err(ConfigurationError(message.into())) }
 
-/// A key and its modifiers. `cmd` parses and validates as in mmenu, but a terminal never
-/// delivers Command, so a cmd chord can't fire in rmenu (see README).
+/// A key and its modifiers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyChord {
     /// Lowercased: one character, or enter/escape/tab/up/down/space.
@@ -115,6 +114,12 @@ impl MenuConfiguration {
     /// push targets, so a config with only hidden sources still reads stdin.
     pub fn root_source(&self) -> Option<&str> {
         self.initial_source.as_deref().or_else(|| self.sources.iter().find(|s| !s.hidden).map(|s| s.id.as_str()))
+    }
+
+    /// Source and binding keys, as written, that hold `cmd`. Call after `validate`.
+    pub fn command_chords(&self) -> impl Iterator<Item = &str> {
+        self.sources.iter().filter_map(|s| s.key.as_deref()).chain(self.bindings.iter().map(|b| b.key.as_str()))
+            .filter(|raw| KeyChord::parse(raw).is_ok_and(|chord| chord.command))
     }
 
     pub fn validate(&self) -> Result<(), ConfigurationError> {
@@ -401,6 +406,14 @@ mod tests {
         ] {
             assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
         }
+    }
+
+    #[test]
+    fn command_chords_are_listed_once_each() {
+        let config = parse(r#"{"sources":[{"id":"a","label":"A","key":"cmd+1","command":["echo"]},{"id":"b","label":"B","key":"ctrl+2","command":["echo"]}],
+            "bindings":[{"key":"Shift+Cmd+R","action":"accept"},{"key":"ctrl+e","action":"accept"},{"key":"cmd+e","action":"copy"}]}"#);
+        config.validate().unwrap();
+        assert_eq!(config.command_chords().collect::<Vec<_>>(), ["cmd+1", "Shift+Cmd+R", "cmd+e"]);
     }
 
     #[test]
