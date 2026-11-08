@@ -103,7 +103,7 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
     let mut line = row().h(QUERY_H).pl(5.0).pr(9.0).gap(6.0).center_y().radius(9.0).fill(c.input);
     if let Some(chip) = chip { line = line.child(chip); } else { line = line.pl(9.0); }
     let mut field_row = line.child(field);
-    if menu.model.loading() || menu.model.is_searching() {
+    if menu.model.loading() {
         field_row = field_row.child(text("…").font(SMALL).color(c.secondary));
     }
     el().w_full().padding(8.0).pb(5.0).child(field_row.w_full())
@@ -143,7 +143,9 @@ fn results(menu: &Menu, c: &Palette) -> El {
         return col().grow(1.0).pt(28.0).items_center().child(text(message).font(TITLE).color(color));
     }
     let c = *c;
-    let stale = model.is_stale();
+    // Dim only rows from another source still being replaced; a query's search in flight
+    // keeps the last results as they look, or every keystroke would flash.
+    let stale = !model.can_navigate();
     let rows = col().key("rows").w_full().items_stretch().growth(GrowthSpec::default())
         .virtual_rows(count, ROW_H,
             |m: &Menu, i| Cow::Owned(m.model.result(i).id.clone()),
@@ -199,7 +201,6 @@ fn footer(menu: &Menu, c: &Palette) -> El {
     let model = &menu.model;
     let status = match model.message() {
         Some(message) => message.to_owned(),
-        None if model.is_searching() => "Searching…".to_owned(),
         None => {
             let marked = model.chosen().into_iter().filter(|i| model.is_marked(i)).count();
             let mut s = format!("{} {}", model.result_count(), if model.result_count() == 1 { "result" } else { "results" });
@@ -209,7 +210,8 @@ fn footer(menu: &Menu, c: &Palette) -> El {
         }
     };
     let failed = model.input_failed() || model.message().is_some_and(|m| m.starts_with("Command") || m.starts_with("Cannot"));
-    let can_act = model.can_act() && !model.running_operation();
+    // Enter during a search is queued by the model, so Choose stays lit while one runs.
+    let can_act = model.can_navigate() && !model.running_operation();
     let mut bar = row().h(FOOTER_H).w_full().px(14.0).gap(14.0).center_y()
         .child(keycap_button(if model.depth() > 0 { "Back" } else { "" }, "Esc", true, c)
             .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Back), tx)))
