@@ -21,6 +21,10 @@ pub use keymap::{
     Command, Find, Hint, Keymap, Motion, NoAction, Object, Operator, Stroke, Table, hint,
 };
 
+/// The largest count Vim takes, as Vim caps its own. A motion repeats once per count, so a
+/// larger one would only spin, and two multiplied could overflow.
+const MAX_COUNT: usize = 99_999;
+
 /// What [`Vim`] is doing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VimMode {
@@ -370,7 +374,7 @@ impl<A: Clone> Vim<A> {
                 || matches!(&self.pending, Pending::Operator { typed, .. } if typed.is_empty());
             if between && (c != '0' || self.count.is_some()) {
                 let digit = c as usize - '0' as usize;
-                self.count = Some(self.count.unwrap_or(0) * 10 + digit);
+                self.count = Some((self.count.unwrap_or(0) * 10 + digit).min(MAX_COUNT));
                 return Some(VimEffect::Moved);
             }
         }
@@ -572,7 +576,7 @@ impl<A: Clone> Vim<A> {
     /// The count for a motion, times the operator's: `2y3w` moves six words.
     fn motion_count(&mut self, op_count: Option<usize>) -> usize {
         self.count_was = self.count;
-        let n = self.count.take().unwrap_or(1) * op_count.unwrap_or(1);
+        let n = (self.count.take().unwrap_or(1) * op_count.unwrap_or(1)).min(MAX_COUNT);
         n.max(1)
     }
 
@@ -824,7 +828,7 @@ impl<A: Clone> Vim<A> {
         text: &str,
         b: &Buf,
     ) -> VimEffect<A> {
-        let n = (count.unwrap_or(1) * self.count.take().unwrap_or(1)).max(1);
+        let n = (count.unwrap_or(1) * self.count.take().unwrap_or(1)).clamp(1, MAX_COUNT);
         self.reset_pending();
         let cur = b.index(self.cursor);
         let first = b.line_start(cur);

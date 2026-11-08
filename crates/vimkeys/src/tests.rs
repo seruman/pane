@@ -578,3 +578,18 @@ fn a_leader_vim_already_uses_panics() {
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None)
         .leader(Stroke::Char(','));
 }
+
+#[test]
+fn a_huge_count_neither_panics_nor_hangs() {
+    let mut v = Vim::default();
+    let start = std::time::Instant::now();
+    press(&mut v, &"9".repeat(25));
+    press(&mut v, "w");
+    assert_eq!(v.cursor(TEXT), TEXT.len() - 1..TEXT.len(), "a count past the end stops on the last character");
+    press(&mut v, "gg");
+    press(&mut v, &"9".repeat(25));
+    press(&mut v, "y");
+    press(&mut v, &"9".repeat(25));
+    assert_eq!(yanked(press(&mut v, "j")), format!("{TEXT}\n"), "a count past the end yanks to the last line");
+    assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+}
