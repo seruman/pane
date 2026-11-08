@@ -25,7 +25,7 @@ fn main() {
         setup: Some(Menu::setup),
         poll: Some(|m: &mut Menu, _, tx: &mut Tx| m.poll(tx)),
         on_key: Some(view::key),
-        ..AppSpec::new("rmenu", (launch.width, 400.0), || unreachable!("init is given"), view::view)
+        ..AppSpec::new("rmenu", (640.0, 400.0), || unreachable!("init is given"), view::view)
     };
     let started = App::new(spec)
         .init(move || Menu::new(launch))

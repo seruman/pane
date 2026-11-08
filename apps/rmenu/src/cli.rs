@@ -59,9 +59,10 @@ pub struct Cli {
     /// Initial query.
     #[arg(long, allow_hyphen_values = true, default_value = "")]
     pub query: String,
-    /// List width in points.
-    #[arg(long, default_value_t = 520, value_parser = clap::value_parser!(u16).range(320..=1000))]
-    pub width: u16,
+    /// mmenu's panel width. The terminal decides rmenu's size, so it's accepted and ignored,
+    /// letting mmenu's callers run rmenu unchanged.
+    #[arg(long, hide = true)]
+    pub width: Option<String>,
     /// Visible rows.
     #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u8).range(4..=30))]
     pub rows: u8,
@@ -81,7 +82,6 @@ pub struct Cli {
 pub struct Launch {
     pub options: Options,
     pub appearance: Appearance,
-    pub width: f32,
 }
 
 impl Cli {
@@ -123,7 +123,6 @@ impl Cli {
                 list_cap: crate::view::LIST_CAP,
             },
             appearance: self.appearance,
-            width: f32::from(self.width),
         })
     }
 }
@@ -148,7 +147,6 @@ mod tests {
             assert_eq!(cli.query, text);
             assert_eq!(cli.prompt.as_deref(), Some(text));
             assert!(cli.json);
-            assert_eq!(cli.width, 720);
         }
     }
 
@@ -169,7 +167,7 @@ mod tests {
 
     #[test]
     fn out_of_range_and_conflicting_flags_are_usage_errors() {
-        for argv in [&["--width", "319"][..], &["--width", "1001"], &["--rows", "3"], &["--rows", "31"],
+        for argv in [&["--rows", "3"][..], &["--rows", "31"],
                      &["--json", "--print0"], &["--appearance", "sepia"], &["--theme", "warm"], &["--input", "xml"]] {
             let error = parse(argv).unwrap_err();
             assert_eq!(error.exit_code(), 2, "{argv:?}");
@@ -181,7 +179,16 @@ mod tests {
         let launch = parse(&[]).unwrap().launch(false).unwrap();
         let o = &launch.options;
         assert_eq!((o.prompt.as_str(), o.query.as_str(), o.rows, o.sorted, o.multi), (">", "", 12, true, false));
-        assert_eq!((o.input, launch.width, launch.appearance), (InputFormat::Lines, 520.0, Appearance::System));
+        assert_eq!((o.input, launch.appearance), (InputFormat::Lines, Appearance::System));
+    }
+
+    #[test]
+    fn mmenu_width_is_accepted_and_changes_nothing() {
+        let with = parse(&["--width", "720"]).unwrap().launch(false).unwrap();
+        let without = parse(&[]).unwrap().launch(false).unwrap();
+        assert_eq!(format!("{:?}", with.options), format!("{:?}", without.options));
+        assert_eq!(with.appearance, without.appearance);
+        assert!(parse(&["--width=9999"]).is_ok(), "any value, as mmenu callers may pass one rmenu has no range for");
     }
 
     #[test]
