@@ -302,8 +302,18 @@ fn buttons(s: &State, theme: &Theme) -> El {
                 })
                 .build("stop", theme),
         )
-        .child(Button::new("Logs").gray().build("logs", theme))
-        .child(Button::new("Help").plain().build("help", theme))
+        .child(
+            Button::new("Logs")
+                .gray()
+                .on_press(|s: &mut State| s.toast = Some("Logs".into()))
+                .build("logs", theme),
+        )
+        .child(
+            Button::new("Help")
+                .plain()
+                .on_press(|s: &mut State| s.toast = Some("Help".into()))
+                .build("help", theme),
+        )
         .child(
             Button::new("Delete")
                 .destructive()
@@ -316,17 +326,20 @@ fn buttons(s: &State, theme: &Theme) -> El {
                 .child(
                     Button::icon_only(&icons::REFRESH_CW, "Refresh")
                         .plain()
+                        .on_press(|s: &mut State| s.toast = Some("Refresh".into()))
                         .build("refresh", theme),
                 )
                 .child(
                     Button::icon_only(&icons::COLUMNS_2, "Split")
                         .plain()
+                        .on_press(|s: &mut State| s.toast = Some("Split".into()))
                         .build("split", theme),
                 )
                 .child(
                     Button::icon_only(&icons::ELLIPSIS, "More")
                         .plain()
                         .small()
+                        .on_press(|s: &mut State| s.toast = Some("More".into()))
                         .build("more", theme),
                 ),
         );
@@ -414,17 +427,7 @@ fn files(s: &State, theme: &Theme) -> El {
             let mut row = ListRow::new(*name)
                 .detail(*detail)
                 .selected(s.file == Some(i))
-                .leading(
-                    icon(
-                        if name.ends_with(".md") {
-                            &icons::FILE_TEXT
-                        } else {
-                            &icons::FILE
-                        },
-                        16.0,
-                    )
-                    .color(theme.text_secondary),
-                )
+                .leading(icon(file_icon(name), 16.0).color(theme.text_secondary))
                 .on_press(move |s: &mut State| s.file = Some(i));
             if *changed {
                 row = row.trailing(Badge::new("M").tone(Tone::Warning).build(theme));
@@ -622,4 +625,42 @@ fn section(head: El, content: El) -> El {
 /// A row of controls that wraps onto more lines when narrow.
 fn cluster(gap: f32) -> El {
     row().flex_wrap().center_y().gaps(gap, gap)
+}
+
+/// The icon for a file: text for Markdown, a plain page for the rest.
+fn file_icon(name: &str) -> &'static rune::Icon {
+    let markdown = std::path::Path::new(name)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if markdown {
+        &icons::FILE_TEXT
+    } else {
+        &icons::FILE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rune::{Env, Runtime};
+
+    #[test]
+    fn every_button_answers_a_press() {
+        for key in ["logs", "help", "refresh", "split", "more"] {
+            let mut rt = Runtime::new(State::default(), view, (900.0, 900.0), Env::default());
+            rt.frame(0.0);
+            let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no {key}"));
+            rt.pointer_down(x, y);
+            rt.pointer_up(x, y);
+            rt.frame(1.0 / 60.0);
+            assert!(rt.state.toast.is_some(), "{key} shows a toast");
+        }
+    }
+
+    #[test]
+    fn markdown_files_get_the_text_icon_whatever_their_case() {
+        assert!(std::ptr::eq(file_icon("README.md"), &icons::FILE_TEXT));
+        assert!(std::ptr::eq(file_icon("NOTES.MD"), &icons::FILE_TEXT));
+        assert!(std::ptr::eq(file_icon("main.rs"), &icons::FILE));
+    }
 }
