@@ -1,7 +1,16 @@
 #!/bin/sh
-cd "$MMENU_VALUE" 2>/dev/null || exit 0
-echo "$(git branch --show-current 2>/dev/null)  $(git log -1 --format='%h %s (%cr)' 2>/dev/null)"
+set -e
+cd "$MMENU_VALUE"
+# Assignments, so set -e sees a failing git. A substitution inside echo would hide it.
+branch=$(git branch --show-current)
+last=$(git log -1 --format='%h %s (%cr)')
+echo "$branch  $last"
 echo
-git log --oneline -8 2>/dev/null
+git log --oneline -8
 echo
-r=$(ls README* readme* 2>/dev/null | head -1); [ -n "$r" ] && head -40 "$r"
+for readme in README* readme*; do
+	if [ -f "$readme" ]; then
+		head -40 "$readme"
+		break
+	fi
+done
