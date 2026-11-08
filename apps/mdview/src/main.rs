@@ -12,6 +12,7 @@
 //! `*` and `#`; Escape hides the matches. Ctrl-D and Ctrl-U page. Space on a task's line ticks
 //! it, and with a file open writes it back. Hover a code block for its copy button.
 
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use pane_ui::{Badge, Button, Theme, icons, kbd};
@@ -30,6 +31,7 @@ enum Act {
     Tick,
 }
 
+#[derive(Clone)]
 struct Doc {
     path: Option<String>,
     source: String,
@@ -38,13 +40,28 @@ struct Doc {
     copied: Option<(usize, Instant)>,
 }
 
+/// The document `main` opened before the app starts, so a file it can't read is an error in
+/// the shell rather than the sample shown under its name.
+static OPENED: OnceLock<Doc> = OnceLock::new();
+
 impl Default for Doc {
     fn default() -> Self {
-        let path = rune::extra_args().first().cloned();
-        let source = path
-            .as_deref()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .unwrap_or_else(|| SAMPLE.to_owned());
+        OPENED.get().cloned().unwrap_or_else(|| Doc::with_source(None, SAMPLE.to_owned()))
+    }
+}
+
+impl Doc {
+    /// The file at `path`, or the sample when there is none. A file that can't be read is an
+    /// error.
+    fn open(path: Option<String>) -> Result<Doc, String> {
+        let source = match &path {
+            Some(p) => std::fs::read_to_string(p).map_err(|e| format!("could not read {p}: {e}"))?,
+            None => SAMPLE.to_owned(),
+        };
+        Ok(Doc::with_source(path, source))
+    }
+
+    fn with_source(path: Option<String>, source: String) -> Doc {
         Doc {
             path,
             source,
@@ -392,6 +409,17 @@ fn poll(s: &mut Doc, _: f64, tx: &mut Tx) -> bool {
 }
 
 fn main() {
+    match Doc::open(rune::extra_args().first().cloned()) {
+        Ok(doc) => {
+            if OPENED.set(doc).is_err() {
+                unreachable!("main opens the document once");
+            }
+        }
+        Err(e) => {
+            eprintln!("mdview: {e}");
+            std::process::exit(1);
+        }
+    }
     rune::run(AppSpec::<Doc> {
         scenes: &[
             ("visual", |s| {
@@ -438,6 +466,23 @@ mod tests {
         let page = RenderedText::new(SRC);
         let at = page.text().find(text).expect("drawn");
         source_of(SRC, &page, at..at + text.len(), linewise)
+    }
+
+    #[test]
+    fn an_unreadable_file_is_an_error_not_the_sample() {
+        let dir = std::env::temp_dir().join(format!("mdview-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing.md");
+        let missing_path = missing.to_str().unwrap().to_owned();
+        assert!(Doc::open(Some(missing_path.clone())).is_err(), "a missing file is an error");
+        assert!(!missing.exists(), "and nothing is written to its path");
+
+        let real = dir.join("plan.md");
+        std::fs::write(&real, "- [ ] one\n").unwrap();
+        let doc = Doc::open(Some(real.to_str().unwrap().to_owned())).unwrap();
+        assert_eq!(doc.source, "- [ ] one\n");
+        assert_eq!(Doc::open(None).unwrap().source, SAMPLE, "no file shows the sample");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
