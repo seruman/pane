@@ -41,6 +41,8 @@ const SAMPLE: &str = include_str!("sample.md");
 /// taken over, so a bad path is an error in the shell rather than a page.
 struct Input {
     title: String,
+    /// The path, for the feedback's title; `None` for stdin and the sample.
+    name: Option<String>,
     source: String,
     out: Option<String>,
 }
@@ -75,6 +77,9 @@ enum Side {
 
 struct App_ {
     title: String,
+    /// The document's name for the feedback's title: the path given, or `None` for stdin and
+    /// the sample.
+    name: Option<String>,
     /// Where the feedback goes: a file, or stdout when `None`.
     out: Option<String>,
     source: String,
@@ -99,14 +104,17 @@ struct App_ {
 
 impl Default for App_ {
     fn default() -> Self {
-        let input = INPUT.get_or_init(|| Input { title: "sample.md".into(), source: SAMPLE.into(), out: None });
-        App_::new(input.title.clone(), input.source.clone(), input.out.clone())
+        let input = INPUT.get_or_init(|| Input { title: "sample.md".into(), name: None, source: SAMPLE.into(), out: None });
+        let mut app = App_::new(input.title.clone(), input.source.clone(), input.out.clone());
+        app.name = input.name.clone();
+        app
     }
 }
 
 impl App_ {
     fn new(title: String, source: String, out: Option<String>) -> Self {
         App_ {
+            name: None,
             title,
             out,
             page: Page::new(&source),
@@ -219,7 +227,7 @@ impl App_ {
         if !self.send {
             return None;
         }
-        self.review.feedback(&self.source, &self.page)
+        self.review.feedback(&self.source, &self.page, self.name.as_deref())
     }
 
     /// Runs a `:` command.
@@ -944,7 +952,8 @@ fn read_input() -> Input {
         },
         None => ("sample.md".to_owned(), SAMPLE.to_owned()),
     };
-    Input { title, source, out }
+    let name = path.filter(|p| p != "-");
+    Input { title, name, source, out }
 }
 
 fn fail(message: &str) -> ! {

@@ -48,22 +48,55 @@ fn feedback_quotes_and_numbers_in_document_order() {
     let s = app(SRC);
     let mut review = Review::default();
     review.add(Comment { kind: Kind::Remove, range: Some(range(&s, "let x = 1;")), body: String::new() });
-    review.add(Comment::on(range(&s, "bold phrase"), "Why bold?\nSay it plainly."));
+    review.add(Comment::on(range(&s, "phrase and"), "Why bold?\nSay it plainly."));
     review.add(Comment { kind: Kind::Label(1), range: Some(range(&s, "one\ntwo")), body: String::new() });
+    review.add(Comment::on(range(&s, "Title"), "Too short."));
     review.add(Comment::general("Fine overall."));
     review.add(Comment::general("One more thing."));
     assert_eq!(review.comments[1].body, "One more thing.", "general comments first, in the order written");
-    let out = review.feedback(&s.source, &s.page).unwrap();
+    let out = review.feedback(&s.source, &s.page, Some("PLAN.md")).unwrap();
     assert_eq!(
         out,
-        "# Review feedback\n\n## General\n\n> Fine overall.\n\n> One more thing.\n\n\
-         I've reviewed this document and have 3 pieces of feedback:\n\n\
-         ## 1. (line 3) Comment\n\nOn: \"bold phrase\"\n\n> Why bold?\n> Say it plainly.\n\n\
-         ## 2. (lines 5–6) Verify this\n\n```markdown\n- one\n- two\n```\n\n\
+        "# Review of `PLAN.md`\n\n## General\n\n> Fine overall.\n\n> One more thing.\n\n\
+         I've reviewed `PLAN.md` and have 4 pieces of feedback:\n\n\
+         ## 1. Comment (line 1)\n\nOn `Title`\n\n> Too short.\n\n\
+         ## 2. Comment (line 3, under `Title`)\n\n\
+         On `phrase and`, written as:\n\n```markdown\nphrase** and\n```\n\n\
+         > Why bold?\n> Say it plainly.\n\n\
+         ## 3. Verify this (lines 5–6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\n\
          This seems like an assumption. Verify it by reading the actual code before going on.\n\n\
-         ## 3. (line 9) Remove this\n\nOn: \"let x = 1;\"\n\nI don't want this in the document.\n"
+         ## 4. Remove this (line 9, under `Title`)\n\n```markdown\nlet x = 1;\n```\n\n\
+         I don't want this in the document.\n"
     );
-    assert_eq!(Review::default().feedback(&s.source, &s.page), None, "nothing to send");
+    assert_eq!(Review::default().feedback(&s.source, &s.page, None), None, "nothing to send");
+}
+
+#[test]
+fn feedback_names_the_nearest_section_and_quotes_safely() {
+    let src = "Intro line.\n\n## Setup\n\nRun `make \"all\"` first.\n\n### Detail\n\nA ``tick` `` here.\n\n## Next\n\nPlain words.\n";
+    let s = app(src);
+    let mut review = Review::default();
+    review.add(Comment::on(range(&s, "Intro line."), "a"));
+    review.add(Comment::on(range(&s, "Run make \"all\" first."), "b"));
+    review.add(Comment::on(range(&s, "tick`"), "c"));
+    review.add(Comment::on(range(&s, "Plain words."), "d"));
+    let out = review.feedback(&s.source, &s.page, None).unwrap();
+    assert!(out.starts_with("# Review\n\nI've reviewed the document and have 4"), "{out}");
+    assert!(out.contains("## 1. Comment (line 1)\n\nOn `Intro line.`\n"), "no section before the first heading:\n{out}");
+    assert!(
+        out.contains("## 2. Comment (line 5, under `Setup`)\n\nOn `Run make \"all\" first.`, written as:\n\n```markdown\nRun `make \"all\"` first.\n```"),
+        "quotes inside stay as they are, and the source shows its backticks:\n{out}"
+    );
+    assert!(out.contains("(line 9, under `Detail`)\n\nOn `` tick` ``\n"), "a backtick in the quote:\n{out}");
+    assert!(out.contains("## 4. Comment (line 13, under `Next`)\n\nOn `Plain words.`\n"), "{out}");
+    assert_eq!(review::inline_code("a ``b`` c"), "```a ``b`` c```");
+
+    // Removing a whole list item quotes its source line, marker and all.
+    let s = app("## Later\n\n- Sharing by link\n- Replies\n");
+    let mut review = Review::default();
+    review.add(Comment { kind: Kind::Remove, range: Some(range(&s, "Sharing by link")), body: String::new() });
+    let out = review.feedback(&s.source, &s.page, None).unwrap();
+    assert!(out.contains("```markdown\n- Sharing by link\n```"), "{out}");
 }
 
 #[test]

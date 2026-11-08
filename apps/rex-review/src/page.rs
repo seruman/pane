@@ -50,6 +50,8 @@ pub struct Block {
     rendered: RenderedText,
     /// Where its text starts in [`Page::text`].
     pub text_at: usize,
+    /// A heading's level (1–6); `None` for any other block.
+    pub heading: Option<u8>,
     /// The space above it on the page.
     pub top: f32,
 }
@@ -118,7 +120,11 @@ impl Page {
             }
             let text_at = page.text.len();
             page.text.push_str(rendered.text());
-            page.blocks.push(Block { src, markdown, rendered, text_at, top });
+            let heading = match kind {
+                BlockKind::Heading(level) => Some(level),
+                _ => None,
+            };
+            page.blocks.push(Block { src, markdown, rendered, text_at, heading, top });
         }
         page
     }
@@ -158,6 +164,16 @@ impl Page {
                 (lo < hi).then(|| lo - src.start..hi - src.start)
             })
             .collect()
+    }
+
+    /// The heading of the section block `index` is in: the nearest heading at or before it,
+    /// as drawn. `None` before the first heading.
+    pub fn section(&self, index: usize) -> Option<&str> {
+        self.blocks[..=index.min(self.blocks.len().saturating_sub(1))]
+            .iter()
+            .rev()
+            .find(|b| b.heading.is_some())
+            .map(|b| b.rendered.text())
     }
 
     /// The block whose text holds byte `at` of [`Self::text`], or the last one before it.

@@ -151,13 +151,19 @@ impl Review {
     }
 
     /// The review as Markdown feedback: the general comments, then each comment on the page in
-    /// document order with the lines it's on and what it quotes. `None` when there's nothing to
-    /// send.
-    pub fn feedback(&self, source: &str, page: &Page) -> Option<String> {
+    /// document order. Each says where it is (its lines, and the section's heading, which still
+    /// finds it once the lines have moved) and what it's about: the text as drawn, or the
+    /// Markdown source where that differs, and always for a removal, so it can be found and
+    /// cut as written. `name` is the document's, for the title; `None` for one read from stdin.
+    /// `None` when there's nothing to send.
+    pub fn feedback(&self, source: &str, page: &Page, name: Option<&str>) -> Option<String> {
         if self.is_empty() {
             return None;
         }
-        let mut out = String::from("# Review feedback\n\n");
+        let mut out = match name {
+            Some(name) => format!("# Review of {}\n\n", inline_code(name)),
+            None => "# Review\n\n".to_owned(),
+        };
         let general: Vec<&str> = self
             .comments
             .iter()
@@ -176,32 +182,55 @@ impl Review {
         let n = anchored.len();
         if n > 0 {
             out.push_str(&format!(
-                "I've reviewed this document and have {n} piece{} of feedback:\n\n",
+                "I've reviewed {} and have {n} piece{} of feedback:\n\n",
+                name.map_or("the document".to_owned(), inline_code),
                 if n == 1 { "" } else { "s" }
             ));
         }
         for (number, (i, range)) in anchored.into_iter().enumerate() {
             let c = &self.comments[i];
             let ranges = page.source_ranges(range.clone());
-            let lines = match lines_of(source, &ranges) {
-                Some((a, b)) if a == b => format!("(line {a}) "),
-                Some((a, b)) => format!("(lines {a}–{b}) "),
-                None => String::new(),
-            };
-            let text = page.text().get(range).unwrap_or_default().trim();
-            out.push_str(&format!("## {}. {lines}", number + 1));
-            match c.kind {
-                Kind::Comment => out.push_str("Comment\n\n"),
-                Kind::Remove => out.push_str("Remove this\n\n"),
-                Kind::Label(l) => out.push_str(&format!("{}\n\n", LABELS[l].text)),
+            let mut place = Vec::new();
+            match lines_of(source, &ranges) {
+                Some((a, b)) if a == b => place.push(format!("line {a}")),
+                Some((a, b)) => place.push(format!("lines {a}–{b}")),
+                None => {}
             }
-            // A quote of more than a line reads better as the Markdown it came from.
-            if text.contains('\n') {
-                let md = source_of(source, &ranges, true);
-                let fence = if md.contains("```") { "````" } else { "```" };
-                out.push_str(&format!("{fence}markdown\n{}\n{fence}\n\n", md.trim_end()));
+            // The section the comment starts in, unless it's on that heading itself.
+            let block = page.block_at(range.start);
+            if page.blocks[block].heading.is_none()
+                && let Some(section) = page.section(block)
+            {
+                place.push(format!("under {}", inline_code(section)));
+            }
+            let title = match c.kind {
+                Kind::Comment => "Comment",
+                Kind::Remove => "Remove this",
+                Kind::Label(l) => LABELS[l].text,
+            };
+            out.push_str(&format!("## {}. {title}", number + 1));
+            if !place.is_empty() {
+                out.push_str(&format!(" ({})", place.join(", ")));
+            }
+            out.push_str("\n\n");
+
+            let full = page.text();
+            // Whole lines of the page (a `V` selection, `cc`, `dd`) quote whole source lines,
+            // with the list marker or heading hashes on them.
+            let whole_lines = (range.start == 0 || full[..range.start].ends_with('\n'))
+                && (range.end >= full.len() || full[range.end..].starts_with('\n'));
+            let text = full.get(range).unwrap_or_default().trim();
+            if text.contains('\n') || (whole_lines && c.kind == Kind::Remove) {
+                // More than a line reads best as the Markdown it came from, whole lines of it.
+                out.push_str(&fenced("markdown", source_of(source, &ranges, true).trim_end()));
             } else {
-                out.push_str(&format!("On: \"{text}\"\n\n"));
+                let md = source_of(source, &ranges, false);
+                if c.kind == Kind::Remove || md.trim() != text {
+                    out.push_str(&format!("On {}, written as:\n\n", inline_code(text)));
+                    out.push_str(&fenced("markdown", md.trim()));
+                } else {
+                    out.push_str(&format!("On {}\n\n", inline_code(text)));
+                }
             }
             if let Kind::Label(l) = c.kind
                 && let Some(tip) = LABELS[l].tip
@@ -219,6 +248,27 @@ impl Review {
         }
         Some(format!("{}\n", out.trim_end()))
     }
+}
+
+/// The longest run of backticks in `text`.
+fn longest_backticks(text: &str) -> usize {
+    text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
+}
+
+/// `text` as inline code, whatever it holds: the backticks around it outnumber any run inside,
+/// and a space pads a backtick at either end, as CommonMark reads code spans. Newlines become
+/// spaces.
+pub fn inline_code(text: &str) -> String {
+    let text = text.replace('\n', " ");
+    let ticks = "`".repeat(longest_backticks(&text) + 1);
+    let pad = if text.starts_with('`') || text.ends_with('`') { " " } else { "" };
+    format!("{ticks}{pad}{text}{pad}{ticks}")
+}
+
+/// `text` in a fenced code block whose fence no line inside can close.
+fn fenced(lang: &str, text: &str) -> String {
+    let fence = "`".repeat(longest_backticks(text).max(2) + 1);
+    format!("{fence}{lang}\n{text}\n{fence}\n\n")
 }
 
 /// `text` as a Markdown quote, every line of it.
