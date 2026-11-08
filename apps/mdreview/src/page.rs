@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rune_kit::markdown::RenderedText;
 
 /// What a top-level block is, for the space around it.
@@ -20,6 +20,8 @@ pub enum BlockKind {
     Quote,
     Rule,
     Table,
+    /// A paragraph that holds only an image, which rune-kit draws as an image block.
+    Image,
 }
 
 impl BlockKind {
@@ -35,6 +37,7 @@ impl BlockKind {
             BlockKind::Quote => (16.0, 16.0),
             BlockKind::Rule => (32.0, 32.0),
             BlockKind::Table => (12.0, 16.0),
+            BlockKind::Image => (24.0, 24.0),
         }
     }
 }
@@ -75,11 +78,32 @@ impl Page {
             Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
         let mut found: Vec<(BlockKind, Range<usize>)> = Vec::new();
         let mut depth = 0usize;
+        // Whether the top-level paragraph being read holds only an image so far.
+        let mut only_image = None;
         let mut events = Parser::new_ext(source, options).into_offset_iter();
         for (event, range) in events.by_ref() {
+            if depth == 1 && let Some(only) = &mut only_image {
+                let fits = match &event {
+                    Event::Start(Tag::Image { .. }) | Event::End(TagEnd::Image) => true,
+                    Event::End(TagEnd::Paragraph) => *only,
+                    Event::Text(t) | Event::Code(t) => t.trim().is_empty(),
+                    Event::SoftBreak | Event::HardBreak => true,
+                    _ => false,
+                };
+                *only = fits && (*only || matches!(event, Event::Start(Tag::Image { .. })));
+                if matches!(event, Event::End(TagEnd::Paragraph))
+                    && only_image.take() == Some(true)
+                    && let Some(last) = found.last_mut()
+                {
+                    last.0 = BlockKind::Image;
+                }
+            }
             match event {
                 Event::Start(tag) => {
                     if depth == 0 {
+                        if matches!(tag, Tag::Paragraph) {
+                            only_image = Some(false);
+                        }
                         found.push((kind_of(&tag), range));
                     }
                     depth += 1;
@@ -107,10 +131,10 @@ impl Page {
             let rendered = RenderedText::new(&markdown);
             let (mt, mb) = kind.margins();
             // As the renderer collapses margins: the larger of the two meet, except that a
-            // block under a heading keeps only the heading's.
+            // block under a heading keeps only the heading's. An image keeps its own.
             let top = match kind {
                 _ if page.blocks.is_empty() => 0.0,
-                BlockKind::Heading(_) | BlockKind::Rule => mt.max(prev_bottom),
+                BlockKind::Heading(_) | BlockKind::Rule | BlockKind::Image => mt.max(prev_bottom),
                 _ if after_heading => prev_bottom,
                 _ => mt.max(prev_bottom),
             };

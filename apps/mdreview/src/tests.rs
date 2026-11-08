@@ -696,3 +696,52 @@ fn the_hints_name_the_keys_that_work() {
     assert!(texts.contains("\\x"), "the card names the delete key:\n{texts}");
     assert!(!texts.contains('—') && !texts.contains('–'), "no long dashes in what the app shows");
 }
+
+/// The gap above each top-level block when rune-kit draws `src` as one document, measured from
+/// the layout: each block's top minus the bottom of the one before.
+fn rune_kit_gaps(src: &str) -> Vec<f32> {
+    struct Doc(String);
+    fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
+        let theme = Theme::current(cx.system_dark());
+        rune_kit::Markdown::new(d.0.as_str()).style(style(&theme)).build(&theme.kit)
+    }
+    let mut rt = Runtime::new(Doc(src.to_owned()), view, (800.0, 4000.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    let rects: Vec<[f32; 4]> = (0..)
+        .map_while(|i| rt.elements().into_iter().find(|e| e.key.as_deref() == Some(&format!("b{i}"))).map(|e| e.rect))
+        .collect();
+    std::iter::once(0.0).chain(rects.windows(2).map(|w| w[1][1] - (w[0][1] + w[0][3]))).collect()
+}
+
+#[test]
+fn block_gaps_match_what_rune_kit_draws() {
+    let src = "# Title\n\nA paragraph.\n\n![logo](logo.png)\n\n## Section\n\n![logo](logo.png)\n\n- one\n- two\n\n> quoted\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n\nThe end.\n";
+    let ours: Vec<f32> = Page::new(src).blocks.iter().map(|b| b.top).collect();
+    assert_eq!(ours, rune_kit_gaps(src));
+    // rune-kit splits a paragraph at each image, so these don't line up block for block.
+    // Drawn mdreview's way, a block at a time, the page still comes out as tall.
+    let src = "Intro.\n\nSee ![logo](logo.png) here.\n\n![a](a.png) ![b](b.png)\n\n## Then\n\nEnd.\n";
+    assert_eq!(page_height(src, true), page_height(src, false), "{src:?}");
+}
+
+/// How tall `src` draws, as one rune-kit document or, with `by_block`, a block at a time with
+/// [`Page`]'s gaps between, as mdreview's view draws it.
+fn page_height(src: &str, by_block: bool) -> f32 {
+    struct Doc(String, bool);
+    fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
+        let theme = Theme::current(cx.system_dark());
+        let md = |m: &str| rune_kit::Markdown::new(m).style(style(&theme)).build(&theme.kit);
+        let mut page = rune::col().key("doc").w_full();
+        if d.1 {
+            for block in Page::new(&d.0).blocks {
+                page = page.child(el().w_full().mt(block.top).child(md(&block.markdown)));
+            }
+        } else {
+            page = page.child(md(&d.0));
+        }
+        page
+    }
+    let mut rt = Runtime::new(Doc(src.to_owned(), by_block), view, (800.0, 4000.0), Env { system_dark: true, scale: 1.0 });
+    rt.frame(0.0);
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some("doc")).map(|e| e.rect[3]).unwrap()
+}
