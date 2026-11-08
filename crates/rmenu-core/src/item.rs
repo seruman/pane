@@ -1,39 +1,70 @@
 //! Rows and the context handed to commands. Port of `Sources/MenuCore/MenuItem.swift`.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// Values are data, never command fragments. Identity is scoped to a source.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct MenuItem {
     pub id: String,
     pub title: String,
     /// Defaults to the title.
     pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub search: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
 impl MenuItem {
-    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self { todo!() }
-    /// `search`, else title and subtitle joined by a space.
-    pub fn search_text(&self) -> String { todo!() }
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        let title = title.into();
+        MenuItem { id: id.into(), value: title.clone(), title, subtitle: None, search: None, detail: None }
+    }
+
+    /// `search`, else the title and subtitle joined by a space.
+    pub fn search_text(&self) -> String {
+        match (&self.search, &self.subtitle) {
+            (Some(search), _) => search.clone(),
+            (None, Some(subtitle)) => format!("{} {subtitle}", self.title),
+            (None, None) => self.title.clone(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MenuItem {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            id: String,
+            title: String,
+            value: Option<String>,
+            subtitle: Option<String>,
+            search: Option<String>,
+            detail: Option<String>,
+        }
+        let w = Wire::deserialize(deserializer)?;
+        Ok(MenuItem { value: w.value.unwrap_or_else(|| w.title.clone()), id: w.id, title: w.title,
+                      subtitle: w.subtitle, search: w.search, detail: w.detail })
+    }
 }
 
 /// One level of a pushed menu: what was chosen there, root first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub query: String,
     pub items: Vec<MenuItem>,
 }
 
-/// JSON on command stdin and `--json` stdout. Key order and omission of nil fields must match
-/// mmenu's `JSONEncoder` output with `.sortedKeys, .withoutEscapingSlashes`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// JSON on command stdin and `--json` stdout.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionContext {
     pub action: String,
     pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     pub items: Vec<MenuItem>,
     pub path: Vec<PathEntry>,
@@ -41,7 +72,51 @@ pub struct ActionContext {
 
 impl ActionContext {
     /// MMENU_ACTION, MMENU_QUERY, MMENU_SOURCE, MMENU_VALUE, MMENU_ID.
-    pub fn environment(&self) -> Vec<(String, String)> { todo!() }
-    /// Byte-for-byte what mmenu writes, without a trailing newline.
-    pub fn json(&self) -> Vec<u8> { todo!() }
+    pub fn environment(&self) -> Vec<(String, String)> {
+        let first = self.items.first();
+        [
+            ("MMENU_ACTION", self.action.as_str()),
+            ("MMENU_QUERY", self.query.as_str()),
+            ("MMENU_SOURCE", self.source.as_deref().unwrap_or("")),
+            ("MMENU_VALUE", first.map_or("", |i| i.value.as_str())),
+            ("MMENU_ID", first.map_or("", |i| i.id.as_str())),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect()
+    }
+
+    /// What mmenu writes (`JSONEncoder` with sorted keys, slashes unescaped), without a
+    /// trailing newline. Going through `serde_json::Value` sorts the keys: its map is a BTreeMap.
+    pub fn json(&self) -> Vec<u8> {
+        let value = serde_json::to_value(self).expect("an ActionContext is always representable");
+        serde_json::to_vec(&value).expect("a Value always serializes")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_sorts_keys_omits_absent_fields_and_keeps_values_as_data() {
+        let mut item = MenuItem::new("1", "One");
+        item.value = "'; echo bad\n$(whoami) /path".into();
+        item.subtitle = Some("sub".into());
+        let context = ActionContext { action: "run".into(), query: "q".into(), source: None, items: vec![item.clone()], path: vec![] };
+        let text = String::from_utf8(context.json()).unwrap();
+        assert_eq!(text, r#"{"action":"run","items":[{"id":"1","subtitle":"sub","title":"One","value":"'; echo bad\n$(whoami) /path"}],"path":[],"query":"q"}"#);
+        let back: ActionContext = serde_json::from_slice(&context.json()).unwrap();
+        assert_eq!(back.items, vec![item]);
+        assert_eq!(context.environment()[3], ("MMENU_VALUE".into(), "'; echo bad\n$(whoami) /path".into()));
+    }
+
+    #[test]
+    fn value_defaults_to_title_and_search_text_joins_the_subtitle() {
+        let item: MenuItem = serde_json::from_str(r#"{"id":"a","title":"T","subtitle":"S"}"#).unwrap();
+        assert_eq!(item.value, "T");
+        assert_eq!(item.search_text(), "T S");
+        let searched: MenuItem = serde_json::from_str(r#"{"id":"a","title":"T","subtitle":"S","search":"x"}"#).unwrap();
+        assert_eq!(searched.search_text(), "x");
+    }
 }
