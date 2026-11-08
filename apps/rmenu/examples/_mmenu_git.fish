@@ -57,9 +57,14 @@ function _mmenu_memo_rows --argument-names repo
     '
 end
 
+# Succeeds when this shell runs in a Rex block and the rex command can act on it.
+function _mmenu_in_rex
+    test "$TERM_PROGRAM" = rex; and set -q REX_SESSION REX_BLOCK; and command -q rex
+end
+
 # The Rex actions every picker level offers, as mmenu bindings.
 function _mmenu_rex_bindings
-    if test "$TERM_PROGRAM" = rex; and command -q rex
+    if _mmenu_in_rex
         printf '%s' '[{"key":"ctrl+v","id":"split-right","label":"Split right","action":"accept"},{"key":"ctrl+s","id":"split-below","label":"Split below","action":"accept"},{"key":"ctrl+t","id":"project-tab","label":"Project tab","action":"accept"}]'
     else
         printf '[]'
@@ -138,9 +143,7 @@ function _mmenu_git_dispatch --argument-names result source_repo
             printf 'mmenu: unexpected action: %s\n' "$action" >&2
             return 1
     end
-    if test "$TERM_PROGRAM" != rex; or not command -q rex
-        return 1
-    end
+    _mmenu_in_rex; or return 1
     # Memos keep their source repository's project label, not the memo slug.
     if test -n "$source_repo"
         _git_dir_action $target "$directory" "$source_repo"

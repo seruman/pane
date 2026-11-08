@@ -51,7 +51,7 @@ function _ghqr_pick --argument-names dir menu query
         }' >$dir/config
     or return 1
 
-    if test "$TERM_PROGRAM" = rex; and set -q REX_SESSION REX_BLOCK; and command -q rex
+    if _mmenu_in_rex
         # The layer's shell runs the picker and leaves its output, errors and status in $dir.
         set -l run (status fish-path) --no-config -c 'set -l dir $argv[1]; set -e argv[1]; $argv >$dir/out 2>$dir/err; echo $status >$dir/status' \
             $dir $menu --config $dir/config --json --query=$query
