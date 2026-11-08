@@ -40,6 +40,16 @@ fn runtime(src: &str) -> Runtime<App_> {
     rt
 }
 
+/// The id of the comment at `position` in the review's order.
+fn id_at(rt: &Runtime<App_>, position: usize) -> CommentId {
+    rt.state.review.at_position(position).unwrap()
+}
+
+/// Where the current comment is in the review's order.
+fn position(rt: &Runtime<App_>) -> Option<usize> {
+    rt.state.current().and_then(|id| rt.state.review.position(id))
+}
+
 fn range(s: &App_, needle: &str) -> Range<usize> {
     let at = s.page.text().find(needle).unwrap();
     at..at + needle.len()
@@ -81,7 +91,7 @@ fn feedback_quotes_and_numbers_in_document_order() {
     review.add(Comment::general("Fine overall."));
     review.add(Comment::general("One more thing."));
     assert_eq!(
-        review.comments[1].body, "One more thing.",
+        review.comments()[1].body, "One more thing.",
         "general comments first, in the order written"
     );
     let out = review
@@ -166,7 +176,7 @@ fn select_comment_save_edit_and_delete() {
     );
     key(&mut rt, Key::Enter);
     assert!(rt.state.composer.is_none());
-    let c = &rt.state.review.comments[0];
+    let c = &rt.state.review.comments()[0];
     assert_eq!(
         (
             &rt.state.page.text()[c.range.clone().unwrap()],
@@ -175,17 +185,17 @@ fn select_comment_save_edit_and_delete() {
         ("Some bold", "Too loud")
     );
     assert!(
-        rt.find(&thread_key(0)).is_some(),
+        rt.find(&thread_key(id_at(&rt, 0))).is_some(),
         "the card shows under its block"
     );
 
     // Enter on the comment edits it; Escape leaves it as it was.
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.composer, Some(Target::Edit(0)));
+    assert_eq!(rt.state.composer, Some(Target::Edit(id_at(&rt, 0))));
     press(&mut rt, "!");
     key(&mut rt, Key::Escape);
     assert!(rt.state.composer.is_none());
-    assert_eq!(rt.state.review.comments[0].body, "Too loud");
+    assert_eq!(rt.state.review.comments()[0].body, "Too loud");
 
     // `ce` too; Shift-Enter is a new line, Enter saves.
     press(&mut rt, "\\e");
@@ -199,10 +209,10 @@ fn select_comment_save_edit_and_delete() {
     rt.frame(1.0 / 60.0);
     press(&mut rt, "really");
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.review.comments[0].body, "Too loud\nreally");
+    assert_eq!(rt.state.review.comments()[0].body, "Too loud\nreally");
 
     press(&mut rt, "\\x");
-    assert!(rt.state.review.comments.is_empty());
+    assert!(rt.state.review.comments().is_empty());
 }
 
 #[test]
@@ -216,13 +226,13 @@ fn several_general_comments_listed_and_stepped_through() {
     let general: Vec<&str> = rt
         .state
         .review
-        .comments
+        .comments()
         .iter()
         .map(|c| c.body.as_str())
         .collect();
     assert_eq!(general, ["First", "Second"]);
     assert!(
-        rt.find(&thread_key(0)).is_some() && rt.find(&thread_key(1)).is_some(),
+        rt.find(&thread_key(id_at(&rt, 0))).is_some() && rt.find(&thread_key(id_at(&rt, 1))).is_some(),
         "both show above the page"
     );
 
@@ -249,18 +259,18 @@ fn stepping_visits_comments_that_start_together() {
     press(&mut rt, "vllc");
     press(&mut rt, "x");
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.review.comments.len(), 3);
+    assert_eq!(rt.state.review.comments().len(), 3);
     let mut seen = Vec::new();
     for _ in 0..3 {
         press(&mut rt, "]c");
-        seen.push(rt.state.selected.unwrap());
+        seen.push(position(&rt).unwrap());
     }
     seen.sort();
     assert_eq!(seen, [0, 1, 2], "]c visits each in turn");
     press(&mut rt, "]c");
-    let first = rt.state.selected;
+    let first = position(&rt);
     press(&mut rt, "[c[c[c");
-    assert_eq!(rt.state.selected, first, "[c comes back round");
+    assert_eq!(position(&rt), first, "[c comes back round");
 }
 
 #[test]
@@ -271,7 +281,7 @@ fn removals_and_jumps() {
     key(&mut rt, Key::Enter);
     press(&mut rt, "gg");
     press(&mut rt, "dd"); // the heading, "Remove this"
-    let kinds: Vec<Kind> = rt.state.review.comments.iter().map(|c| c.kind).collect();
+    let kinds: Vec<Kind> = rt.state.review.comments().iter().map(|c| c.kind).collect();
     assert_eq!(
         kinds,
         [Kind::Remove, Kind::Comment],
@@ -279,15 +289,15 @@ fn removals_and_jumps() {
     );
 
     press(&mut rt, "]c");
-    assert_eq!(rt.state.current(), Some(1));
+    assert_eq!(position(&rt), Some(1));
     press(&mut rt, "]c");
-    assert_eq!(rt.state.current(), Some(0), "wraps round");
+    assert_eq!(position(&rt), Some(0), "wraps round");
     press(&mut rt, "[c");
-    assert_eq!(rt.state.current(), Some(1));
+    assert_eq!(position(&rt), Some(1));
 
     // Moving drops the comment picked; the cursor's own picks the comment under it again.
     press(&mut rt, "gg");
-    assert_eq!(rt.state.current(), Some(0));
+    assert_eq!(position(&rt), Some(0));
 }
 
 #[test]
@@ -370,7 +380,7 @@ fn which_key_shows_what_can_follow() {
         !rt.state.vim.is_pending() && rt.find("which-key").is_none(),
         "Escape cancels it"
     );
-    assert!(rt.state.review.comments.is_empty());
+    assert!(rt.state.review.comments().is_empty());
 
     // `\?` lists every key; the next key closes it and does what it does.
     let line = |rt: &Runtime<App_>| {
@@ -391,7 +401,7 @@ fn which_key_shows_what_can_follow() {
 fn comment_and_remove_are_operators() {
     let mut rt = runtime(SRC);
     let quote = |rt: &Runtime<App_>, n: usize| {
-        rt.state.page.text()[rt.state.review.comments[n].range.clone().unwrap()].to_owned()
+        rt.state.page.text()[rt.state.review.comments()[n].range.clone().unwrap()].to_owned()
     };
     // `cw` on the paragraph's first word.
     press(&mut rt, "jcw");
@@ -401,18 +411,13 @@ fn comment_and_remove_are_operators() {
     // `dip`: the list, as a paragraph.
     press(&mut rt, "jdip");
     assert_eq!(quote(&rt, 1), "one\ntwo");
-    assert_eq!(rt.state.review.comments[1].kind, Kind::Remove);
+    assert_eq!(rt.state.review.comments()[1].kind, Kind::Remove);
     // `2cc`: two lines.
     press(&mut rt, "gg2cc");
     press(&mut rt, "b");
     key(&mut rt, Key::Enter);
-    let c = rt
-        .state
-        .review
-        .comments
-        .iter()
-        .find(|c| c.body == "b")
-        .unwrap();
+    let comments = rt.state.review.comments();
+    let c = comments.iter().find(|c| c.body == "b").unwrap();
     assert!(rt.state.page.text()[c.range.clone().unwrap()].starts_with("Title"));
 }
 
@@ -448,7 +453,7 @@ fn the_comment_list_floats_and_jumps() {
     press(&mut rt, "jj");
     assert_eq!(rt.state.list, Some(2));
     assert_eq!(
-        rt.state.current(),
+        position(&rt),
         Some(2),
         "the page marks the list's comment"
     );
@@ -463,17 +468,17 @@ fn the_comment_list_floats_and_jumps() {
     key(&mut rt, Key::Escape);
     assert!(rt.find("comment-list").is_none());
     assert_eq!(rt.state.cursor(), cursor);
-    assert_eq!(rt.state.current(), Some(0));
+    assert_eq!(position(&rt), Some(0));
 
     // Enter goes to the comment in the document.
     key(&mut rt, Key::Tab);
     press(&mut rt, "G");
     key(&mut rt, Key::Enter);
     assert!(rt.state.list.is_none());
-    assert_eq!(rt.state.current(), Some(2));
+    assert_eq!(position(&rt), Some(2));
     assert_eq!(
         rt.state.cursor(),
-        rt.state.review.comments[2].range.clone().unwrap().start
+        rt.state.review.comments()[2].range.clone().unwrap().start
     );
 
     // A click on a row goes there too.
@@ -483,7 +488,7 @@ fn the_comment_list_floats_and_jumps() {
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
     assert!(rt.state.list.is_none());
-    assert_eq!(rt.state.current(), Some(0));
+    assert_eq!(position(&rt), Some(0));
 }
 
 #[test]
@@ -523,7 +528,7 @@ fn moving_in_the_list_scrolls_the_page_to_the_comment() {
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
     }
-    assert_eq!(rt.state.current(), Some(1));
+    assert_eq!(position(&rt), Some(1));
     assert!(
         on_screen(&rt),
         "the page scrolled to the last comment: {:?}",
@@ -546,7 +551,7 @@ fn counts_work_in_visual_mode() {
     // With no labels on the number keys, a count grows the selection as in Vim.
     let mut rt = runtime(SRC);
     press(&mut rt, "jv2e");
-    assert!(rt.state.review.comments.is_empty());
+    assert!(rt.state.review.comments().is_empty());
     let sel = rt.state.vim.selection(rt.state.page.text()).unwrap();
     assert_eq!(&rt.state.page.text()[sel], "Some bold");
 }
@@ -569,3 +574,51 @@ fn a_review_that_cant_be_written_is_an_error_and_still_reaches_stdout() {
     assert_eq!(String::from_utf8(stdout).unwrap(), "# Review\n", "and the review isn't lost");
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+fn click(rt: &mut Runtime<App_>, key_name: &str) {
+    let (x, y) = rt.find(key_name).unwrap_or_else(|| panic!("no {key_name} on screen"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+}
+
+/// Two comments, `first` on the heading and `second` on the paragraph.
+fn two_comments() -> Runtime<App_> {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "cc");
+    press(&mut rt, "first");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "jcc");
+    press(&mut rt, "second");
+    key(&mut rt, Key::Enter);
+    rt
+}
+
+#[test]
+fn deleting_another_comment_while_editing_keeps_the_edit_on_its_comment() {
+    let mut rt = two_comments();
+    press(&mut rt, "\\e");
+    assert!(rt.find("composer-field").is_some(), "editing the second comment");
+    let delete = format!("delete-{}", id_at(&rt, 0));
+    click(&mut rt, &delete);
+    press(&mut rt, " edited");
+    key(&mut rt, Key::Enter);
+    let bodies: Vec<&str> = rt.state.review.comments().iter().map(|c| c.body.as_str()).collect();
+    assert_eq!(bodies, ["second edited"]);
+}
+
+#[test]
+fn deleting_another_comment_while_editing_keeps_the_editor_and_its_keys() {
+    let mut rt = two_comments();
+    press(&mut rt, "\\e");
+    let delete = format!("delete-{}", id_at(&rt, 0));
+    click(&mut rt, &delete);
+    assert!(rt.find("composer-field").is_some(), "the editor stays on screen");
+    key(&mut rt, Key::Escape);
+    assert!(rt.find("composer-field").is_none(), "Escape still closes it");
+    let before = rt.state.cursor();
+    press(&mut rt, "gg");
+    assert_ne!(rt.state.cursor(), before, "and keys reach Vim again");
+}
+
+

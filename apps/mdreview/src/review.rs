@@ -14,6 +14,18 @@ pub enum Kind {
     Remove,
 }
 
+/// A comment's identity, kept while others are added or deleted around it. Positions in
+/// [`Review::comments`] shift, so anything that holds on to a comment holds its id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CommentId(u32);
+
+impl std::fmt::Display for CommentId {
+    /// The id as element keys spell it (`thread-3`, `delete-3`).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
     pub kind: Kind,
@@ -62,30 +74,73 @@ impl Comment {
 
 #[derive(Clone, Debug, Default)]
 pub struct Review {
-    /// General comments first, in the order they were written, then the rest in document order.
-    pub comments: Vec<Comment>,
+    /// General comments first, in the order they were written, then the rest in document order,
+    /// each with its id.
+    comments: Vec<(CommentId, Comment)>,
+    next_id: u32,
 }
 
 impl Review {
-    /// Adds `comment` in its place and returns its index.
-    pub fn add(&mut self, comment: Comment) -> usize {
+    /// Adds `comment` in its place and returns its id.
+    pub fn add(&mut self, comment: Comment) -> CommentId {
+        let id = CommentId(self.next_id);
+        self.next_id += 1;
         let key = comment.order();
-        let at = self.comments.partition_point(|c| c.order() <= key);
-        self.comments.insert(at, comment);
-        at
+        let at = self.comments.partition_point(|(_, c)| c.order() <= key);
+        self.comments.insert(at, (id, comment));
+        id
+    }
+
+    /// The comments in order, without their ids.
+    #[cfg(test)]
+    pub fn comments(&self) -> Vec<&Comment> {
+        self.comments.iter().map(|(_, c)| c).collect()
+    }
+
+    /// Every comment with its id, in order.
+    pub fn iter(&self) -> impl Iterator<Item = (CommentId, &Comment)> {
+        self.comments.iter().map(|(id, c)| (*id, c))
+    }
+
+    pub fn len(&self) -> usize {
+        self.comments.len()
+    }
+
+    pub fn get(&self, id: CommentId) -> Option<&Comment> {
+        self.comments.iter().find(|(i, _)| *i == id).map(|(_, c)| c)
+    }
+
+    pub fn get_mut(&mut self, id: CommentId) -> Option<&mut Comment> {
+        self.comments.iter_mut().find(|(i, _)| *i == id).map(|(_, c)| c)
+    }
+
+    /// Where comment `id` is in the order, counted from 0, as the `#n` cards show it.
+    pub fn position(&self, id: CommentId) -> Option<usize> {
+        self.comments.iter().position(|(i, _)| *i == id)
+    }
+
+    /// The comment at `position` in the order.
+    pub fn at_position(&self, position: usize) -> Option<CommentId> {
+        self.comments.get(position).map(|(id, _)| *id)
+    }
+
+    /// Deletes comment `id`; false when there's no such comment.
+    pub fn remove(&mut self, id: CommentId) -> bool {
+        let before = self.comments.len();
+        self.comments.retain(|(i, _)| *i != id);
+        self.comments.len() != before
     }
 
     /// The comments on the page, with their ranges, in document order.
-    fn anchored(&self) -> Vec<(usize, Range<usize>)> {
+    fn anchored(&self) -> Vec<(CommentId, Range<usize>)> {
         self.comments
             .iter()
-            .enumerate()
-            .filter_map(|(i, c)| c.range.clone().map(|r| (i, r)))
+            .filter_map(|(id, c)| c.range.clone().map(|r| (*id, r)))
             .collect()
     }
 
     /// The comment `at` (a byte of the page's text) falls in; the innermost when they nest.
-    pub fn at(&self, at: usize) -> Option<usize> {
+    pub fn at(&self, at: usize) -> Option<CommentId> {
         self.anchored()
             .into_iter()
             .filter(|(_, r)| r.contains(&at) || (r.is_empty() && r.start == at))
@@ -96,17 +151,17 @@ impl Review {
     /// The comment after comment `from` in the list (general comments first, then the page's in
     /// document order), or with `back` the one before, wrapping round. With no comment to start
     /// from, the first on the page starting after `at` (or the last before it).
-    pub fn step(&self, from: Option<usize>, at: usize, back: bool) -> Option<usize> {
+    pub fn step(&self, from: Option<CommentId>, at: usize, back: bool) -> Option<CommentId> {
         let n = self.comments.len();
         if n == 0 {
             return None;
         }
-        if let Some(f) = from.filter(|f| *f < n) {
-            return Some((f + if back { n - 1 } else { 1 }) % n);
+        if let Some(f) = from.and_then(|id| self.position(id)) {
+            return self.at_position((f + if back { n - 1 } else { 1 }) % n);
         }
         let list = self.anchored();
         if list.is_empty() {
-            return Some(if back { n - 1 } else { 0 });
+            return self.at_position(if back { n - 1 } else { 0 });
         }
         let found = if back {
             list.iter()
@@ -138,8 +193,8 @@ impl Review {
             None => "# Review\n\n".to_owned(),
         };
         let general: Vec<&str> = self
-            .comments
             .iter()
+            .map(|(_, c)| c)
             .filter(|c| c.range.is_none())
             .map(|c| c.body.trim())
             .filter(|b| !b.is_empty())
@@ -160,8 +215,8 @@ impl Review {
                 if n == 1 { "" } else { "s" }
             ));
         }
-        for (number, (i, range)) in anchored.into_iter().enumerate() {
-            let c = &self.comments[i];
+        for (number, (id, range)) in anchored.into_iter().enumerate() {
+            let Some(c) = self.get(id) else { continue };
             let ranges = page.source_ranges(range.clone());
             let mut place = Vec::new();
             match lines_of(source, &ranges) {

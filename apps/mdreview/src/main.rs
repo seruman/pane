@@ -38,7 +38,7 @@ use rune_kit::{Markdown, MarkdownStyle};
 use vimkeys::{Hint, Keymap, Operator, Stroke, Table, Vim, VimEffect, VimMode, hint};
 
 use page::Page;
-use review::{Comment, Kind, Review};
+use review::{Comment, CommentId, Kind, Review};
 
 const SAMPLE: &str = include_str!("sample.md");
 
@@ -62,8 +62,8 @@ enum Target {
         kind: Kind,
         range: Option<Range<usize>>,
     },
-    /// Comment `n`, again.
-    Edit(usize),
+    /// A saved comment, again.
+    Edit(CommentId),
 }
 
 /// What the review adds to Vim's keys.
@@ -137,7 +137,7 @@ struct App_ {
     draft: TextEdit,
     /// The comment `]c`, `[c` or a click went to, until the cursor moves; it tells comments
     /// apart that start at the same place, and it's how a general comment is picked.
-    selected: Option<usize>,
+    selected: Option<CommentId>,
     /// `\\?` asked for every key; the next key closes the list.
     all_keys: bool,
     /// The `:` command being typed.
@@ -191,22 +191,21 @@ impl App_ {
 
     /// The comment Enter, `ce` and `dc` act on, and the one the page marks: the comment list's
     /// row while it's open, else the one stepped to, or the one under the cursor.
-    fn current(&self) -> Option<usize> {
-        let n = self.review.comments.len();
-        if let Some(at) = self.list {
-            return (at < n).then_some(at);
+    fn current(&self) -> Option<CommentId> {
+        if let Some(row) = self.list {
+            return self.review.at_position(row);
         }
         self.selected
-            .filter(|i| *i < n)
+            .filter(|id| self.review.get(*id).is_some())
             .or_else(|| self.review.at(self.cursor()))
     }
 
     /// Shows comment `n` on the page without moving Vim's cursor: its text centred, or for a
     /// general comment, its card.
-    fn show(&self, n: usize, tx: &mut Tx) {
-        match self.review.comments.get(n).map(|c| c.range.is_some()) {
+    fn show(&self, id: CommentId, tx: &mut Tx) {
+        match self.review.get(id).map(|c| c.range.is_some()) {
             Some(true) => tx.scroll_center(CURRENT_MARK),
-            Some(false) => tx.scroll_into_view(thread_key(n)),
+            Some(false) => tx.scroll_into_view(thread_key(id)),
             None => {}
         }
     }
@@ -220,7 +219,10 @@ impl App_ {
             self.vim.set_cursor(range.start, self.page.text());
         }
         let body = match &target {
-            Target::Edit(n) => self.review.comments[*n].body.clone(),
+            Target::Edit(id) => match self.review.get(*id) {
+                Some(c) => c.body.clone(),
+                None => return,
+            },
             Target::New { .. } => String::new(),
         };
         self.draft = TextEdit::new(body);
@@ -240,17 +242,19 @@ impl App_ {
                 if kind == Kind::Comment && body.is_empty() {
                     return;
                 }
-                let n = self.review.add(Comment { kind, range, body });
-                self.selected = Some(n);
-                self.note = Some(format!("Comment #{} saved", n + 1));
+                let id = self.review.add(Comment { kind, range, body });
+                self.selected = Some(id);
+                self.note = Some(format!("Comment #{} saved", self.number(id)));
             }
-            Target::Edit(n) => {
-                let c = &mut self.review.comments[n];
+            Target::Edit(id) => {
+                let Some(c) = self.review.get_mut(id) else {
+                    return;
+                };
                 if c.kind == Kind::Comment && body.is_empty() {
-                    self.delete(n);
+                    self.delete(id);
                 } else {
                     c.body = body;
-                    self.note = Some(format!("Comment #{} saved", n + 1));
+                    self.note = Some(format!("Comment #{} saved", self.number(id)));
                 }
             }
         }
@@ -259,38 +263,52 @@ impl App_ {
     /// Marks the selection (or the line) to be removed. Enter adds words to it.
     fn remove(&mut self, range: Range<usize>) {
         self.vim.set_cursor(range.start, self.page.text());
-        let n = self.review.add(Comment {
+        let id = self.review.add(Comment {
             kind: Kind::Remove,
             range: Some(range),
             body: String::new(),
         });
-        self.selected = Some(n);
+        self.selected = Some(id);
         self.note = Some("Marked to remove — Enter adds a note".into());
     }
 
-    fn delete(&mut self, n: usize) {
-        if n < self.review.comments.len() {
-            self.review.comments.remove(n);
-            self.selected = None;
-            self.note = Some(format!("Comment #{} deleted", n + 1));
+    /// Deletes comment `id`, and the editor with it when it's the one being edited.
+    fn delete(&mut self, id: CommentId) {
+        let number = self.number(id);
+        if !self.review.remove(id) {
+            return;
         }
+        if self.composer == Some(Target::Edit(id)) {
+            self.composer = None;
+        } else if self.composer.is_some() {
+            self.draft.focused = true;
+        }
+        if self.selected == Some(id) {
+            self.selected = None;
+        }
+        self.note = Some(format!("Comment #{number} deleted"));
+    }
+
+    /// Comment `id`'s number on its card, from 1.
+    fn number(&self, id: CommentId) -> usize {
+        self.review.position(id).map_or(0, |p| p + 1)
     }
 
     /// Goes to comment `n`: the cursor to its start, and its card into view.
-    fn jump(&mut self, n: usize, tx: &mut Tx) {
-        let Some(c) = self.review.comments.get(n) else {
+    fn jump(&mut self, id: CommentId, tx: &mut Tx) {
+        let Some(c) = self.review.get(id) else {
             return;
         };
         if let Some(range) = &c.range {
             self.vim.set_cursor(range.start, self.page.text());
         }
-        self.selected = Some(n);
+        self.selected = Some(id);
         self.note = Some(format!(
             "#{} of {} · Enter edits, dc deletes",
-            n + 1,
-            self.review.comments.len()
+            self.number(id),
+            self.review.len()
         ));
-        tx.scroll_into_view(thread_key(n));
+        tx.scroll_into_view(thread_key(id));
     }
 
     /// The feedback, when quitting sends it.
@@ -305,10 +323,12 @@ impl App_ {
     /// Opens the comment list on the comment picked or under the cursor, or the first, and
     /// shows that comment on the page.
     fn open_list(&mut self, tx: &mut Tx) {
-        let at = self.current().unwrap_or(0);
-        self.list = Some(at);
-        tx.scroll_into_view(list_key(at));
-        self.show(at, tx);
+        let row = self.current().and_then(|id| self.review.position(id)).unwrap_or(0);
+        self.list = Some(row);
+        tx.scroll_into_view(list_key(row));
+        if let Some(id) = self.review.at_position(row) {
+            self.show(id, tx);
+        }
     }
 
     /// Runs a `:` command.
@@ -332,8 +352,8 @@ impl App_ {
 const CURRENT_MARK: &str = "current-comment";
 
 /// The key a comment's card is drawn under, to scroll to.
-fn thread_key(n: usize) -> String {
-    format!("thread-{n}")
+fn thread_key(id: CommentId) -> String {
+    format!("thread-{id}")
 }
 
 /// GitHub's reading width and type, in the theme's colours, as `mdview` draws.
@@ -382,12 +402,12 @@ fn highlights(s: &App_, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize>>, 
     let local = |range: Range<usize>| page.local_ranges(index, &page.source_ranges(range));
     let mut out = Vec::new();
     let current = s.current();
-    for (n, c) in s.review.comments.iter().enumerate() {
+    for (id, c) in s.review.iter() {
         let Some(range) = c.range.clone() else {
             continue;
         };
         let mut h = Highlight::new().bg(tint(c.kind, theme));
-        if current == Some(n) {
+        if current == Some(id) {
             // The same ring whether the cursor or the list picks it.
             h = h.ring(tint(c.kind, theme).alpha(0.9), 1.0);
             // Keyed in the block it starts in, for the list to scroll to.
@@ -524,26 +544,26 @@ fn quote_view(q: &str, theme: &Theme) -> El {
 }
 
 /// A saved comment, as a card.
-fn comment_view(n: usize, c: &Comment, current: bool, theme: &Theme) -> El {
+fn comment_view(id: CommentId, number: usize, c: &Comment, current: bool, theme: &Theme) -> El {
     let edit = Button::icon_only(&icons::PENCIL, "Edit")
         .plain()
         .small()
         .on_press(move |s: &mut App_| {
-            s.selected = Some(n);
-            s.open(Target::Edit(n));
+            s.selected = Some(id);
+            s.open(Target::Edit(id));
         })
-        .build(&format!("edit-{n}"), theme);
+        .build(&format!("edit-{id}"), theme);
     let delete = Button::icon_only(&icons::TRASH, "Delete")
         .plain()
         .small()
-        .on_press(move |s: &mut App_| s.delete(n))
-        .build(&format!("delete-{n}"), theme);
+        .on_press(move |s: &mut App_| s.delete(id))
+        .build(&format!("delete-{id}"), theme);
     let mut head = row()
         .w_full()
         .gap(8.0)
         .center_y()
         .child(
-            text(format!("#{}", n + 1))
+            text(format!("#{number}"))
                 .font(theme.ty.mono)
                 .color(theme.text_tertiary),
         )
@@ -557,7 +577,7 @@ fn comment_view(n: usize, c: &Comment, current: bool, theme: &Theme) -> El {
         );
     }
     let mut card = col()
-        .key(thread_key(n))
+        .key(thread_key(id))
         .w_full()
         .gap(6.0)
         .px(12.0)
@@ -606,19 +626,20 @@ fn block_thread(s: &App_, index: usize, theme: &Theme) -> Option<El> {
         |range: &Range<usize>| page.block_at(range.end.saturating_sub(1).max(range.start)) == index;
     let current = s.current();
     let mut cards = Vec::new();
-    for (n, c) in s.review.comments.iter().enumerate() {
+    for (number, (id, c)) in s.review.iter().enumerate() {
+        let number = number + 1;
         if !c.range.as_ref().is_some_and(ends_here) {
             continue;
         }
-        if s.composer == Some(Target::Edit(n)) {
+        if s.composer == Some(Target::Edit(id)) {
             cards.push(composer_view(
                 &s.draft,
-                &format!("Edit #{} · {}", n + 1, c.title()),
+                &format!("Edit #{number} · {}", c.title()),
                 None,
                 theme,
             ));
         } else {
-            cards.push(comment_view(n, c, current == Some(n), theme));
+            cards.push(comment_view(id, number, c, current == Some(id), theme));
         }
     }
     if let Some(Target::New {
@@ -641,19 +662,20 @@ fn block_thread(s: &App_, index: usize, theme: &Theme) -> Option<El> {
 fn general_thread(s: &App_, theme: &Theme) -> Option<El> {
     let current = s.current();
     let mut cards = Vec::new();
-    for (n, c) in s.review.comments.iter().enumerate() {
+    for (number, (id, c)) in s.review.iter().enumerate() {
+        let number = number + 1;
         if c.range.is_some() {
             continue;
         }
-        if s.composer == Some(Target::Edit(n)) {
+        if s.composer == Some(Target::Edit(id)) {
             cards.push(composer_view(
                 &s.draft,
-                &format!("Edit #{} · General", n + 1),
+                &format!("Edit #{number} · General"),
                 None,
                 theme,
             ));
         } else {
-            cards.push(comment_view(n, c, current == Some(n), theme));
+            cards.push(comment_view(id, number, c, current == Some(id), theme));
         }
     }
     if matches!(s.composer, Some(Target::New { range: None, .. })) {
@@ -666,7 +688,7 @@ fn general_thread(s: &App_, theme: &Theme) -> Option<El> {
 /// `at` is on is tinted; Enter jumps to it.
 fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
     let mut rows = col().w_full().gap(2.0);
-    if s.review.comments.is_empty() {
+    if s.review.is_empty() {
         rows = rows.child(
             text("No comments yet. Select with v, then c; C comments on the whole document.")
                 .font(theme.ty.caption)
@@ -675,7 +697,7 @@ fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
                 .w_full(),
         );
     }
-    for (n, c) in s.review.comments.iter().enumerate() {
+    for (n, (id, c)) in s.review.iter().enumerate() {
         let quote = c.range.clone().map(|r| {
             s.page
                 .text()
@@ -697,7 +719,7 @@ fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
             })
             .on_press_tx(move |s: &mut App_, tx: &mut Tx| {
                 s.list = None;
-                s.jump(n, tx);
+                s.jump(id, tx);
             })
             .child(
                 row()
@@ -760,7 +782,7 @@ fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
         .border(1.0, theme.popover_border)
         .shadow(12.0, 32.0, theme.shadow_strong)
         .child(
-            text(format!("Comments · {}", s.review.comments.len()))
+            text(format!("Comments · {}", s.review.len()))
                 .font(theme.ty.strong)
                 .color(theme.text),
         )
@@ -981,7 +1003,7 @@ fn status_line(s: &App_, theme: &Theme) -> El {
             el().child(Badge::new(label).tone(tone).build(theme))
         }
     };
-    let count = s.review.comments.len();
+    let count = s.review.len();
     let summary = format!("{count} comment{}", if count == 1 { "" } else { "s" });
     let note = s
         .note
@@ -1057,9 +1079,16 @@ fn cmdline_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
 }
 
 fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
-    // The composer's field has the keys while it's open; one that reaches here missed it.
+    // A click elsewhere takes focus from the editor's field, and its keys come here. Escape
+    // closes the editor. Any other key gives the field its focus back.
     if s.composer.is_some() {
-        return false;
+        if k.key == Key::Escape {
+            s.composer = None;
+            s.note = Some("Cancelled".into());
+        } else {
+            s.draft.focused = true;
+        }
+        return true;
     }
     if s.cmdline.is_some() {
         cmdline_key(s, k, tx);
@@ -1120,16 +1149,16 @@ fn act(s: &mut App_, action: Act, tx: &mut Tx) {
                 .review
                 .step(s.current(), s.cursor(), action == Act::PreviousComment)
             {
-                Some(n) => s.jump(n, tx),
+                Some(id) => s.jump(id, tx),
                 None => s.note = Some("No comments".into()),
             }
         }
         Act::Edit => match s.current() {
-            Some(n) => s.open(Target::Edit(n)),
+            Some(id) => s.open(Target::Edit(id)),
             None => s.note = Some("No comment here: v selects, c comments".into()),
         },
         Act::Delete => match s.current() {
-            Some(n) => s.delete(n),
+            Some(id) => s.delete(id),
             None => s.note = Some("No comment here".into()),
         },
         Act::List => s.open_list(tx),
@@ -1147,7 +1176,7 @@ fn act(s: &mut App_, action: Act, tx: &mut Tx) {
 /// Escape, Tab or `q` close it and scroll back to the cursor, which never moved.
 fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     let Some(at) = s.list else { return };
-    let n = s.review.comments.len();
+    let n = s.review.len();
     let step =
         |at: usize, by: isize| (at as isize + by).clamp(0, n.saturating_sub(1) as isize) as usize;
     let to = match (&k.key, ch(k)) {
@@ -1158,8 +1187,8 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
         }
         (Key::Enter, _) => {
             s.list = None;
-            if at < n {
-                s.jump(at, tx);
+            if let Some(id) = s.review.at_position(at) {
+                s.jump(id, tx);
             }
             return;
         }
@@ -1171,7 +1200,9 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     };
     s.list = Some(to);
     tx.scroll_into_view(list_key(to));
-    s.show(to, tx);
+    if let Some(id) = s.review.at_position(to) {
+        s.show(id, tx);
+    }
 }
 
 /// Sends the review on the way out, when `:wq` or `ZZ` asked: to the file `-o` names, or to
@@ -1273,7 +1304,7 @@ fn main() {
                 s.review.add(Comment::general(
                     "Good direction overall. Keep the first version small.",
                 ));
-                s.review.add(Comment::on(
+                let picked = s.review.add(Comment::on(
                     find("stores the quote and its lines"),
                     "Lines drift when the agent rewrites the plan. Keep the quote as the anchor.",
                 ));
@@ -1286,7 +1317,7 @@ fn main() {
                     range: Some(find("Sharing a review by link")),
                     body: String::new(),
                 });
-                s.selected = Some(1);
+                s.selected = Some(picked);
             }),
             ("composing", |s| {
                 let text = s.page.text().to_owned();
