@@ -124,9 +124,8 @@ impl MenuConfiguration {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for source in &self.sources {
-            if source.id.is_empty() || !ids.insert(source.id.as_str()) {
-                return error("Source IDs must be unique and nonempty.");
-            }
+            if source.id.is_empty() { return error("Source IDs cannot be empty."); }
+            if !ids.insert(source.id.as_str()) { return error(format!("Duplicate source ID: {}", source.id)); }
             if source.command.is_empty() { return error(format!("Source {} needs an argv command.", source.id)); }
             if source.preview.as_ref().is_some_and(Vec::is_empty) {
                 return error(format!("Source {} preview command cannot be empty.", source.id));
@@ -144,16 +143,20 @@ impl MenuConfiguration {
         for binding in &self.bindings {
             let key = &binding.key;
             add_key(key, &mut keys)?;
-            if let Some(id) = &binding.id
-                && (id.is_empty() || !binding_ids.insert(id.as_str())) {
-                return error(format!("Binding IDs must be unique and nonempty: {id}"));
+            if let Some(id) = &binding.id {
+                if id.is_empty() { return error(format!("Binding {key} has an empty ID.")); }
+                if !binding_ids.insert(id.as_str()) { return error(format!("Duplicate binding ID: {id}")); }
             }
             if binding.action == BindingAction::Run && binding.command.as_ref().is_none_or(Vec::is_empty) {
                 return error(format!("Run binding {key} needs a command."));
             }
-            if matches!(binding.action, BindingAction::Source | BindingAction::Push)
-                && !ids.contains(binding.source.as_deref().unwrap_or("")) {
-                return error(format!("Binding {key} references an unknown source."));
+            if matches!(binding.action, BindingAction::Source | BindingAction::Push) {
+                match binding.source.as_deref() {
+                    None => return error(format!("Binding {key} needs a source.")),
+                    Some(source) if !ids.contains(source) =>
+                        return error(format!("Binding {key} references unknown source {source}.")),
+                    Some(_) => {}
+                }
             }
             if binding.action == BindingAction::Source
                 && self.source(binding.source.as_deref()).is_some_and(|s| s.hidden) {
@@ -353,6 +356,24 @@ mod tests {
             format!(r#"{{"initialSource":"missing","sources":[{source}]}}"#),
         ] {
             assert!(parse(&json).validate().is_err(), "{json}");
+        }
+    }
+
+    #[test]
+    fn errors_name_the_rejected_item() {
+        let source = r#"{"id":"a","label":"A","command":["echo"]}"#;
+        for (json, message) in [
+            (format!(r#"{{"sources":[{source},{source}]}}"#), "Duplicate source ID: a"),
+            (r#"{"sources":[{"id":"","label":"A","command":["echo"]}]}"#.to_owned(), "Source IDs cannot be empty."),
+            (format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"push","source":"b"}}]}}"#),
+             "Binding ctrl+w references unknown source b."),
+            (format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"source"}}]}}"#),
+             "Binding ctrl+w needs a source."),
+            (r#"{"bindings":[{"key":"ctrl+v","id":"","action":"accept"}]}"#.to_owned(), "Binding ctrl+v has an empty ID."),
+            (r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#.to_owned(),
+             "Duplicate binding ID: x"),
+        ] {
+            assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
         }
     }
 
