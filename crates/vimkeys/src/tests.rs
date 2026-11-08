@@ -176,8 +176,8 @@ fn search_smart_case_and_star() {
     assert!(at(&v).starts_with("s);"));
     press(&mut v, "N");
     assert!(at(&v).starts_with("s = "));
-    assert_eq!(find_all("Hello hello", "hello").len(), 2);
-    assert_eq!(find_all("Hello hello", "Hello").len(), 1);
+    assert_eq!(find_all("Hello hello", &Query::typed("hello")).len(), 2);
+    assert_eq!(find_all("Hello hello", &Query::typed("Hello")).len(), 1);
     press(&mut v, "gg*");
     assert_eq!(v.message(), Some("[1/1]"));
     press(&mut v, "/zzz");
@@ -610,11 +610,11 @@ fn a_huge_count_neither_panics_nor_hangs() {
 fn search_survives_characters_whose_lowercase_changes_length() {
     // `İ` lowercases to two characters, three bytes where it had two.
     let text = "İstanbul Hello hello";
-    let found = find_all(text, "hello");
+    let found = find_all(text, &Query::typed("hello"));
     let quoted: Vec<&str> = found.iter().map(|r| &text[r.clone()]).collect();
     assert_eq!(quoted, ["Hello", "hello"]);
     assert_eq!(
-        find_all(text, "i̇stanbul")
+        find_all(text, &Query::typed("i̇stanbul"))
             .iter()
             .map(|r| &text[r.clone()])
             .collect::<Vec<_>>(),
@@ -622,7 +622,7 @@ fn search_survives_characters_whose_lowercase_changes_length() {
     );
     let text = "ẞtraße STRASSE";
     assert_eq!(
-        find_all(text, "sse")
+        find_all(text, &Query::typed("sse"))
             .iter()
             .map(|r| &text[r.clone()])
             .collect::<Vec<_>>(),
@@ -630,16 +630,31 @@ fn search_survives_characters_whose_lowercase_changes_length() {
     );
 }
 
-
 #[test]
 fn pending_shows_the_keys_typed_with_their_counts() {
     let mut v = Vim::default();
     press(&mut v, "y2i");
-    assert_eq!(v.pending(), "y2i", "the count between the operator and the object");
-    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    assert_eq!(
+        v.pending(),
+        "y2i",
+        "the count between the operator and the object"
+    );
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
     press(&mut v, "3y2f");
     assert_eq!(v.pending(), "3y2f");
-    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
 
     // Rebound keys show as typed, not as Vim's defaults.
     let keys = Keymap::<NoAction>::vim()
@@ -648,7 +663,13 @@ fn pending_shows_the_keys_typed_with_their_counts() {
     let mut v = Vim::new(keys);
     press(&mut v, "x");
     assert_eq!(v.pending(), "x");
-    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
     press(&mut v, "yI");
     assert_eq!(v.pending(), "yI");
 }
@@ -656,14 +677,32 @@ fn pending_shows_the_keys_typed_with_their_counts() {
 #[test]
 fn a_count_on_a_text_object_takes_that_many() {
     let mut v = Vim::default();
-    assert_eq!(yanked(press(&mut v, "y2iw")), "fn ", "a space run counts as a word, as in Vim");
+    assert_eq!(
+        yanked(press(&mut v, "y2iw")),
+        "fn ",
+        "a space run counts as a word, as in Vim"
+    );
     assert_eq!(yanked(press(&mut v, "y3iw")), "fn main");
-    assert_eq!(yanked(press(&mut v, "2yiw")), "fn ", "the count may come before the operator");
+    assert_eq!(
+        yanked(press(&mut v, "2yiw")),
+        "fn ",
+        "the count may come before the operator"
+    );
     assert_eq!(yanked(press(&mut v, "y2aw")), "fn main");
     press(&mut v, "v3iw");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "fn main");
-    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
-    assert_eq!(yanked(press(&mut v, "gg0y3ip")), TEXT, "both paragraphs and the blank line");
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
+    assert_eq!(
+        yanked(press(&mut v, "gg0y3ip")),
+        TEXT,
+        "both paragraphs and the blank line"
+    );
 
     let text = "f(a, (b), c)";
     let mut v = Vim::default();
@@ -671,7 +710,13 @@ fn a_count_on_a_text_object_takes_that_many() {
     let yank = |v: &mut Vim, keys: &str| {
         let mut last = None;
         for c in keys.chars() {
-            last = v.key(&KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() }, text);
+            last = v.key(
+                &KeyEvent {
+                    key: Key::Text(c.to_string()),
+                    mods: Mods::default(),
+                },
+                text,
+            );
         }
         yanked(last)
     };
@@ -682,3 +727,28 @@ fn a_count_on_a_text_object_takes_that_many() {
     assert_eq!(yank(&mut v, "y2a("), "(a, (b), c)");
 }
 
+#[test]
+fn a_typed_backslash_b_is_searched_as_typed() {
+    let text = r"foobar barfoo \bfoo";
+    let mut v = Vim::default();
+    press_on(&mut v, text, r"/\bfoo");
+    v.key(
+        &KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        },
+        text,
+    );
+    let found: Vec<&str> = v.matches(text).iter().map(|r| &text[r.clone()]).collect();
+    assert_eq!(
+        found,
+        [r"\bfoo"],
+        "a backslash the user typed is part of the query"
+    );
+
+    // `*` searches whole words.
+    let mut v = Vim::default();
+    press_on(&mut v, text, "*");
+    let found: Vec<usize> = v.matches(text).iter().map(|r| r.start).collect();
+    assert_eq!(found, [0], "foobar as a whole word only");
+}

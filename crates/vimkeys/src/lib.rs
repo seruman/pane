@@ -118,7 +118,7 @@ pub struct Vim<A = NoAction> {
     /// The character just typed after `f F t T`, for the motion to take.
     last_typed_find: Option<char>,
     typing: String,
-    query: String,
+    query: Query,
     backward: bool,
     /// The mode a search returns to.
     anchor_search: VimMode,
@@ -149,7 +149,7 @@ impl<A: Clone> Vim<A> {
             last_find: None,
             last_typed_find: None,
             typing: String::new(),
-            query: String::new(),
+            query: Query::default(),
             backward: false,
             anchor_search: VimMode::Normal,
             matches_hidden: false,
@@ -319,7 +319,7 @@ impl<A: Clone> Vim<A> {
     /// Where the last search matches, for painting.
     pub fn matches(&self, text: &str) -> Vec<Range<usize>> {
         if self.mode == VimMode::Search {
-            return find_all(text, &self.typing);
+            return find_all(text, &Query::typed(&self.typing));
         }
         if self.matches_hidden {
             return Vec::new();
@@ -341,7 +341,7 @@ impl<A: Clone> Vim<A> {
         if ev.key == Key::Escape {
             let busy = self.is_pending() || self.visual();
             // With nothing else to cancel, Escape hides the search's matches, as `:noh` does.
-            let shown = !busy && !self.matches_hidden && !self.query.is_empty();
+            let shown = !busy && !self.matches_hidden && !self.query.text.is_empty();
             if shown {
                 self.matches_hidden = true;
             }
@@ -747,7 +747,10 @@ impl<A: Clone> Vim<A> {
                     self.reset_pending();
                     return Some(VimEffect::Moved);
                 };
-                self.query = format!("\\b{}", b.chars[word].iter().collect::<String>());
+                self.query = Query {
+                    text: b.chars[word].iter().collect(),
+                    whole_word: true,
+                };
                 self.backward = m == Motion::SearchWordBack;
                 match self.next_match(text, self.backward) {
                     Some(t) => (b.index(t), Kind::Exclusive),
@@ -810,7 +813,8 @@ impl<A: Clone> Vim<A> {
         text: &str,
         b: &Buf,
     ) -> Option<VimEffect<A>> {
-        let count = self.count.take().unwrap_or(1) * op.as_ref().and_then(|(_, _, c)| *c).unwrap_or(1);
+        let count =
+            self.count.take().unwrap_or(1) * op.as_ref().and_then(|(_, _, c)| *c).unwrap_or(1);
         self.reset_pending();
         let cur = b.index(self.cursor);
         let Some(range) = counted_object(b, cur, object, around, count.min(MAX_COUNT)) else {
@@ -902,7 +906,7 @@ impl<A: Clone> Vim<A> {
             Key::Enter => {
                 self.mode = self.anchor_search;
                 if !self.typing.is_empty() {
-                    self.query = std::mem::take(&mut self.typing);
+                    self.query = Query::typed(&std::mem::take(&mut self.typing));
                 }
                 if let Some(t) = self.next_match(text, self.backward) {
                     return self.go(b.index(t), Kind::Exclusive, None, text, b);
@@ -920,10 +924,7 @@ impl<A: Clone> Vim<A> {
         self.matches_hidden = false;
         let found = find_all(text, &self.query);
         if found.is_empty() {
-            self.message = Some(format!(
-                "Pattern not found: {}",
-                self.query.trim_start_matches("\\b")
-            ));
+            self.message = Some(format!("Pattern not found: {}", self.query.text));
             return None;
         }
         let at = self.cursor;
@@ -1030,24 +1031,36 @@ fn class(c: char, big: bool) -> u8 {
     }
 }
 
-/// Every place `query` occurs, case-insensitive unless it has a capital (Vim's smartcase). A
-/// leading `\b` matches only at the start of a word, as `*` searches.
-pub fn find_all(text: &str, query: &str) -> Vec<Range<usize>> {
-    let (word, query) = match query.strip_prefix("\\b") {
-        Some(q) => (true, q),
-        None => (false, query),
-    };
-    let sensitive = query.chars().any(char::is_uppercase);
-    let boundary = |i: usize| {
+/// A search: the text to find, and whether it must start a word (`*` and `#` search whole words).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Query {
+    pub text: String,
+    pub whole_word: bool,
+}
+
+impl Query {
+    /// A search as typed after `/` or `?`.
+    pub fn typed(text: &str) -> Query {
+        Query {
+            text: text.to_owned(),
+            whole_word: false,
+        }
+    }
+}
+
+/// Every place `query` occurs, case-insensitive unless it has a capital (Vim's smartcase).
+pub fn find_all(text: &str, query: &Query) -> Vec<Range<usize>> {
+    let sensitive = query.text.chars().any(char::is_uppercase);
+    let starts_word = |i: usize| {
         i == 0
             || !text[..i]
                 .chars()
                 .next_back()
                 .is_some_and(|c| c.is_alphanumeric() || c == '_')
     };
-    find_folded(text, query, !sensitive)
+    find_folded(text, &query.text, !sensitive)
         .into_iter()
-        .filter(|r| !word || boundary(r.start))
+        .filter(|r| !query.whole_word || starts_word(r.start))
         .collect()
 }
 
@@ -1285,14 +1298,21 @@ fn word_at(b: &Buf, i: usize, big: bool) -> Option<Range<usize>> {
 /// `count` text objects from `cur`, as Vim takes them. Words and paragraphs run on, each from the
 /// end of the one before (a space run counts as a word, a blank run as a paragraph). Brackets
 /// grow out a pair at a time. Quotes take no count.
-fn counted_object(b: &Buf, cur: usize, object: Object, around: bool, count: usize) -> Option<Range<usize>> {
+fn counted_object(
+    b: &Buf,
+    cur: usize,
+    object: Object,
+    around: bool,
+    count: usize,
+) -> Option<Range<usize>> {
     let first = text_object(b, cur, object, around)?;
     match object {
         Object::Word | Object::BigWord | Object::Paragraph => {
             let mut range = first;
             for _ in 1..count {
                 // A paragraph ends before its newline, so the next one starts past it.
-                let from = range.end + usize::from(object == Object::Paragraph && b.at(range.end) == '\n');
+                let from =
+                    range.end + usize::from(object == Object::Paragraph && b.at(range.end) == '\n');
                 if from >= b.n() {
                     break;
                 }
@@ -1308,7 +1328,10 @@ fn counted_object(b: &Buf, cur: usize, object: Object, around: bool, count: usiz
             for _ in 1..count {
                 // The pair around this one: start looking from just outside its opening bracket.
                 let outer_at = if around { range.start } else { range.start - 1 };
-                let Some(outer) = outer_at.checked_sub(1).and_then(|at| text_object(b, at, object, around)) else {
+                let Some(outer) = outer_at
+                    .checked_sub(1)
+                    .and_then(|at| text_object(b, at, object, around))
+                else {
                     break;
                 };
                 if outer.start >= range.start {
