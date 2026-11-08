@@ -111,7 +111,10 @@ impl Review {
     }
 
     pub fn get_mut(&mut self, id: CommentId) -> Option<&mut Comment> {
-        self.comments.iter_mut().find(|(i, _)| *i == id).map(|(_, c)| c)
+        self.comments
+            .iter_mut()
+            .find(|(i, _)| *i == id)
+            .map(|(_, c)| c)
     }
 
     /// Where comment `id` is in the order, counted from 0, as the `#n` cards show it.

@@ -323,7 +323,10 @@ impl App_ {
     /// Opens the comment list on the comment picked or under the cursor, or the first, and
     /// shows that comment on the page.
     fn open_list(&mut self, tx: &mut Tx) {
-        let row = self.current().and_then(|id| self.review.position(id)).unwrap_or(0);
+        let row = self
+            .current()
+            .and_then(|id| self.review.position(id))
+            .unwrap_or(0);
         self.list = Some(row);
         tx.scroll_into_view(list_key(row));
         if let Some(id) = self.review.at_position(row) {
@@ -1239,25 +1242,51 @@ fn deliver(feedback: &str, out: Option<&str>, stdout: &mut impl Write) -> Result
         return Ok(());
     };
     let written = to_stdout(stdout);
-    let shown = if written.is_ok() { ", so it went to stdout" } else { "" };
+    let shown = if written.is_ok() {
+        ", so it went to stdout"
+    } else {
+        ""
+    };
     Err(format!("could not write the review to {path}: {e}{shown}"))
+}
+
+/// The command line: the document to read (`-` for stdin) and where the review goes.
+#[derive(Debug, Default, PartialEq)]
+struct Args {
+    path: Option<String>,
+    out: Option<String>,
+}
+
+/// Parses `[FILE | -] [-o OUT]`.
+fn parse_args(args: &[String]) -> Result<Args, String> {
+    let mut parsed = Args::default();
+    let mut args = args.iter();
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "-o" | "--output" => match args.next() {
+                Some(o) => parsed.out = Some(o.clone()),
+                None => return Err("-o needs a file".into()),
+            },
+            flag if flag.starts_with('-') && flag != "-" => {
+                return Err(format!(
+                    "unknown option {flag}. Usage: mdreview [FILE | -] [-o OUT]"
+                ));
+            }
+            _ if parsed.path.is_some() => {
+                return Err(format!(
+                    "one document at a time, but {a} came after another"
+                ));
+            }
+            _ => parsed.path = Some(a.clone()),
+        }
+    }
+    Ok(parsed)
 }
 
 /// Reads the command line: `[FILE | -] [-o OUT]`. Exits with a message when the document can't
 /// be read.
 fn read_input() -> Input {
-    let mut path = None;
-    let mut out = None;
-    let mut args = rune::extra_args().iter();
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "-o" | "--output" => match args.next() {
-                Some(o) => out = Some(o.clone()),
-                None => fail("-o needs a file"),
-            },
-            _ => path = Some(a.clone()),
-        }
-    }
+    let Args { path, out } = parse_args(rune::extra_args()).unwrap_or_else(|e| fail(&e));
     let (title, source) = match path.as_deref() {
         Some("-") => {
             if std::io::stdin().is_terminal() {

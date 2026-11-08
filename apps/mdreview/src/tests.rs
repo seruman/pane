@@ -47,7 +47,9 @@ fn id_at(rt: &Runtime<App_>, position: usize) -> CommentId {
 
 /// Where the current comment is in the review's order.
 fn position(rt: &Runtime<App_>) -> Option<usize> {
-    rt.state.current().and_then(|id| rt.state.review.position(id))
+    rt.state
+        .current()
+        .and_then(|id| rt.state.review.position(id))
 }
 
 fn range(s: &App_, needle: &str) -> Range<usize> {
@@ -91,7 +93,8 @@ fn feedback_quotes_and_numbers_in_document_order() {
     review.add(Comment::general("Fine overall."));
     review.add(Comment::general("One more thing."));
     assert_eq!(
-        review.comments()[1].body, "One more thing.",
+        review.comments()[1].body,
+        "One more thing.",
         "general comments first, in the order written"
     );
     let out = review
@@ -232,7 +235,8 @@ fn several_general_comments_listed_and_stepped_through() {
         .collect();
     assert_eq!(general, ["First", "Second"]);
     assert!(
-        rt.find(&thread_key(id_at(&rt, 0))).is_some() && rt.find(&thread_key(id_at(&rt, 1))).is_some(),
+        rt.find(&thread_key(id_at(&rt, 0))).is_some()
+            && rt.find(&thread_key(id_at(&rt, 1))).is_some(),
         "both show above the page"
     );
 
@@ -452,11 +456,7 @@ fn the_comment_list_floats_and_jumps() {
     // j and k move the list's cursor, not Vim's, and the page marks that comment.
     press(&mut rt, "jj");
     assert_eq!(rt.state.list, Some(2));
-    assert_eq!(
-        position(&rt),
-        Some(2),
-        "the page marks the list's comment"
-    );
+    assert_eq!(position(&rt), Some(2), "the page marks the list's comment");
     assert!(rt.find(CURRENT_MARK).is_some(), "keyed, to scroll to");
     press(&mut rt, "j");
     assert_eq!(rt.state.list, Some(2), "stops at the end");
@@ -563,20 +563,33 @@ fn a_review_that_cant_be_written_is_an_error_and_still_reaches_stdout() {
 
     let file = dir.join("review.md");
     let mut stdout = Vec::new();
-    assert_eq!(deliver("# Review\n", Some(file.to_str().unwrap()), &mut stdout), Ok(()));
+    assert_eq!(
+        deliver("# Review\n", Some(file.to_str().unwrap()), &mut stdout),
+        Ok(())
+    );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "# Review\n");
     assert!(stdout.is_empty(), "a written file keeps stdout clear");
 
     let unwritable = dir.join("no-such-dir").join("review.md");
     let mut stdout = Vec::new();
-    let result = deliver("# Review\n", Some(unwritable.to_str().unwrap()), &mut stdout);
+    let result = deliver(
+        "# Review\n",
+        Some(unwritable.to_str().unwrap()),
+        &mut stdout,
+    );
     assert!(result.is_err(), "a failed write is an error: {result:?}");
-    assert_eq!(String::from_utf8(stdout).unwrap(), "# Review\n", "and the review isn't lost");
+    assert_eq!(
+        String::from_utf8(stdout).unwrap(),
+        "# Review\n",
+        "and the review isn't lost"
+    );
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 fn click(rt: &mut Runtime<App_>, key_name: &str) {
-    let (x, y) = rt.find(key_name).unwrap_or_else(|| panic!("no {key_name} on screen"));
+    let (x, y) = rt
+        .find(key_name)
+        .unwrap_or_else(|| panic!("no {key_name} on screen"));
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
@@ -598,12 +611,21 @@ fn two_comments() -> Runtime<App_> {
 fn deleting_another_comment_while_editing_keeps_the_edit_on_its_comment() {
     let mut rt = two_comments();
     press(&mut rt, "\\e");
-    assert!(rt.find("composer-field").is_some(), "editing the second comment");
+    assert!(
+        rt.find("composer-field").is_some(),
+        "editing the second comment"
+    );
     let delete = format!("delete-{}", id_at(&rt, 0));
     click(&mut rt, &delete);
     press(&mut rt, " edited");
     key(&mut rt, Key::Enter);
-    let bodies: Vec<&str> = rt.state.review.comments().iter().map(|c| c.body.as_str()).collect();
+    let bodies: Vec<&str> = rt
+        .state
+        .review
+        .comments()
+        .iter()
+        .map(|c| c.body.as_str())
+        .collect();
     assert_eq!(bodies, ["second edited"]);
 }
 
@@ -613,12 +635,46 @@ fn deleting_another_comment_while_editing_keeps_the_editor_and_its_keys() {
     press(&mut rt, "\\e");
     let delete = format!("delete-{}", id_at(&rt, 0));
     click(&mut rt, &delete);
-    assert!(rt.find("composer-field").is_some(), "the editor stays on screen");
+    assert!(
+        rt.find("composer-field").is_some(),
+        "the editor stays on screen"
+    );
     key(&mut rt, Key::Escape);
-    assert!(rt.find("composer-field").is_none(), "Escape still closes it");
+    assert!(
+        rt.find("composer-field").is_none(),
+        "Escape still closes it"
+    );
     let before = rt.state.cursor();
     press(&mut rt, "gg");
     assert_ne!(rt.state.cursor(), before, "and keys reach Vim again");
 }
 
-
+#[test]
+fn the_command_line_takes_one_document_and_an_output() {
+    let args = |a: &[&str]| parse_args(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+    assert_eq!(
+        args(&["plan.md", "-o", "out.md"]),
+        Ok(Args {
+            path: Some("plan.md".into()),
+            out: Some("out.md".into())
+        })
+    );
+    assert_eq!(
+        args(&["-"]),
+        Ok(Args {
+            path: Some("-".into()),
+            out: None
+        })
+    );
+    assert_eq!(args(&[]), Ok(Args::default()));
+    assert!(args(&["-o"]).is_err(), "-o needs a file");
+    assert!(
+        args(&["--help"]).is_err(),
+        "an unknown flag isn't a file name"
+    );
+    assert!(args(&["-x", "plan.md"]).is_err());
+    assert!(
+        args(&["a.md", "b.md"]).is_err(),
+        "a second document isn't taken over the first"
+    );
+}
