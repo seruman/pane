@@ -135,7 +135,7 @@ impl Menu {
                 Effect::Copy(text) => tx.copy(text),
                 Effect::Beep => {}
                 Effect::Finish { status, output } => {
-                    let error = (status == 2).then(|| self.model.message().map(str::to_owned)).flatten();
+                    let error = (status == 2).then(|| self.model.stdin_error().or(self.model.message()).map(str::to_owned)).flatten();
                     self.stop();
                     let mut outcome = OUTCOME.lock().unwrap();
                     if outcome.is_none() { *outcome = Some(Outcome { status, output, error }); }
@@ -184,7 +184,7 @@ impl Menu {
         if OUTCOME.lock().unwrap().is_some() { return; }
         let effects = self.model.handle(Event::Nav(rmenu_core::model::Nav::Cancel));
         let status = effects.iter().find_map(|e| match e { Effect::Finish { status, .. } => Some(*status), _ => None }).unwrap_or(130);
-        let error = (status == 2).then(|| self.model.message().map(str::to_owned)).flatten();
+        let error = (status == 2).then(|| self.model.stdin_error().or(self.model.message()).map(str::to_owned)).flatten();
         self.stop();
         *OUTCOME.lock().unwrap() = Some(Outcome { status, output: Vec::new(), error });
     }

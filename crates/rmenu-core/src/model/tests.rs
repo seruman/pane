@@ -1163,3 +1163,105 @@ fn the_highlight_stays_within_the_listed_rows() {
     assert_eq!(h.model.highlighted_row(), Some(2));
     assert_eq!(h.model.result_count(), 5, "every match is still counted");
 }
+
+// Review fixes.
+
+fn previewed(h: &mut Harness, text: &str) {
+    let Task::Preview { token, .. } = h.take(TaskKind::Preview) else { unreachable!() };
+    h.send(Event::PreviewDone { token, result: Ok(CommandResult { stdout: text.into(), stderr: Vec::new(), status: 0 }) });
+}
+
+#[test]
+fn a_query_with_no_matches_clears_the_preview() {
+    let mut h = start(json!({"sources": [src("a", json!({}))], "preview": ["show"]}));
+    h.load("alpha\nbeta\n");
+    previewed(&mut h, "PREVIEW OF alpha");
+    h.query("zzzz");
+    h.settle();
+    assert_eq!(h.model.result_count(), 0);
+    assert_eq!(h.model.preview(), Some(""), "no row, so no preview");
+}
+
+#[test]
+fn switching_source_after_typing_drops_the_old_sources_preview() {
+    let mut h = start(json!({"sources": [src("a", json!({})), src("b", json!({}))], "preview": ["show"]}));
+    h.load("alpha\nbeta\n");
+    previewed(&mut h, "PREVIEW OF alpha");
+    h.query("al");
+    assert_eq!(h.model.preview(), Some("PREVIEW OF alpha"), "kept while the next search runs");
+    h.switch("b");
+    assert_eq!(h.model.preview(), Some(""));
+    h.load("");
+    assert_eq!(h.model.preview(), Some(""));
+}
+
+#[test]
+fn going_back_drops_the_childs_preview() {
+    let mut h = start(json!({
+        "sources": [repos(json!({})), hidden("child", json!({}))],
+        "bindings": [push_binding()], "preview": ["show"]}));
+    h.load(r#"{"id":"a","title":"alpha"}"#);
+    previewed(&mut h, "PARENT");
+    h.perform(0);
+    h.load(r#"{"id":"x","title":"xray"}"#);
+    previewed(&mut h, "CHILD xray");
+    h.nav(Nav::Back);
+    assert_eq!(h.model.preview(), Some(""), "the parent's own preview comes, not the child's");
+}
+
+#[test]
+fn an_operation_failure_survives_typing_and_moving() {
+    let mut h = operations(json!([{"key": "ctrl+d", "action": "run", "command": ["fail"]}]));
+    h.load("one\ntwo\n");
+    h.perform(0);
+    h.query("o");
+    h.finish_operation(3, "permission denied\n");
+    h.settle();
+    h.query("on");
+    h.nav(Nav::Down);
+    assert_eq!(h.model.message(), Some("Command exited 3: permission denied"));
+    h.settle();
+    h.perform(0);
+    assert!(h.model.message().unwrap().starts_with("Running"), "the next action replaces it");
+    h.finish_operation(0, "");
+    h.query("o");
+    assert_eq!(h.model.message(), None, "a later success is an acknowledgement again");
+}
+
+#[test]
+fn acknowledgements_retire_on_the_next_key() {
+    let mut h = operations(json!([{"key": "ctrl+d", "action": "run", "command": ["ok"]}]));
+    h.load("one\ntwo\n");
+    h.perform(0);
+    h.finish_operation(0, "");
+    assert!(h.model.message().unwrap().ends_with("completed"));
+    h.nav(Nav::Down);
+    assert_eq!(h.model.message(), None);
+}
+
+#[test]
+fn going_back_does_not_show_a_finished_operations_running_line() {
+    let mut h = start(json!({
+        "sources": [repos(json!({})), hidden("child", json!({}))],
+        "bindings": [{"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"]}, push_binding()]}));
+    h.load(r#"{"id":"a","title":"alpha"}"#);
+    h.perform(0);
+    assert!(h.model.message().unwrap().starts_with("Running"));
+    h.perform(1);
+    h.load(r#"{"id":"x","title":"xray"}"#);
+    h.finish_operation(0, "");
+    h.nav(Nav::Back);
+    assert!(!h.model.message().is_some_and(|m| m.starts_with("Running")), "{:?}", h.model.message());
+}
+
+#[test]
+fn a_stdin_failure_is_reported_from_any_level() {
+    let mut h = start(json!({"sources": [hidden("child", json!({}))], "bindings": [push_binding()]}));
+    h.stdin("alpha\n");
+    h.settle();
+    h.perform(0);
+    h.send(Event::StdinFailed("Record 2 contains invalid UTF-8.".into()));
+    h.nav(Nav::Cancel);
+    assert_eq!(h.finished.as_ref().unwrap().0, 2);
+    assert_eq!(h.model.stdin_error(), Some("Record 2 contains invalid UTF-8."));
+}

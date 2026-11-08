@@ -70,6 +70,8 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
     cx.reduced_motion(true);
     let c = palette(menu, cx.system_dark());
     let model = &menu.model;
+    // The terminal's size in points; before the first layout, a typical floating layer.
+    let width = cx.layout_with("root", |r| r[2].round()).unwrap_or(640.0);
     let list = col().key("list").grow(1.0).min_w(0.0).h_full().items_stretch()
         .child(query_row(menu, &c))
         .child(source_strip(menu, &c))
@@ -78,12 +80,13 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
         Some(preview) => row().grow(1.0).w_full().min_h(0.0)
             .child(list)
             .child(el().w(1.0).h_full().fill(c.separator))
-            .child(preview_pane(preview, &c)),
+            // The list keeps at least half the width, as in mmenu.
+            .child(preview_pane(preview, &c, PREVIEW_W.min(width / 2.0))),
         None => row().grow(1.0).w_full().min_h(0.0).child(list),
     };
-    col().w_full().h_full().fill(c.background)
+    col().key("root").w_full().h_full().fill(c.background)
         .child(body)
-        .child(footer(menu, &c))
+        .child(footer(menu, &c, width))
 }
 
 fn query_row(menu: &Menu, c: &Palette) -> El {
@@ -138,25 +141,25 @@ fn results(menu: &Menu, c: &Palette) -> El {
     let count = model.result_count().min(LIST_CAP);
     if count == 0 {
         let (message, color) = if model.input_failed() {
-            ("Input failed — see status below", c.error)
-        } else if model.loading() || model.is_searching() {
+            // The whole error, wrapped, where there's room for it; the footer only has a line.
+            (model.message().unwrap_or("Input failed"), c.error)
+        } else if model.loading() {
+            ("Loading…", c.secondary)
+        } else if model.is_searching() {
             ("", c.secondary)
         } else {
             ("No matches", c.secondary)
         };
-        return col().grow(1.0).pt(28.0).items_center().child(text(message).font(TITLE).color(color));
+        return col().grow(1.0).pt(28.0).px(24.0).items_center()
+            .child(text(message.to_owned()).font(TITLE).color(color).wrap().max_lines(6));
     }
     let c = *c;
-    // Dim only rows from another source still being replaced; a query's search in flight
-    // keeps the last results as they look, or every keystroke would flash.
-    let stale = !model.can_navigate();
     let rows = col().key("rows").w_full().items_stretch().growth(GrowthSpec::default())
         .virtual_rows(count, ROW_H,
             |m: &Menu, i| Cow::Owned(m.model.result(i).id.clone()),
             move |m: &Menu, i| result_row(m, i, &c))
         .virtual_rows_version((model.result_revision(), count));
     col().key("scroller").scroll(ScrollSpec { stick_bottom: false }).w_full().grow(1.0).min_h(0.0).pb(4.0)
-        .opacity(if stale { 0.6 } else { 1.0 })
         .child(rows)
 }
 
@@ -190,6 +193,8 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let line = if selected { line } else { line.hover(c.foreground.alpha(0.05)) };
     el().w_full().h(if subtitle.is_some() { ROW_SUB_H } else { ROW_H }).px(6.0).py(1.0)
         .on_press_tx(move |m: &mut Menu, tx: &mut Tx| {
+            // Typing after a click goes to the query, as it does in mmenu.
+            m.field.focused = true;
             let Some(r) = row_for(m) else { return };
             m.handle(Event::Highlight(r), tx);
             if tx.mods().ctrl && m.model.options().multi { m.handle(Event::ToggleRow(r), tx); }
@@ -207,13 +212,13 @@ fn matched(content: &str, query: &str, style: TextStyle, color: Color, mark: Col
     line.font(style).color(color).truncate_middle()
 }
 
-fn preview_pane(preview: &str, c: &Palette) -> El {
+fn preview_pane(preview: &str, c: &Palette, width: f32) -> El {
     let body = if preview.is_empty() { String::new() } else { plain_text(preview) };
-    col().key("preview").w(PREVIEW_W).h_full().scroll(ScrollSpec { stick_bottom: false })
+    col().key("preview").w(width).h_full().scroll(ScrollSpec { stick_bottom: false })
         .child(el().px(12.0).py(10.0).child(text(body).font(MONO).color(c.foreground).wrap().selectable(true)))
 }
 
-fn footer(menu: &Menu, c: &Palette) -> El {
+fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     let model = &menu.model;
     let status = match model.message() {
         Some(message) => message.to_owned(),
@@ -227,21 +232,43 @@ fn footer(menu: &Menu, c: &Palette) -> El {
     };
     let failed = model.input_failed() || model.message().is_some_and(|m| m.starts_with("Command") || m.starts_with("Cannot"));
     // Enter during a search is queued by the model, so Choose stays lit while one runs.
-    let can_act = model.can_navigate() && !model.running_operation();
+    let can_act = model.can_navigate() && !model.running_operation() && !model.chosen().is_empty();
+    let back = if model.depth() > 0 { "Back" } else { "" };
     let mut bar = row().h(FOOTER_H).w_full().px(14.0).gap(14.0).center_y()
-        .child(keycap_button(if model.depth() > 0 { "Back" } else { "" }, "Esc", true, c)
+        .child(keycap_button(back, "Esc", true, c)
             .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Back), tx)))
         .child(text(status).font(SMALL).color(if failed { c.error } else { c.secondary }).truncate().grow(1.0).min_w(0.0));
-    for (index, binding) in model.options().configuration.bindings.iter().enumerate() {
-        let Some(label) = binding.label.as_deref() else { continue };
-        if !binding.applies(model.source_id()) { continue; }
-        let key = KeyChord::parse(&binding.key).map(|k| k.display()).unwrap_or_else(|_| binding.key.clone());
-        bar = bar.child(keycap_button(label, &key, true, c)
+    let bindings: Vec<(usize, &str, String)> = model.options().configuration.bindings.iter().enumerate()
+        .filter(|(_, b)| b.applies(model.source_id()))
+        .filter_map(|(i, b)| Some((i, b.label.as_deref()?, KeyChord::parse(&b.key).map(|k| k.display()).unwrap_or_else(|_| b.key.clone()))))
+        .collect();
+    // Esc, Choose and a readable status always fit: what's left goes to bindings, labelled
+    // when they all fit that way, keycaps only when that's what fits, the rightmost dropped
+    // after that.
+    let fixed = 28.0 + keycap_width(back, "Esc") + keycap_width("Choose", "↩") + STATUS_MIN_W + 2.0 * 14.0;
+    let room = (width - fixed).max(0.0);
+    let cost = |labelled: bool, n: usize| bindings[..n].iter()
+        .map(|(_, label, key)| 14.0 + keycap_width(if labelled { label } else { "" }, key)).sum::<f32>();
+    let labelled = cost(true, bindings.len()) <= room;
+    let shown = (0..=bindings.len()).rev().find(|&n| cost(labelled, n) <= room).unwrap_or(0);
+    for (index, label, key) in &bindings[..shown] {
+        let index = *index;
+        bar = bar.child(keycap_button(if labelled { label } else { "" }, key, true, c)
             .on_press_tx(move |m: &mut Menu, tx: &mut Tx| m.handle(Event::Perform(index), tx)));
     }
     bar = bar.child(keycap_button("Choose", "↩", can_act, c)
         .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Accept), tx)));
     col().w_full().child(el().h(1.0).w_full().fill(c.separator)).child(bar)
+}
+
+/// The status line's narrowest useful width in the footer.
+const STATUS_MIN_W: f32 = 120.0;
+
+/// A keycap button's width, from average glyph widths of its two fonts: close enough to
+/// decide what fits, and it never draws anything itself.
+fn keycap_width(label: &str, key: &str) -> f32 {
+    let label_w = if label.is_empty() { 0.0 } else { label.chars().count() as f32 * 6.1 + 6.0 };
+    label_w + (key.chars().count() as f32 * 6.4 + 10.0).max(18.0)
 }
 
 fn keycap_button(label: &str, key: &str, enabled: bool, c: &Palette) -> El {

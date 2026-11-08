@@ -170,6 +170,8 @@ struct Level {
     loading: bool,
     input_failed: bool,
     message: Option<String>,
+    /// `message` was the "Running X…" line of an operation in flight when the child was pushed.
+    running_message: bool,
     /// What was chosen here when the child was pushed: the child's input and its path entry.
     chosen: Vec<MenuItem>,
     /// Piped stdin kept streaming into this (root) level while a child was shown.
@@ -207,9 +209,13 @@ pub struct Model {
     loading: bool,
     input_failed: bool,
     message: Option<String>,
+    /// The message is an operation's failure: it stays until the next action, not the next
+    /// keystroke, since the user may be typing when it lands.
+    message_sticky: bool,
     result_revision: u64,
 
-    stdin_failed: bool,
+    /// Piped stdin broke: the exit status is 2 and this is why, at whatever level is shown.
+    stdin_error: Option<String>,
     search: Option<SearchRun>,
     operation: Option<Operation>,
     preview_enabled: bool,
@@ -245,8 +251,9 @@ impl Model {
             loading: true,
             input_failed: false,
             message: None,
+            message_sticky: false,
             result_revision: 0,
-            stdin_failed: false,
+            stdin_error: None,
             search: None,
             operation: None,
             preview_enabled: true,
@@ -319,6 +326,9 @@ impl Model {
 
     /// A status or error line (`Copied 2`, `Command exited 1: ...`).
     pub fn message(&self) -> Option<&str> { self.message.as_deref() }
+
+    /// Why piped stdin failed, if it did: what an exit 2 reports.
+    pub fn stdin_error(&self) -> Option<&str> { self.stdin_error.as_deref() }
 
     /// Some while the preview pane is shown; its text, possibly empty or "Loading…".
     pub fn preview(&self) -> Option<&str> { self.preview_visible().then_some(self.preview_text.as_str()) }
@@ -407,7 +417,7 @@ impl Model {
                 self.stdin_changed();
             }
             Event::StdinFailed(error) => {
-                self.stdin_failed = true;
+                self.stdin_error = Some(error.clone());
                 let (loading, failed, message) = match self.levels.first_mut() {
                     Some(root) => (&mut root.loading, &mut root.input_failed, &mut root.message),
                     None => (&mut self.loading, &mut self.input_failed, &mut self.message),
@@ -604,6 +614,7 @@ impl Model {
             loading: self.loading,
             input_failed: self.input_failed,
             message: self.message.clone(),
+            running_message: self.operation.is_some(),
             chosen: picked,
             stdin_changed,
         });
@@ -632,7 +643,10 @@ impl Model {
         self.query = parent.query;
         self.loading = parent.loading;
         self.input_failed = parent.input_failed;
-        self.message = parent.message;
+        // A parent's "Running X…" is stale once its operation has finished.
+        self.message = parent.message.filter(|_| self.operation.is_some() || !parent.running_message);
+        self.message_sticky = false;
+        self.preview_text.clear();
         self.displayed_source_generation = self.source_generation;
         self.result_revision += 1;
         self.update_preview();
@@ -661,6 +675,11 @@ impl Model {
         self.awaiting_source_data = true;
         self.input_failed = false;
         self.message = None;
+        self.message_sticky = false;
+        // Switching or pushing replaces the rows with another source's; a reload keeps them.
+        if self.pending_selection_reset {
+            self.preview_text.clear();
+        }
         // Keep the presented selection until the replacement commits. Plain ordinal IDs
         // cannot carry checks across reloads; JSONL IDs can.
         self.pending_selection_reset |= source.format != InputFormat::Jsonl;
@@ -787,6 +806,11 @@ impl Model {
         let item = self.highlighted().cloned();
         let shown = self.preview_visible() && self.can_act();
         let identity = item.clone().filter(|_| shown).map(|i| (self.source_generation, i, self.query.clone()));
+        // Settled with nothing highlighted (no matches, an empty source): there is nothing to
+        // preview, so the last item's text must not stay beside it.
+        if identity.is_none() && self.can_act() {
+            self.preview_text.clear();
+        }
         if identity == self.preview_identity {
             return;
         }
@@ -816,7 +840,7 @@ impl Model {
     /// Clears a status line that answered an earlier action. Source failures stay: they
     /// describe the rows on screen.
     fn clear_transient_message(&mut self) {
-        if !self.input_failed && self.operation.is_none() {
+        if !self.input_failed && self.operation.is_none() && !self.message_sticky {
             self.message = None;
         }
     }
@@ -839,6 +863,7 @@ impl Model {
         };
         let token = self.fresh();
         self.message = Some(format!("Running {action}…"));
+        self.message_sticky = false;
         self.operation = Some(Operation { token, action, reload, source_generation: self.source_generation });
         self.effects.push(Effect::Start(Task::Operation {
             token,
@@ -857,8 +882,14 @@ impl Model {
                     self.reload();
                 }
             }
-            Ok(r) => self.message = Some(command_failure(&r)),
-            Err(error) => self.message = Some(error),
+            Ok(r) => {
+                self.message = Some(command_failure(&r));
+                self.message_sticky = true;
+            }
+            Err(error) => {
+                self.message = Some(error);
+                self.message_sticky = true;
+            }
         }
     }
 
@@ -918,7 +949,7 @@ impl Model {
     // A failed command source is one source; the user can switch or just cancel.
     // Failed piped stdin means the caller's whole input broke, which is an error.
     fn cancel(&mut self) {
-        let status = if self.stdin_failed { 2 } else { 130 };
+        let status = if self.stdin_error.is_some() { 2 } else { 130 };
         self.finish(status, Vec::new());
     }
 
