@@ -159,7 +159,7 @@ impl Status {
     /// Rex's mark for the status: a spinner while working, a dot with a halo when done, blocked
     /// or failed, and an empty space of the same size when idle.
     pub fn mark(self, theme: &Theme) -> El {
-        match self {
+        let mark = match self {
             Status::Idle => el().size(13.0, 13.0),
             Status::Working => el().size(13.0, 13.0).center().child(spinner(theme)),
             other => {
@@ -168,11 +168,10 @@ impl Status {
                     .radius(6.5)
                     .center()
                     .fill(color.alpha(0.22))
-                    .role("img")
-                    .label(other.label())
                     .child(el().size(7.0, 7.0).radius(3.5).fill(color))
             }
-        }
+        };
+        mark.role("img").label(self.label())
     }
 }
 

@@ -25,6 +25,8 @@ pub struct MenuItem {
     leading: Option<&'static Icon>,
     trailing: MenuTrailing,
     highlight: Option<Range<usize>>,
+    /// `None` for an item that isn't a toggle.
+    checked: Option<bool>,
     selected: bool,
     disabled: bool,
     handlers: Vec<Attach>,
@@ -37,6 +39,7 @@ impl MenuItem {
             leading: None,
             trailing: MenuTrailing::None,
             highlight: None,
+            checked: None,
             selected: false,
             disabled: false,
             handlers: Vec::new(),
@@ -51,10 +54,10 @@ impl MenuItem {
         self.trailing = MenuTrailing::Shortcut(keys.into());
         self
     }
+    /// Whether the item is ticked, as "Wrap lines" is. A ticked item shows a check at its end
+    /// and reads as checked. Unticked, it reads as unchecked and shows what `trailing` set.
     pub fn checked(mut self, checked: bool) -> Self {
-        if checked {
-            self.trailing = MenuTrailing::Check;
-        }
+        self.checked = Some(checked);
         self
     }
     pub fn submenu(mut self) -> Self {
@@ -107,6 +110,9 @@ impl MenuItem {
             .radius(theme.radius.row)
             .disabled(self.disabled)
             .focusable(!self.disabled);
+        if let Some(checked) = self.checked {
+            item = item.checked(checked);
+        }
         item = if self.selected {
             item.fill(theme.accent)
         } else {
@@ -150,7 +156,11 @@ impl MenuItem {
             ),
         };
         item = item.child(label_el.grow(1.0).min_w(0.0));
-        item = match self.trailing {
+        let trailing = match self.checked {
+            Some(true) => MenuTrailing::Check,
+            _ => self.trailing,
+        };
+        item = match trailing {
             MenuTrailing::None => item,
             MenuTrailing::Shortcut(keys) => {
                 item.child(text(keys).font(theme.ty.body).color(secondary))

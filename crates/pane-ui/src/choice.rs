@@ -213,7 +213,7 @@ impl Select {
             .key(key)
             .role("combobox")
             .label(shown.clone())
-            .checked(self.open)
+            .expanded(self.open)
             .h(28.0)
             .pl(10.0)
             .pr(8.0)
