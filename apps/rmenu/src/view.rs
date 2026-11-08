@@ -172,10 +172,11 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let (text_color, meta) = if selected { (c.selected_text, c.selected_text.alpha(0.75)) } else { (c.foreground, c.secondary) };
     let query = model.shown_query();
     let mark = if selected { c.selected_text } else { c.accent };
+    let (title_marks, subtitle_marks) = rmenu_core::search::item_highlights(query, item);
     let mut labels = col().grow(1.0).min_w(0.0).gap(0.0)
-        .child(matched(&item.title, query, TITLE, text_color, mark));
+        .child(matched(&item.title, title_marks, TITLE, text_color, mark));
     if let Some(subtitle) = subtitle {
-        labels = labels.child(matched(subtitle, query, SMALL, meta, mark));
+        labels = labels.child(matched(subtitle, subtitle_marks, SMALL, meta, mark));
     }
     let mut line = row().w_full().h_full().px(10.0).gap(8.0).center_y().radius(8.0)
         .fill(if selected { c.accent } else if marked { c.accent.alpha(0.2) } else { Color::TRANSPARENT });
@@ -205,8 +206,8 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
 
 /// One line of row text: the characters the query matched in bold accent, the middle elided
 /// when it doesn't fit, so both ends of a path stay readable.
-fn matched(content: &str, query: &str, style: TextStyle, color: Color, mark: Color) -> El {
-    let spans: Vec<Span> = rmenu_core::search::highlights(query, content).into_iter()
+fn matched(content: &str, marks: Vec<std::ops::Range<usize>>, style: TextStyle, color: Color, mark: Color) -> El {
+    let spans: Vec<Span> = marks.into_iter()
         .map(|r| Span::new(r.start, r.end).color(mark).weight(650.0)).collect();
     let line = if spans.is_empty() { text(content.to_owned()) } else { rich(content.to_owned(), spans).single_line() };
     line.font(style).color(color).truncate_middle()

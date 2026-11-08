@@ -189,3 +189,23 @@ fn highlights_cover_whole_graphemes() {
     assert_eq!(marked("e", "e\u{301}x"), ["e\u{301}"], "a combining mark is marked with its base");
     assert_eq!(marked("b", "a\r\nb"), ["b"]);
 }
+
+#[test]
+fn item_highlights_follow_the_text_the_row_matched() {
+    let marked = |query, item: &MenuItem| {
+        let (title, subtitle) = super::item_highlights(query, item);
+        let sub = item.subtitle.as_deref().unwrap_or("");
+        (title.into_iter().map(|r| item.title[r].to_owned()).collect::<Vec<_>>(),
+         subtitle.into_iter().map(|r| sub[r].to_owned()).collect::<Vec<_>>())
+    };
+    let mut item = MenuItem::new("1", "a");
+    item.subtitle = Some("b".into());
+    assert_eq!(search(&SearchIndex::new(std::slice::from_ref(&item)), "ab"), [0], "fixture: the row matches");
+    assert_eq!(marked("ab", &item), (vec!["a".into()], vec!["b".into()]), "a token spanning both fields marks both");
+    let mut item = MenuItem::new("1", "src/rune");
+    item.subtitle = Some("seruman".into());
+    assert_eq!(marked("rune ser", &item), (vec!["rune".into()], vec!["ser".into()]));
+    item.search = Some("Override".into());
+    assert_eq!(marked("rune", &item), (vec!["rune".into()], vec![]),
+               "a search override can't map to shown text, so each field is marked on its own");
+}

@@ -1,5 +1,6 @@
 //! Fuzzy-ranked matching on nucleo-matcher.
 
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
@@ -21,9 +22,8 @@ pub struct SearchIndex {
     len: usize,
 }
 
-/// Byte ranges of `text` the query matched, merged and in order, for highlighting a row.
-/// Ranges index `text`, a row's title or subtitle, matched on its own.
-pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
+/// Byte ranges of `text` the query matched, merged and in order.
+fn highlights(query: &str, text: &str) -> Vec<Range<usize>> {
     let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
     if pattern.atoms.is_empty() { return Vec::new(); }
     let mut matcher = Matcher::new(Config::DEFAULT);
@@ -36,7 +36,7 @@ pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
         let mut found = Vec::new();
         if atom.indices(haystack, &mut matcher, &mut found).is_some() { hits.extend(found); }
     }
-    let graphemes: Vec<std::ops::Range<usize>> =
+    let graphemes: Vec<Range<usize>> =
         text.grapheme_indices(true).map(|(start, g)| start..start + g.len()).collect();
     // `Utf32Str::new` keeps a text whose graphemes all start with ASCII as its bytes, so a hit
     // is a byte offset there. Otherwise nucleo keeps one char per grapheme and a hit counts graphemes.
@@ -46,7 +46,7 @@ pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
     }).collect();
     marked.sort_unstable();
     marked.dedup();
-    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut ranges: Vec<Range<usize>> = Vec::new();
     for grapheme in marked {
         let range = graphemes[grapheme].clone();
         match ranges.last_mut() {
@@ -55,6 +55,21 @@ pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
         }
     }
     ranges
+}
+
+/// Byte ranges to mark in a row's title and in its subtitle. Without a `search` override the
+/// query runs on the same title and subtitle text the row was searched by, so a token spanning
+/// both fields marks both. A `search` override isn't shown, so each field is matched on its own.
+pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
+    let subtitle = item.subtitle.as_deref().unwrap_or("");
+    if item.search.is_some() { return (highlights(query, &item.title), highlights(query, subtitle)); }
+    let ranges = highlights(query, &item.search_text());
+    let split = |field: Range<usize>| -> Vec<Range<usize>> {
+        ranges.iter().map(|r| r.start.max(field.start)..r.end.min(field.end)).filter(|r| !r.is_empty())
+            .map(|r| r.start - field.start..r.end - field.start).collect()
+    };
+    let title = item.title.len();
+    (split(0..title), split(title + 1..title + 1 + subtitle.len()))
 }
 
 /// Search was cancelled before finishing.
