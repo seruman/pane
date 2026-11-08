@@ -38,6 +38,8 @@ struct Doc {
     vim: Vim<Act>,
     /// The code block whose copy button shows a check, and since when.
     copied: Option<(usize, Instant)>,
+    /// A one-off note for the status line.
+    note: Option<String>,
 }
 
 /// The document `main` opened before the app starts, so a file it can't read is an error in
@@ -46,7 +48,10 @@ static OPENED: OnceLock<Doc> = OnceLock::new();
 
 impl Default for Doc {
     fn default() -> Self {
-        OPENED.get().cloned().unwrap_or_else(|| Doc::with_source(None, SAMPLE.to_owned()))
+        OPENED
+            .get()
+            .cloned()
+            .unwrap_or_else(|| Doc::with_source(None, SAMPLE.to_owned()))
     }
 }
 
@@ -55,7 +60,9 @@ impl Doc {
     /// error.
     fn open(path: Option<String>) -> Result<Doc, String> {
         let source = match &path {
-            Some(p) => std::fs::read_to_string(p).map_err(|e| format!("could not read {p}: {e}"))?,
+            Some(p) => {
+                std::fs::read_to_string(p).map_err(|e| format!("could not read {p}: {e}"))?
+            }
             None => SAMPLE.to_owned(),
         };
         Ok(Doc::with_source(path, source))
@@ -68,6 +75,7 @@ impl Doc {
             vim: Vim::new(Keymap::vim().action(&[Stroke::Char(' ')], Act::Tick, "Tick the task"))
                 .skip_blank_lines(true),
             copied: None,
+            note: None,
         }
     }
 }
@@ -108,7 +116,8 @@ impl Doc {
         if let Some(path) = &self.path
             && let Err(error) = std::fs::write(path, &self.source)
         {
-            eprintln!("could not save {path}: {error}");
+            // stderr is the terminal the page is drawn on, so the note goes in the status line.
+            self.note = Some(format!("could not save {path}: {error}"));
         }
     }
 }
@@ -289,12 +298,12 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
         .child(bar)
         .child(el().h(1.0).w_full().fill(theme.separator))
         .child(content.grow(1.0).min_h(0.0))
-        .child(status_line(&s.vim, &page, &theme))
+        .child(status_line(&s.vim, s.note.as_deref(), &page, &theme))
 }
 
 /// Vim's status line: the mode (or the search being typed), a note, half-typed keys and the
 /// cursor's line.
-fn status_line(vim: &Vim<Act>, page: &RenderedText, theme: &Theme) -> El {
+fn status_line(vim: &Vim<Act>, note: Option<&str>, page: &RenderedText, theme: &Theme) -> El {
     let text_of = page.text();
     let line = text_of[..vim.cursor(text_of).start].matches('\n').count() + 1;
     let lines = text_of.matches('\n').count() + 1;
@@ -321,7 +330,7 @@ fn status_line(vim: &Vim<Act>, page: &RenderedText, theme: &Theme) -> El {
         .fill(theme.group)
         .child(mode)
         .child(
-            text(vim.message().unwrap_or_default().to_owned())
+            text(note.or(vim.message()).unwrap_or_default().to_owned())
                 .font(theme.ty.caption)
                 .color(theme.text_secondary)
                 .truncate()
@@ -341,6 +350,7 @@ fn status_line(vim: &Vim<Act>, page: &RenderedText, theme: &Theme) -> El {
 }
 
 fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
+    s.note = None;
     let page = RenderedText::new(&s.source);
     match s.vim.key(k, page.text()) {
         Some(VimEffect::Moved) => {
@@ -474,15 +484,49 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let missing = dir.join("missing.md");
         let missing_path = missing.to_str().unwrap().to_owned();
-        assert!(Doc::open(Some(missing_path.clone())).is_err(), "a missing file is an error");
+        assert!(
+            Doc::open(Some(missing_path.clone())).is_err(),
+            "a missing file is an error"
+        );
         assert!(!missing.exists(), "and nothing is written to its path");
 
         let real = dir.join("plan.md");
         std::fs::write(&real, "- [ ] one\n").unwrap();
         let doc = Doc::open(Some(real.to_str().unwrap().to_owned())).unwrap();
         assert_eq!(doc.source, "- [ ] one\n");
-        assert_eq!(Doc::open(None).unwrap().source, SAMPLE, "no file shows the sample");
+        assert_eq!(
+            Doc::open(None).unwrap().source,
+            SAMPLE,
+            "no file shows the sample"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_failed_save_shows_in_the_status_line() {
+        let dir = std::env::temp_dir().join(format!("mdview-save-{}", std::process::id()));
+        let missing = dir.join("gone").join("plan.md");
+        let mut doc = Doc::with_source(
+            Some(missing.to_str().unwrap().to_owned()),
+            "- [ ] one\n".to_owned(),
+        );
+        let page = RenderedText::new(&doc.source);
+        let (offset, checked) = doc.task_under_cursor(&page).unwrap();
+        doc.set_task(offset, !checked);
+        assert_eq!(doc.source, "- [x] one\n");
+        let note = doc.note.clone().unwrap_or_default();
+        assert!(
+            note.starts_with("could not save"),
+            "the user sees the failure: {note:?}"
+        );
+
+        let mut rt = rune::Runtime::new(doc, view, (600.0, 400.0), rune::Env::default());
+        rt.frame(0.0);
+        let shown: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
+        assert!(
+            shown.iter().any(|t| t.starts_with("could not save")),
+            "in the status line: {shown:?}"
+        );
     }
 
     #[test]
