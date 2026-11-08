@@ -25,4 +25,4 @@ commands and search; `crates/rmenu` holds the CLI, the host that runs effects on
 the view.
 
 `examples/repos/run.sh` is a fuller example: your ghq repositories with a Worktrees level
-(Ctrl-W), a git preview (Alt-P) and marks (Tab). It needs `ghq` and `git`.
+(Ctrl-W), a git preview (Alt-P) and marks (Tab). It needs `ghq`, `git`, `jq` and `bash`.
