@@ -1,0 +1,17 @@
+[package]
+name = "rex-review"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Review a Markdown document in a terminal pane: comment on what you select with Vim's keys, and send the review as Markdown feedback."
+
+[dependencies]
+rune = { workspace = true, features = ["terminal"] }
+rune-kit = { workspace = true, features = ["markdown"] }
+rex-ui.workspace = true
+rex-vim.workspace = true
+# The same parser `rune-kit` draws with, to cut the page into its top-level blocks.
+pulldown-cmark = { version = "0.13", default-features = false }
+
+[lints]
+workspace = true

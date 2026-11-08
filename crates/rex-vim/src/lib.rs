@@ -247,6 +247,20 @@ impl Vim {
         b.byte(i)..b.byte(i + 1)
     }
 
+    /// Puts the cursor on the character at byte `at` of `text` and drops back to Normal, as a
+    /// jump the app makes (to a mark, a comment) does.
+    pub fn set_cursor(&mut self, at: usize, text: &str) {
+        let b = Buf::new(text);
+        if b.n() == 0 {
+            return;
+        }
+        let i = b.index(at.min(text.len())).min(b.n() - 1);
+        self.cursor = b.byte(i);
+        self.want_col = i - b.line_start(i);
+        self.mode = VimMode::Normal;
+        self.reset_pending();
+    }
+
     /// The selected bytes in visual modes.
     pub fn selection(&self, text: &str) -> Option<Range<usize>> {
         let b = Buf::new(text);

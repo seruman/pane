@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rex-ui", "crates/rex-vim", "apps/rex-md", "apps/rex-pane"]
+members = ["crates/rex-ui", "crates/rex-vim", "apps/rex-md", "apps/rex-pane", "apps/rex-review"]
 
 [workspace.package]
 edition = "2024"
