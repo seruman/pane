@@ -3,7 +3,12 @@
 source (path dirname -- (status filename))/_mmenu_git.fish
 
 function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, in a Rex floating layer'
-    _mmenu_require ghqr ghq git jq; or return
+    _mmenu_require ghqr ghq git git-memo jq; or return
+    # The split and tab keys call _git_dir_action, which lives in the user's fish config.
+    if _mmenu_in_rex; and not functions -q _git_dir_action
+        printf 'ghqr: missing function: _git_dir_action\n' >&2
+        return 127
+    end
     set -l menu $RMENU_BIN
     test -n "$menu"; or set menu (path resolve -- (path dirname -- (status filename))/../target/release/rmenu)
     test -x "$menu"; or begin
