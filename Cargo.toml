@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rex-ui", "crates/rex-vim", "apps/rex-md", "apps/rex-pane", "apps/rex-review"]
+members = ["crates/pane-ui", "crates/vimkeys", "apps/mdview", "apps/gallery", "apps/mdreview"]
 
 [workspace.package]
 edition = "2024"
@@ -11,8 +11,8 @@ license = "MIT"
 [workspace.dependencies]
 rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune" }
 rune-kit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-kit" }
-rex-ui = { path = "crates/rex-ui" }
-rex-vim = { path = "crates/rex-vim" }
+pane-ui = { path = "crates/pane-ui" }
+vimkeys = { path = "crates/vimkeys" }
 
 [profile.dev.package."*"]
 debug = false

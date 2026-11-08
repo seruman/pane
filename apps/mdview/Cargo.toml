@@ -1,0 +1,15 @@
+[package]
+name = "mdview"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "A Markdown viewer for a terminal pane, read with Vim's keys."
+
+[dependencies]
+rune = { workspace = true, features = ["terminal"] }
+rune-kit = { workspace = true, features = ["markdown", "mermaid"] }
+pane-ui.workspace = true
+vimkeys.workspace = true
+
+[lints]
+workspace = true

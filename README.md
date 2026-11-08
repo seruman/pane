@@ -1,14 +1,15 @@
-# rex-kit
+# pane
 
 Apps and components for programs that draw inside a terminal pane (Rex, Ghostty, kitty) with
 [Rune](https://github.com/anomalyco/rune) through its terminal shell, in the terminal's own colours.
 
 | Path | What |
 | --- | --- |
-| `crates/rex-ui` | Rex-style components: buttons, fields, toggles, sliders, selects, settings groups, lists, menus, dialogs, the command palette, toasts, and layout that wraps and stacks in a narrow pane. See its README. |
-| `crates/rex-vim` | Vim's motions, text objects, search and yank over any text, for read-only views. Knows nothing about what draws the text. |
-| `apps/rex-md` | A Markdown viewer read with Vim's keys: GFM tables, task lists (Space ticks the one under the cursor), code with a copy button, diff and Mermaid fences. |
-| `apps/rex-pane` | Every rex-ui component on one page. |
+| `crates/pane-ui` | Rex-style components: buttons, fields, toggles, sliders, selects, settings groups, lists, menus, dialogs, the command palette, toasts, and layout that wraps and stacks in a narrow pane. See its README. |
+| `crates/vimkeys` | Vim's keys over any text, for read-only views: motions, text objects, search and yank as bindings in a `Keymap`, to which an app adds its own actions, operators and a leader. Knows nothing about what draws the text. |
+| `apps/mdview` | A Markdown viewer read with Vim's keys: GFM tables, task lists (Space ticks the one under the cursor), code with a copy button, diff and Mermaid fences. |
+| `apps/mdreview` | Review a Markdown document the way a pull request is reviewed: select with Vim's keys, comment (`c`) or mark for removal (`d`), with the comments under their blocks; `:wq` writes the review as Markdown feedback. |
+| `apps/gallery` | Every pane-ui component on one page. |
 
 ## Rune
 
@@ -25,9 +26,15 @@ The toolchain is pinned to Rune's (`rust-toolchain.toml`); move them together.
 ```sh
 cargo build --release
 scripts/fmt.sh            # rustfmt; `cargo fmt --all` would also reformat the Rune checkout
-RUNE_TERMINAL=1 ./target/release/rex-md README.md
-RUNE_TERMINAL=1 ./target/release/rex-pane
+RUNE_TERMINAL=1 ./target/release/mdview README.md
+RUNE_TERMINAL=1 ./target/release/mdreview PLAN.md -o review.md
+RUNE_TERMINAL=1 ./target/release/gallery
 ```
 
 Without `RUNE_TERMINAL=1` they open a window. `--snap out.png --size 800x600` renders a frame
 without one, as any Rune app does.
+
+## Names
+
+The names are working names. `scripts/rename.py OLD NEW …` renames a crate or app: its folder,
+its package name and its Rust name wherever they appear.

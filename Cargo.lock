@@ -1007,6 +1007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gallery"
+version = "0.1.0"
+dependencies = [
+ "pane-ui",
+ "rune",
+ "rune-kit",
+]
+
+[[package]]
 name = "gethostname"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1459,6 +1468,27 @@ name = "log"
 version = "0.4.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
+
+[[package]]
+name = "mdreview"
+version = "0.1.0"
+dependencies = [
+ "pane-ui",
+ "pulldown-cmark",
+ "rune",
+ "rune-kit",
+ "vimkeys",
+]
+
+[[package]]
+name = "mdview"
+version = "0.1.0"
+dependencies = [
+ "pane-ui",
+ "rune",
+ "rune-kit",
+ "vimkeys",
+]
 
 [[package]]
 name = "memchr"
@@ -2071,6 +2101,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pane-ui"
+version = "0.1.0"
+dependencies = [
+ "rune",
+ "rune-kit",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2505,51 +2543,6 @@ dependencies = [
  "svgtypes",
  "tiny-skia",
  "usvg",
-]
-
-[[package]]
-name = "rex-md"
-version = "0.1.0"
-dependencies = [
- "rex-ui",
- "rex-vim",
- "rune",
- "rune-kit",
-]
-
-[[package]]
-name = "rex-pane"
-version = "0.1.0"
-dependencies = [
- "rex-ui",
- "rune",
- "rune-kit",
-]
-
-[[package]]
-name = "rex-review"
-version = "0.1.0"
-dependencies = [
- "pulldown-cmark",
- "rex-ui",
- "rex-vim",
- "rune",
- "rune-kit",
-]
-
-[[package]]
-name = "rex-ui"
-version = "0.1.0"
-dependencies = [
- "rune",
- "rune-kit",
-]
-
-[[package]]
-name = "rex-vim"
-version = "0.1.0"
-dependencies = [
- "rune",
 ]
 
 [[package]]
@@ -3451,6 +3444,13 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vimkeys"
+version = "0.1.0"
+dependencies = [
+ "rune",
+]
 
 [[package]]
 name = "walkdir"
