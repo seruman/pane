@@ -23,9 +23,10 @@
 mod page;
 mod review;
 
-use std::io::{IsTerminal as _, Read as _, Write as _};
+use std::io::{IsTerminal as _, Read as _, Write};
 use std::ops::Range;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use pane_ui::{Badge, Button, Theme, Tone, icons, kbd};
 use rune::{
@@ -1174,29 +1175,41 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
 }
 
 /// Sends the review on the way out, when `:wq` or `ZZ` asked: to the file `-o` names, or to
-/// stdout once the terminal is the shell's again.
+/// stdout once the terminal is the shell's again. A review that can't be written sets
+/// [`SEND_FAILED`], so `main` exits non-zero.
 fn send(s: &mut App_, _: &mut Tx) {
     if s.send && s.composer.is_some() {
         s.save();
     }
     let Some(feedback) = s.feedback() else { return };
-    match &s.out {
-        Some(path) => {
-            if let Err(e) = std::fs::write(path, &feedback) {
-                eprintln!("mdreview: could not write {path}: {e}");
-            }
-        }
-        None => {
-            let mut out = std::io::stdout();
-            if out
-                .write_all(feedback.as_bytes())
-                .and_then(|()| out.flush())
-                .is_err()
-            {
-                eprintln!("mdreview: could not write the review to stdout");
-            }
-        }
+    if let Err(e) = deliver(&feedback, s.out.as_deref(), &mut std::io::stdout()) {
+        eprintln!("mdreview: {e}");
+        SEND_FAILED.store(true, Ordering::Relaxed);
     }
+}
+
+/// The review couldn't be written. `on_quit` can't return an exit code, so it tells `main`.
+static SEND_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Writes `feedback` to the file at `out`, or to `stdout` when there's none. When the file
+/// can't be written the review goes to `stdout` instead, so it isn't lost, and the error
+/// comes back.
+fn deliver(feedback: &str, out: Option<&str>, stdout: &mut impl Write) -> Result<(), String> {
+    let to_stdout = |stdout: &mut dyn Write| {
+        stdout
+            .write_all(feedback.as_bytes())
+            .and_then(|()| stdout.flush())
+            .map_err(|e| format!("could not write the review to stdout: {e}"))
+    };
+    let Some(path) = out else {
+        return to_stdout(stdout);
+    };
+    let Err(e) = std::fs::write(path, feedback) else {
+        return Ok(());
+    };
+    let written = to_stdout(stdout);
+    let shown = if written.is_ok() { ", so it went to stdout" } else { "" };
+    Err(format!("could not write the review to {path}: {e}{shown}"))
 }
 
 /// Reads the command line: `[FILE | -] [-o OUT]`. Exits with a message when the document can't
@@ -1342,6 +1355,9 @@ fn main() {
     })
     .on_quit(send)
     .run();
+    if SEND_FAILED.load(Ordering::Relaxed) {
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]

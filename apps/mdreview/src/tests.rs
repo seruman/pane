@@ -550,3 +550,22 @@ fn counts_work_in_visual_mode() {
     let sel = rt.state.vim.selection(rt.state.page.text()).unwrap();
     assert_eq!(&rt.state.page.text()[sel], "Some bold");
 }
+
+#[test]
+fn a_review_that_cant_be_written_is_an_error_and_still_reaches_stdout() {
+    let dir = std::env::temp_dir().join(format!("mdreview-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let file = dir.join("review.md");
+    let mut stdout = Vec::new();
+    assert_eq!(deliver("# Review\n", Some(file.to_str().unwrap()), &mut stdout), Ok(()));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "# Review\n");
+    assert!(stdout.is_empty(), "a written file keeps stdout clear");
+
+    let unwritable = dir.join("no-such-dir").join("review.md");
+    let mut stdout = Vec::new();
+    let result = deliver("# Review\n", Some(unwritable.to_str().unwrap()), &mut stdout);
+    assert!(result.is_err(), "a failed write is an error: {result:?}");
+    assert_eq!(String::from_utf8(stdout).unwrap(), "# Review\n", "and the review isn't lost");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
