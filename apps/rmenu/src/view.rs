@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use rmenu_core::config::KeyChord;
 use rmenu_core::model::{Event, Nav, Target};
 use rune::tok;
-use rune::{Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text, text_input};
+use rune::{Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, Span, TextStyle, Tx, col, el, rich, row, text, text_input};
 
 use crate::cli::Appearance;
 use crate::host::Menu;
@@ -135,8 +135,8 @@ fn results(menu: &Menu, c: &Palette) -> El {
     if count == 0 {
         let (message, color) = if model.input_failed() {
             ("Input failed — see status below", c.error)
-        } else if model.loading() {
-            ("Loading…", c.secondary)
+        } else if model.loading() || model.is_searching() {
+            ("", c.secondary)
         } else {
             ("No matches", c.secondary)
         };
@@ -163,10 +163,12 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let marked = model.is_marked(item);
     let subtitle = item.subtitle.as_deref().filter(|s| !s.is_empty());
     let (text_color, meta) = if selected { (c.selected_text, c.selected_text.alpha(0.75)) } else { (c.foreground, c.secondary) };
+    let query = model.shown_query();
+    let mark = if selected { c.selected_text } else { c.accent };
     let mut labels = col().grow(1.0).min_w(0.0).gap(0.0)
-        .child(text(item.title.clone()).font(TITLE).color(text_color).truncate());
+        .child(matched(&item.title, query, TITLE, text_color, mark));
     if let Some(subtitle) = subtitle {
-        labels = labels.child(text(subtitle.to_owned()).font(SMALL).color(meta).truncate());
+        labels = labels.child(matched(subtitle, query, SMALL, meta, mark));
     }
     let mut line = row().w_full().h_full().px(10.0).gap(8.0).center_y().radius(8.0)
         .fill(if selected { c.accent } else if marked { c.accent.alpha(0.2) } else { Color::TRANSPARENT });
@@ -181,6 +183,7 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let id = item.id.clone();
     // Handlers find their row by item ID: the index a virtual row was built at can go stale.
     let row_for = move |m: &Menu| (0..m.model.result_count()).find(|&r| m.model.result(r).id == id);
+    let line = if selected { line } else { line.hover(c.foreground.alpha(0.05)) };
     el().w_full().h(if subtitle.is_some() { ROW_SUB_H } else { ROW_H }).px(6.0).py(1.0)
         .on_press_tx(move |m: &mut Menu, tx: &mut Tx| {
             let Some(r) = row_for(m) else { return };
@@ -189,6 +192,15 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
         })
         .on_double_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Accept), tx))
         .child(line)
+}
+
+/// One line of row text: the characters the query matched in bold accent, the middle elided
+/// when it doesn't fit, so both ends of a path stay readable.
+fn matched(content: &str, query: &str, style: TextStyle, color: Color, mark: Color) -> El {
+    let spans: Vec<Span> = rmenu_core::search::highlights(query, content).into_iter()
+        .map(|r| Span::new(r.start, r.end).color(mark).weight(650.0)).collect();
+    let line = if spans.is_empty() { text(content.to_owned()) } else { rich(content.to_owned(), spans).single_line() };
+    line.font(style).color(color).truncate_middle()
 }
 
 fn preview_pane(preview: &str, c: &Palette) -> El {

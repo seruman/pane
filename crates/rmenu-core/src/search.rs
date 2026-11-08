@@ -20,6 +20,36 @@ pub struct SearchIndex {
     len: usize,
 }
 
+/// Byte ranges of `text` the query matched, merged and in order, for highlighting a row.
+/// Ranges index `text`, a row's title or subtitle, matched on its own.
+pub fn highlights(query: &str, text: &str) -> Vec<std::ops::Range<usize>> {
+    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+    if pattern.atoms.is_empty() { return Vec::new(); }
+    let mut matcher = Matcher::new(Config::DEFAULT);
+    let mut buf = Vec::new();
+    let haystack = nucleo_matcher::Utf32Str::new(text, &mut buf);
+    let mut chars = Vec::new();
+    // Each token matches on its own here, so a row whose title holds only some of the
+    // query's tokens still shows which ones.
+    for atom in &pattern.atoms {
+        let mut found = Vec::new();
+        if atom.indices(haystack, &mut matcher, &mut found).is_some() { chars.extend(found); }
+    }
+    chars.sort_unstable();
+    chars.dedup();
+    let starts: Vec<usize> = text.char_indices().map(|(i, _)| i).collect();
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for c in chars {
+        let Some(&start) = starts.get(c as usize) else { continue };
+        let end = starts.get(c as usize + 1).copied().unwrap_or(text.len());
+        match ranges.last_mut() {
+            Some(last) if last.end == start => last.end = end,
+            _ => ranges.push(start..end),
+        }
+    }
+    ranges
+}
+
 /// Search was cancelled before finishing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cancelled;

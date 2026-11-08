@@ -240,7 +240,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
     h.load("alpha\nbeta\n");
     h.toggle(1);
     let marks = h.marked();
-    assert_eq!(h.model.preview(), Some("Loading…"));
+    assert_eq!(h.model.preview(), Some(""), "nothing to show until the first preview lands");
 
     h.switch("b");
     assert_eq!(h.model.preview(), Some(""), "the preview clears as the source switches");
@@ -506,17 +506,16 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     assert_eq!(h.model.preview(), Some("a"));
 
     h.query("al");
-    assert_eq!(h.model.preview(), Some(""));
+    assert_eq!(h.model.preview(), Some("a"), "the last preview stays while the next is fetched");
     assert!(cancelled(&h, TaskKind::Preview));
     h.settle();
-    assert_eq!(h.model.preview(), Some("Loading…"));
+    assert_eq!(h.model.preview(), Some("a"));
     let (stale, query) = preview(&mut h, "al");
     assert_eq!(query, "al");
     h.query("alp");
     h.send(stale);
-    assert_eq!(h.model.preview(), Some(""), "a preview for an older query cannot publish");
+    assert_eq!(h.model.preview(), Some("a"), "a preview for an older query cannot publish");
     h.settle();
-    assert_eq!(h.model.preview(), Some("Loading…"));
     let (hidden, _) = preview(&mut h, "alp");
 
     h.perform(0);
@@ -525,7 +524,7 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     h.send(hidden);
     assert_eq!(h.model.preview(), None);
     h.perform(0);
-    assert_eq!(h.model.preview(), Some("Loading…"));
+    assert_eq!(h.model.preview(), Some(""), "a hidden preview comes back empty, not with old text");
 
     h.switch("b");
     assert_eq!(h.model.preview(), Some(""));

@@ -166,3 +166,15 @@ fn sorted_and_unsorted_have_the_same_matches() {
         assert_eq!(ranked, unsorted(&rows, query), "{query:?}");
     }
 }
+
+#[test]
+fn highlights_mark_the_matched_characters_as_byte_ranges() {
+    assert_eq!(super::highlights("rune", "github.com/seruman/rune"), vec![19..23]);
+    assert_eq!(super::highlights("", "anything"), vec![]);
+    assert_eq!(super::highlights("zzz", "abc"), vec![]);
+    let ranges = super::highlights("cafe", "Café/x");
+    assert_eq!(ranges, vec![0..5], "a folded multi-byte character is one whole range");
+    let both = super::highlights("ser rune", "github.com/seruman/rune");
+    assert!(both.iter().any(|r| r.start >= 19), "every token is highlighted: {both:?}");
+    assert!(both.len() >= 2);
+}

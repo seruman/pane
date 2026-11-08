@@ -321,6 +321,10 @@ impl Model {
     /// Some while the preview pane is shown; its text, possibly empty or "Loading…".
     pub fn preview(&self) -> Option<&str> { self.preview_visible().then_some(self.preview_text.as_str()) }
 
+    /// The query the shown results were matched for, which can trail the typed query while
+    /// its search runs. Match highlights use it so they agree with the rows.
+    pub fn shown_query(&self) -> &str { self.shown.query.as_deref().unwrap_or("") }
+
     /// The current level's source ID; None for piped stdin.
     pub fn source_id(&self) -> Option<&str> { self.source_id.as_deref() }
 
@@ -473,13 +477,16 @@ impl Model {
         }
         self.query = value;
         self.invalidate_preview();
-        self.preview_text.clear();
+        self.clear_transient_message();
         self.request_search(false, false);
     }
 
     fn highlight(&mut self, row: usize) {
         if !self.can_navigate() || row >= self.shown.results.len() {
             return;
+        }
+        if self.shown.highlighted_row != Some(row) {
+            self.clear_transient_message();
         }
         self.shown.highlighted_row = Some(row);
         let id = self.result(row).id.clone();
@@ -795,14 +802,21 @@ impl Model {
             items: vec![item.clone()],
             path: self.path(vec![item]),
         };
-        self.preview_text = "Loading…".into();
-        // Only preview execution is delayed; the highlight itself changes immediately.
+        // The last preview stays until this one arrives. Only preview execution is delayed; the highlight itself changes immediately.
         self.effects.push(Effect::Start(Task::Preview {
             token: self.preview_generation,
             argv,
             env: context.environment(),
             delay: Duration::from_millis(60),
         }));
+    }
+
+    /// Clears a status line that answered an earlier action. Source failures stay: they
+    /// describe the rows on screen.
+    fn clear_transient_message(&mut self) {
+        if !self.input_failed && self.operation.is_none() {
+            self.message = None;
+        }
     }
 
     /// Late preview output carries a stale token and cannot publish.
