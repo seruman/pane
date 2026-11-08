@@ -15,8 +15,12 @@ fn main() {
             std::process::exit(2);
         }
     };
-    // SAFETY: setting a signal disposition at startup, before any thread exists.
-    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
+    // SAFETY: both run at startup, before any thread exists.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+        // rmenu only ever draws in the terminal; callers shouldn't have to ask.
+        if std::env::var_os("RUNE_TERMINAL").is_none() { std::env::set_var("RUNE_TERMINAL", "1"); }
+    }
     let spec = AppSpec {
         setup: Some(Menu::setup),
         poll: Some(|m: &mut Menu, _, tx: &mut Tx| m.poll(tx)),

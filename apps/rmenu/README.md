@@ -6,10 +6,10 @@ layer, SSH.
 
 ```sh
 cargo build --release
-ghq list -p | RUNE_TERMINAL=1 target/release/rmenu --prompt Repositories
+ghq list -p | target/release/rmenu --prompt Repositories
 ```
 
-`RUNE_TERMINAL=1` is required; set it in the calling script. Flags, `--config` JSON (sources,
+Flags, `--config` JSON (sources,
 bindings, push levels, preview), stdin formats, `--json` / `--print0` output and exit codes
 (0 chosen, 130 cancelled, 2 failed input) follow mmenu's README.
 
