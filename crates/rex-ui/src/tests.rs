@@ -1,6 +1,7 @@
 use rune::Color;
 
 use crate::{Palette, PaletteEntry, PaletteKey, Rex, palette_matches};
+use rune_kit::Kit;
 
 const ENTRIES: &[PaletteEntry] = &[
     PaletteEntry::new("Dark Theme").section("Appearance"),
@@ -37,4 +38,35 @@ fn text_on_a_fill_contrasts_with_it() {
     let rex = Rex::new(Palette::merino_light());
     assert_eq!(rex.on(Color::BLACK), Color::WHITE);
     assert!(rex.on(Color::WHITE).luminance() < 0.2);
+}
+
+#[test]
+fn the_kit_is_rune_kits_terminal_kit() {
+    for palette in Palette::builtins() {
+        let rex = Rex::new(palette.clone());
+        let terminal = Kit::from_terminal_colors(palette.terminal_colors()).unwrap();
+        assert_eq!(rex.kit.c.page, terminal.c.page, "{}", palette.name);
+        assert_eq!(
+            rex.kit.c.bg_accent, palette.cursor,
+            "{}: the cursor is the accent",
+            palette.name
+        );
+        assert_eq!(
+            rex.kit.c.border_focus, terminal.c.border_focus,
+            "{}",
+            palette.name
+        );
+        assert_eq!(
+            rex.kit.c.danger.fg,
+            palette.ansi[if palette.dark { 9 } else { 1 }],
+            "{}: danger is ANSI red",
+            palette.name
+        );
+        assert_eq!(
+            rex.kit.c.knob,
+            Color::WHITE,
+            "{}: the knob stays white",
+            palette.name
+        );
+    }
 }

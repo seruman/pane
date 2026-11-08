@@ -101,48 +101,6 @@ pub fn heading(title: impl Into<String>, rex: &Rex) -> El {
         .color(rex.text_secondary)
 }
 
-/// A heading and its content, with an optional control at the heading's end.
-pub struct Section {
-    title: String,
-    trailing: Option<El>,
-    children: Vec<El>,
-}
-
-impl Section {
-    pub fn new(title: impl Into<String>) -> Self {
-        Section {
-            title: title.into(),
-            trailing: None,
-            children: Vec::new(),
-        }
-    }
-    pub fn trailing(mut self, trailing: El) -> Self {
-        self.trailing = Some(trailing);
-        self
-    }
-    pub fn child(mut self, child: El) -> Self {
-        self.children.push(child);
-        self
-    }
-    pub fn children(mut self, children: impl IntoIterator<Item = El>) -> Self {
-        self.children.extend(children);
-        self
-    }
-
-    pub fn build(self, rex: &Rex) -> El {
-        let mut head = row()
-            .pt(6.0)
-            .gap(8.0)
-            .center_y()
-            .justify_between()
-            .child(heading(self.title, rex));
-        if let Some(trailing) = self.trailing {
-            head = head.child(trailing);
-        }
-        col().w_full().gap(10.0).child(head).children(self.children)
-    }
-}
-
 /// Columns side by side while each has at least `min_width`, stacked one above the other when
 /// the pane is narrower. Columns share the extra width equally.
 pub struct Columns {
@@ -188,11 +146,6 @@ impl Columns {
                     .map(|(child, min)| col().grow(1.0).min_w(min).child(child)),
             )
     }
-}
-
-/// A row of controls that wraps onto more lines when narrow, as a toolbar of buttons.
-pub fn cluster(gap: f32) -> El {
-    row().flex_wrap().center_y().gaps(gap, gap)
 }
 
 /// Pins `toast` to the bottom of the [`Page`], centred.

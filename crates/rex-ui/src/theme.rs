@@ -2,8 +2,8 @@
 //! only these tokens, so changing a field restyles every component that uses it.
 
 use rune::color::{srgb_decode, srgb_encode};
-use rune::{Color, TextStyle};
-use rune_kit::{Kit, PaletteSeed};
+use rune::{Color, TerminalColors, TextStyle};
+use rune_kit::Kit;
 
 /// A terminal theme: the colours a Rex theme is defined by.
 #[derive(Clone, Debug, PartialEq)]
@@ -101,11 +101,15 @@ impl Palette {
     }
 
     /// The terminal's theme, once it has reported its text and background colours. Colours it
-    /// leaves out come from Merino; a missing cursor falls back to ANSI blue.
+    /// leaves out come from Merino; a missing cursor falls back to ANSI blue. Only the ANSI
+    /// table and the cursor are read from it: the rest of the theme comes from
+    /// [`Kit::from_terminal`], so the two decide alike.
     pub fn from_terminal() -> Option<Palette> {
         let colors = rune::terminal_colors()?;
         let (background, foreground) = (colors.background?, colors.foreground?);
-        let dark = colors.dark.unwrap_or(background.luminance() < 0.18);
+        // Dark from the colours drawn, as `Kit::from_terminal` decides it: the scheme the
+        // terminal reports can be a placeholder while a pane is set up.
+        let dark = foreground.luminance() > background.luminance();
         let base = if dark {
             Palette::merino_dark()
         } else {
@@ -130,6 +134,17 @@ impl Palette {
     pub fn with_cursor(mut self, cursor: Color) -> Palette {
         self.cursor = cursor;
         self
+    }
+
+    /// The palette as a terminal would report it, for [`Kit::from_terminal_colors`].
+    pub fn terminal_colors(&self) -> TerminalColors {
+        let mut colors = TerminalColors::default();
+        colors.background = Some(self.background);
+        colors.foreground = Some(self.foreground);
+        colors.cursor = Some(self.cursor);
+        colors.palette = self.ansi.map(Some);
+        colors.dark = Some(self.dark);
+        colors
     }
 }
 
@@ -216,19 +231,28 @@ pub struct Rex {
 }
 
 impl Rex {
-    /// The terminal's theme inside a terminal, else Merino in `dark`'s appearance.
+    /// The terminal's theme inside a terminal, else Merino in `dark`'s appearance. The
+    /// rune-kit kit is [`Kit::from_terminal`]'s, so rune-kit components inside look as they do
+    /// in any terminal app.
     pub fn current(dark: bool) -> Rex {
-        let palette = Palette::from_terminal().unwrap_or_else(|| {
-            if dark {
+        match Palette::from_terminal() {
+            Some(palette) => Rex::with_kit(palette, Kit::from_terminal(dark)),
+            None => Rex::new(if dark {
                 Palette::merino_dark()
             } else {
                 Palette::merino_light()
-            }
-        });
-        Rex::new(palette)
+            }),
+        }
     }
 
+    /// `palette`'s theme, with the kit rune-kit derives from a terminal in those colours.
     pub fn new(palette: Palette) -> Rex {
+        let kit = Kit::from_terminal_colors(palette.terminal_colors())
+            .unwrap_or_else(|| Kit::neutral(palette.dark));
+        Rex::with_kit(palette, kit)
+    }
+
+    fn with_kit(palette: Palette, mut kit: Kit) -> Rex {
         let (bg, fg, dark) = (palette.background, palette.foreground, palette.dark);
         let (black, white) = (Color::BLACK, Color::WHITE);
         let accent = palette.cursor;
@@ -242,8 +266,6 @@ impl Rex {
             group: 14.0,
             popover: 14.0,
         };
-        let mut kit = Kit::from_palette(PaletteSeed { bg, fg, accent });
-        kit.c.border_focus = accent.alpha(0.9);
         // Rex's switches have a white knob in either appearance.
         kit.c.knob = white;
         kit.c.knob_on = white;

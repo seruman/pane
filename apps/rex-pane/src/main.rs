@@ -12,11 +12,11 @@ use std::time::Duration;
 
 use rex_ui::{
     Badge, Button, Checkbox, Chip, Columns, CommandPalette, Dialog, EmptyState, List, ListRow,
-    Menu, MenuItem, Page, Palette, PaletteEntry, PaletteKey, Rex, Section, SegmentedControl,
-    Select, SettingsGroup, SettingsRow, Slider, Status, Swatch, TextField, Toast, Toggle, Tone,
-    cluster, icons, kbd, modal_layer, palette_matches, progress_bar, spinner, toast_region, token,
+    Menu, MenuItem, Page, Palette, PaletteEntry, PaletteKey, Rex, SegmentedControl, Select,
+    SettingsGroup, SettingsRow, Slider, Status, Swatch, TextField, Toast, Toggle, Tone, heading,
+    icons, kbd, modal_layer, palette_matches, progress_bar, spinner, toast_region, token,
 };
-use rune::{AppSpec, Color, Cx, El, Key, KeyEvent, TextEdit, Tx, el, icon, row, text};
+use rune::{AppSpec, Color, Cx, El, Key, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
 
 const COMMANDS: &[PaletteEntry] = &[
     PaletteEntry::new("Run Tests").shortcut("⌃R"),
@@ -181,51 +181,42 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
     let mut layer = Vec::new();
     let mut page = Page::new()
         .child(top)
-        .child(
-            Section::new("Tabs")
+        .child(section(
+            heading("Tabs", &rex),
+            SegmentedControl::new(TABS)
+                .selected(s.tab)
+                .on_select(|s: &mut State, i| s.tab = i)
+                .build("tabs", &rex),
+        ))
+        .child(section(heading("Buttons", &rex), buttons(s, &rex)))
+        .child(section(
+            heading("Settings", &rex),
+            settings(s, &rex, &mut layer),
+        ))
+        .child(section(
+            row()
+                .gap(8.0)
+                .center_y()
+                .justify_between()
+                .child(heading("Files", &rex))
                 .child(
-                    SegmentedControl::new(TABS)
-                        .selected(s.tab)
-                        .on_select(|s: &mut State, i| s.tab = i)
-                        .build("tabs", &rex),
-                )
-                .build(&rex),
-        )
-        .child(Section::new("Buttons").child(buttons(s, &rex)).build(&rex))
-        .child(
-            Section::new("Settings")
-                .child(settings(s, &rex, &mut layer))
-                .build(&rex),
-        )
-        .child(
-            Section::new("Files")
-                .trailing(
                     Badge::new(format!("{} changed", FILES.iter().filter(|f| f.2).count()))
                         .tone(Tone::Warning)
                         .build(&rex),
-                )
-                .child(files(s, &rex))
-                .build(&rex),
-        )
+                ),
+            files(s, &rex),
+        ))
         .child(
             Columns::new(220.0)
-                .child(Section::new("Menu").child(menu(s, &rex)).build(&rex))
+                .child(section(heading("Menu", &rex), menu(s, &rex)))
                 .child(
                     rune::col()
                         .w_full()
                         .gap(12.0)
-                        .child(
-                            Section::new("Checklist")
-                                .child(checklist(s, &rex))
-                                .build(&rex),
-                        )
-                        .child(Section::new("Status").child(statuses(s, &rex)).build(&rex))
-                        .child(Section::new("Tags").child(tags(&rex)).build(&rex))
-                        .child(
-                            Section::new("Color")
-                                .child(color_picker(s, &rex))
-                                .build(&rex),
-                        ),
+                        .child(section(heading("Checklist", &rex), checklist(s, &rex)))
+                        .child(section(heading("Status", &rex), statuses(s, &rex)))
+                        .child(section(heading("Tags", &rex), tags(&rex)))
+                        .child(section(heading("Color", &rex), color_picker(s, &rex))),
                 )
                 .build(),
         )
@@ -621,4 +612,14 @@ fn main() {
         on_key: Some(on_key),
         ..AppSpec::new("Rex Pane", (900.0, 900.0), State::default, view)
     });
+}
+
+/// A heading and what's under it, as each block of the page is.
+fn section(head: El, content: El) -> El {
+    col().w_full().gap(10.0).child(head.pt(6.0)).child(content)
+}
+
+/// A row of controls that wraps onto more lines when narrow.
+fn cluster(gap: f32) -> El {
+    row().flex_wrap().center_y().gaps(gap, gap)
 }
