@@ -258,7 +258,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
     h.perform(0);
     assert!(!h.model.running_operation());
     h.nav(Nav::Accept);
-    assert_eq!(h.beeps, 1);
+    assert_eq!(h.beeps, 2, "the run and the accept are both refused");
 
     h.load("bravo\n");
     assert!(h.settled());
@@ -925,7 +925,7 @@ fn accept_waits_for_a_running_operation() {
     assert_eq!(h.started.iter().filter(|t| t.kind() == TaskKind::Operation).count(), 1, "operations are serialized");
     h.nav(Nav::Accept);
     assert!(h.finished.is_none(), "accept is refused while an operation runs");
-    assert_eq!(h.beeps, 1);
+    assert_eq!(h.beeps, 2, "the second run and the accept are both refused");
     h.finish_operation(0, "");
     h.nav(Nav::Accept);
     assert_eq!(h.context().items[0].value(), "one");
@@ -1305,4 +1305,33 @@ fn a_click_past_the_listed_rows_marks_nothing() {
     h.load("a\nb\nc\n");
     h.toggle(2);
     assert!(h.marked().is_empty(), "row 2 is not listed, yet {:?} is marked", h.marked());
+}
+
+#[test]
+fn a_refused_run_beeps_and_starts_nothing() {
+    let mut h = operations(json!([{"key": "ctrl+d", "action": "run", "command": ["wait"]}]));
+    h.load("a\nb\n");
+    h.perform(0);
+    h.perform(0);
+    assert_eq!(h.beeps, 1, "a second run while one is running");
+    h.finish_operation(0, "");
+    h.query("zzz");
+    h.settle();
+    h.perform(0);
+    assert_eq!(h.beeps, 2, "a run with nothing chosen");
+    assert_eq!(h.started.iter().filter(|t| t.kind() == TaskKind::Operation).count(), 1);
+}
+
+#[test]
+fn every_action_with_nothing_chosen_beeps() {
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))],
+        "bindings": [push_binding(), {"key": "ctrl+y", "action": "copy"}]}));
+    h.load(&jsonl(&REPOS));
+    h.query("zzz");
+    h.settle();
+    h.nav(Nav::Accept);
+    h.perform(0);
+    h.perform(1);
+    assert_eq!(h.beeps, 3);
+    assert!(h.finished.is_none() && h.model.depth() == 0 && h.copied.is_empty());
 }

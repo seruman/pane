@@ -569,6 +569,7 @@ impl Model {
                 }
                 let values: Vec<String> = self.chosen().iter().map(|i| i.value().to_owned()).collect();
                 if values.is_empty() {
+                    self.effects.push(Effect::Beep);
                     return;
                 }
                 self.effects.push(Effect::Copy(values.join("\n")));
@@ -592,7 +593,8 @@ impl Model {
             }
             BindingAction::Run => {
                 let Some(command) = binding.command.clone() else { return };
-                if self.operation.is_some() || !self.can_act() {
+                if self.operation.is_some() || !self.can_act() || self.chosen().is_empty() {
+                    self.effects.push(Effect::Beep);
                     return;
                 }
                 self.run_operation(command, binding.action_name().to_owned(), binding.reload == Some(true));
@@ -625,6 +627,7 @@ impl Model {
         }
         let picked = self.chosen();
         if picked.is_empty() {
+            self.effects.push(Effect::Beep);
             return;
         }
         let stdin_changed = self.source_id.is_none() && (self.search.is_some() || self.pending_data_search);
@@ -923,6 +926,7 @@ impl Model {
         }
         let picked = self.chosen();
         if picked.is_empty() {
+            self.effects.push(Effect::Beep);
             return;
         }
         let items = match self.options.configuration.marks {
