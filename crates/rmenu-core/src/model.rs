@@ -598,7 +598,7 @@ impl Model {
                     self.effects.push(Effect::Beep);
                     return;
                 }
-                self.run_operation(command, binding.action_name().to_owned(), binding.reload == Some(true));
+                self.run_operation(command, binding.action_name().to_owned(), binding.reload);
             }
         }
     }

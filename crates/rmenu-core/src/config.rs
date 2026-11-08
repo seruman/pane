@@ -73,7 +73,8 @@ pub struct MenuBinding {
     pub action: BindingAction,
     pub command: Option<Vec<String>>,
     pub source: Option<String>,
-    pub reload: Option<bool>,
+    #[serde(default, deserialize_with = "null_as_false")]
+    pub reload: bool,
     pub sources: Option<Vec<String>>,
 }
 
@@ -423,9 +424,13 @@ mod tests {
     }
 
     #[test]
-    fn multi_is_off_unless_true() {
+    fn multi_and_reload_are_off_unless_true() {
         for (json, multi) in [("{}", false), (r#"{"multi":null}"#, false), (r#"{"multi":false}"#, false), (r#"{"multi":true}"#, true)] {
             assert_eq!(parse(json).multi, multi, "{json}");
+        }
+        let binding = |extra: &str| parse(&format!(r#"{{"bindings":[{{"key":"ctrl+d","action":"run","command":["x"]{extra}}}]}}"#)).bindings[0].reload;
+        for (extra, reload) in [("", false), (r#","reload":null"#, false), (r#","reload":false"#, false), (r#","reload":true"#, true)] {
+            assert_eq!(binding(extra), reload, "{extra}");
         }
         assert!(serde_json::from_str::<MenuConfiguration>(r#"{"multi":"yes"}"#).is_err());
     }
