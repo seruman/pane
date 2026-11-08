@@ -36,5 +36,6 @@ without one, as any Rune app does.
 
 ## Names
 
-The names are working names. `scripts/rename.py OLD NEW …` renames a crate or app: its folder,
-its package name and its Rust name wherever they appear.
+The crate and app names are working names. To rename one, `git mv` its folder and replace its
+package name and its Rust name (with `_` for `-`) as whole words in the manifests and the code.
+`cargo build` then shows anything missed.
