@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Read with `rex-vim`'s keys. Select with `v` or `V`, then `c` comments on the selection, `d`
-//! marks it to be removed, and `1`–`9` give it a label ("Clarify this", "Verify this", …); `cc`
+//! marks it to be removed; `cc`
 //! and `dd` do the same for the cursor's line. `C` adds a general comment, about the document
 //! as a whole. `]c` and `[c` step through the comments; on one, Enter or `ce` edits it and `dc`
 //! deletes it. `Tab` lists every comment beside the page. While keys are half typed (`y`,
@@ -34,7 +34,7 @@ use rune_kit::markdown::Highlight;
 use rune_kit::{Markdown, MarkdownStyle};
 
 use page::Page;
-use review::{Comment, Kind, LABELS, Review};
+use review::{Comment, Kind, Review};
 
 const SAMPLE: &str = include_str!("sample.md");
 
@@ -133,7 +133,7 @@ impl App_ {
         self.vim.cursor(self.page.text()).start
     }
 
-    /// What `c`, `d` and the labels act on: the selection, or the cursor's line.
+    /// What `c` and `d` act on: the selection, or the cursor's line.
     fn target_range(&self) -> Range<usize> {
         let text = self.page.text();
         if let Some(sel) = self.vim.selection(text) {
@@ -205,13 +205,13 @@ impl App_ {
         }
     }
 
-    /// Adds a comment that needs no words: a removal or a label. Enter adds words to it.
-    fn quick(&mut self, kind: Kind) {
+    /// Marks the selection (or the line) to be removed. Enter adds words to it.
+    fn remove(&mut self) {
         let range = self.target_range();
         self.vim.set_cursor(range.start, self.page.text());
-        let n = self.review.add(Comment { kind, range: Some(range), body: String::new() });
+        let n = self.review.add(Comment { kind: Kind::Remove, range: Some(range), body: String::new() });
         self.selected = Some(n);
-        self.note = Some(format!("{} added — Enter adds a note", self.review.comments[n].title()));
+        self.note = Some("Marked to remove — Enter adds a note".into());
     }
 
     fn delete(&mut self, n: usize) {
@@ -298,7 +298,6 @@ fn tone(c: &Comment) -> Tone {
         (_, None) => Tone::Neutral,
         (Kind::Comment, _) => Tone::Warning,
         (Kind::Remove, _) => Tone::Danger,
-        (Kind::Label(_), _) => Tone::Accent,
     }
 }
 
@@ -306,7 +305,6 @@ fn tint(kind: Kind, rex: &Rex) -> rune::Color {
     match kind {
         Kind::Comment => rex.warning.alpha(0.22),
         Kind::Remove => rex.danger.alpha(0.22),
-        Kind::Label(_) => rex.accent.alpha(0.18),
     }
 }
 
@@ -472,12 +470,6 @@ fn comment_view(n: usize, c: &Comment, current: bool, rex: &Rex) -> El {
         .fill(rex.group)
         .border(1.0, if current { rex.accent.alpha(0.7) } else { rex.separator })
         .child(head.child(edit).child(delete));
-    if let Kind::Label(l) = c.kind
-        && let Some(tip) = LABELS[l].tip
-        && c.range.is_some()
-    {
-        card = card.child(text(tip).font(rex.ty.caption).color(rex.text_tertiary).wrap().w_full());
-    }
     if !c.body.is_empty() {
         card = card.child(text(c.body.clone()).font(rex.ty.body).color(rex.text).wrap().w_full());
     }
@@ -521,7 +513,6 @@ fn block_thread(s: &App_, index: usize, rex: &Rex) -> Option<El> {
         let title = match kind {
             Kind::Comment => "New comment",
             Kind::Remove => "Remove this",
-            Kind::Label(l) => LABELS[*l].text,
         };
         cards.push(composer_view(&s.draft, title, Some(quote), rex));
     }
@@ -716,28 +707,15 @@ fn pending_keys(s: &App_) -> Option<(String, Vec<Vec<Hint>>)> {
     let (typed, mut groups) = s.vim.hints()?;
     if s.vim.pending().is_empty() && matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) {
         groups.insert(0, vec![hint("c", "Comment"), hint("d", "Remove this")]);
-        groups.insert(1, LABEL_HINTS.to_vec());
     }
     Some((typed, groups))
 }
-
-/// The labels on the number keys.
-const LABEL_HINTS: [Hint; 9] = {
-    let keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    let mut out = [hint("", ""); 9];
-    let mut i = 0;
-    while i < 9 {
-        out[i] = hint(keys[i], LABELS[i].text);
-        i += 1;
-    }
-    out
-};
 
 /// Every key, after Space.
 fn all_keys() -> Vec<Vec<Hint>> {
     vec![
         vec![
-            hint("v V", "Select, then comment or label"),
+            hint("v V", "Select, then comment or remove"),
             hint("cc", "Comment on the line"),
             hint("dd", "Remove the line"),
             hint("C", "General comment"),
@@ -967,7 +945,7 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
                 Some(n) => s.delete(n),
                 None => s.note = Some("No comment here".into()),
             },
-            (Prefix::D, Some('d')) => s.quick(Kind::Remove),
+            (Prefix::D, Some('d')) => s.remove(),
             (Prefix::Z, Some('Z')) => s.command("wq", tx),
             (Prefix::Z, Some('Q')) => s.command("q!", tx),
             _ => {}
@@ -992,8 +970,7 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
     let Some(c) = c else { return vim_key(s, k, tx) };
     match c {
         'c' if visual => s.open(Target::New { kind: Kind::Comment, range: Some(s.target_range()) }),
-        'd' if visual => s.quick(Kind::Remove),
-        '1'..='9' if visual => s.quick(Kind::Label(c as usize - '1' as usize)),
+        'd' if visual => s.remove(),
         'c' => s.prefix = Some(Prefix::C),
         'd' => s.prefix = Some(Prefix::D),
         'C' => s.open(Target::New { kind: Kind::Comment, range: None }),
@@ -1141,7 +1118,7 @@ fn main() {
                     find("stores the quote and its lines"),
                     "Lines drift when the agent rewrites the plan. Keep the quote as the anchor.",
                 ));
-                s.review.add(Comment { kind: Kind::Label(1), range: Some(find("Escape cancels")), body: String::new() });
+                s.review.add(Comment::on(find("Escape cancels"), "Is Escape the only way out?"));
                 s.review.add(Comment { kind: Kind::Remove, range: Some(find("Sharing a review by link")), body: String::new() });
                 s.selected = Some(1);
             }),
@@ -1155,9 +1132,9 @@ fn main() {
             ("panel", |s| {
                 let text = s.page.text().to_owned();
                 let at = text.find("stores the quote").unwrap_or(0);
-                s.review.add(Comment::general("Ship the first version without labels."));
+                s.review.add(Comment::general("Ship the first version small."));
                 s.review.add(Comment::on(at..at + 16, "Anchor on the quote."));
-                s.review.add(Comment { kind: Kind::Label(0), range: Some(at + 20..at + 30), body: String::new() });
+                s.review.add(Comment { kind: Kind::Remove, range: Some(at + 20..at + 30), body: String::new() });
                 s.list = Some(1);
             }),
             ("visual", |s| {

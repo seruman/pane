@@ -13,10 +13,10 @@ has moved on. There is also one general comment for the reply as a whole.
 2. Type the comment; Enter saves and Escape cancels.
 3. Quit with `ZZ` and the review goes to stdout.
 
-## Labels
+## Removing
 
-For the usual answers there are labels on the number keys: *Clarify this*, *Verify this*,
-*Give me an example*. A label can carry a note of its own.
+To ask for something to go, select it and press `d`: the feedback quotes the Markdown to cut,
+as written. A removal can carry a note of its own.
 
 ## Later
 

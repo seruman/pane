@@ -49,7 +49,7 @@ fn feedback_quotes_and_numbers_in_document_order() {
     let mut review = Review::default();
     review.add(Comment { kind: Kind::Remove, range: Some(range(&s, "let x = 1;")), body: String::new() });
     review.add(Comment::on(range(&s, "phrase and"), "Why bold?\nSay it plainly."));
-    review.add(Comment { kind: Kind::Label(1), range: Some(range(&s, "one\ntwo")), body: String::new() });
+    review.add(Comment::on(range(&s, "one\ntwo"), "Verify this."));
     review.add(Comment::on(range(&s, "Title"), "Too short."));
     review.add(Comment::general("Fine overall."));
     review.add(Comment::general("One more thing."));
@@ -63,8 +63,7 @@ fn feedback_quotes_and_numbers_in_document_order() {
          ## 2. Comment (line 3, under `Title`)\n\n\
          On `phrase and`, written as:\n\n```markdown\nphrase** and\n```\n\n\
          > Why bold?\n> Say it plainly.\n\n\
-         ## 3. Verify this (lines 5–6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\n\
-         This seems like an assumption. Verify it by reading the actual code before going on.\n\n\
+         ## 3. Comment (lines 5–6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\n> Verify this.\n\n\
          ## 4. Remove this (line 9, under `Title`)\n\n```markdown\nlet x = 1;\n```\n\n\
          I don't want this in the document.\n"
     );
@@ -161,8 +160,10 @@ fn stepping_visits_comments_that_start_together() {
     // The case from the screenshot: three comments starting at the same place.
     let mut rt = runtime(SRC);
     press(&mut rt, "jVd");
-    press(&mut rt, "v1");
-    press(&mut rt, "vll2");
+    press(&mut rt, "vd");
+    press(&mut rt, "vllc");
+    press(&mut rt, "x");
+    key(&mut rt, Key::Enter);
     assert_eq!(rt.state.review.comments.len(), 3);
     let mut seen = Vec::new();
     for _ in 0..3 {
@@ -178,13 +179,15 @@ fn stepping_visits_comments_that_start_together() {
 }
 
 #[test]
-fn labels_removals_and_jumps() {
+fn removals_and_jumps() {
     let mut rt = runtime(SRC);
-    press(&mut rt, "jjV2"); // the list's first line, "Verify this"
+    press(&mut rt, "jjVc"); // the list's first line
+    press(&mut rt, "check");
+    key(&mut rt, Key::Enter);
     press(&mut rt, "gg");
     press(&mut rt, "dd"); // the heading, "Remove this"
     let kinds: Vec<Kind> = rt.state.review.comments.iter().map(|c| c.kind).collect();
-    assert_eq!(kinds, [Kind::Remove, Kind::Label(1)], "kept in document order");
+    assert_eq!(kinds, [Kind::Remove, Kind::Comment], "kept in document order");
 
     press(&mut rt, "]c");
     assert_eq!(rt.state.current(), Some(1));
@@ -240,8 +243,7 @@ fn which_key_shows_what_can_follow() {
     press(&mut rt, "v");
     assert!(rt.find("which-key").is_some(), "a selection lists its keys");
     assert_eq!(keys(&rt, 0), ["c", "d"], "the review's first");
-    assert_eq!(keys(&rt, 1).len(), LABELS.len(), "then the labels");
-    assert!(keys(&rt, 2).contains(&"gy"), "then Vim's, Markdown yank included");
+    assert!(keys(&rt, 1).contains(&"gy"), "then Vim's, Markdown yank included");
     key(&mut rt, Key::Escape);
     assert!(rt.find("which-key").is_none());
 
@@ -287,7 +289,7 @@ fn the_comment_list_floats_and_jumps() {
     press(&mut rt, "jVc");
     press(&mut rt, "two");
     key(&mut rt, Key::Enter);
-    press(&mut rt, "jV3");
+    press(&mut rt, "jVd");
     press(&mut rt, "gg");
     let heading = rt.find("block-0").unwrap();
     let cursor = rt.state.cursor();
@@ -365,4 +367,14 @@ fn moving_in_the_list_scrolls_the_page_to_the_comment() {
         rt.frame(1.0 / 60.0);
     }
     assert!(rt.find("vim-cursor").is_some_and(|(_, y)| (0.0..400.0).contains(&y)));
+}
+
+#[test]
+fn counts_work_in_visual_mode() {
+    // With no labels on the number keys, a count grows the selection as in Vim.
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jv2e");
+    assert!(rt.state.review.comments.is_empty());
+    let sel = rt.state.vim.selection(rt.state.page.text()).unwrap();
+    assert_eq!(&rt.state.page.text()[sel], "Some bold");
 }

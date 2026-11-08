@@ -6,51 +6,12 @@ use std::ops::Range;
 
 use crate::page::{Page, lines_of, source_of};
 
-/// A preset comment applied with one key, after Plannotator's quick labels. `tip` goes out with
-/// the label, telling the reader what to do about it.
-pub struct Label {
-    pub text: &'static str,
-    pub tip: Option<&'static str>,
-}
-
-pub const LABELS: [Label; 9] = [
-    Label { text: "Clarify this", tip: None },
-    Label {
-        text: "Verify this",
-        tip: Some("This seems like an assumption. Verify it by reading the actual code before going on."),
-    },
-    Label {
-        text: "Give me an example",
-        tip: Some("This is too abstract. Show a before and after, a sample input and output, or a concrete scenario."),
-    },
-    Label {
-        text: "Match existing patterns",
-        tip: Some("Look for existing patterns, components or utilities that already solve this, and reuse them."),
-    },
-    Label {
-        text: "Consider alternatives",
-        tip: Some("Propose two or three other approaches, with their trade-offs."),
-    },
-    Label {
-        text: "Ensure no regression",
-        tip: Some("Make sure this doesn't break existing behaviour: say what could regress and how it's protected."),
-    },
-    Label {
-        text: "Out of scope",
-        tip: Some("This isn't part of the task. Leave it out and stay with what was asked."),
-    },
-    Label { text: "Needs tests", tip: None },
-    Label { text: "Looks good", tip: None },
-];
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// A comment in words.
     Comment,
     /// "Remove this".
     Remove,
-    /// One of [`LABELS`], with optional words of its own.
-    Label(usize),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,7 +20,7 @@ pub struct Comment {
     /// What it's about, in the page's text; `None` for a general comment, about the whole
     /// document.
     pub range: Option<Range<usize>>,
-    /// What the reviewer wrote; may be empty for a removal or a label.
+    /// What the reviewer wrote; may be empty for a removal.
     pub body: String,
 }
 
@@ -74,13 +35,12 @@ impl Comment {
         Comment { kind: Kind::Comment, range: None, body: body.into() }
     }
 
-    /// The heading word for it: "General", "Comment", "Remove" or the label.
+    /// The heading word for it: "General", "Comment" or "Remove".
     pub fn title(&self) -> &'static str {
         match (self.kind, &self.range) {
             (_, None) => "General",
             (Kind::Comment, _) => "Comment",
             (Kind::Remove, _) => "Remove",
-            (Kind::Label(i), _) => LABELS[i].text,
         }
     }
 
@@ -206,7 +166,6 @@ impl Review {
             let title = match c.kind {
                 Kind::Comment => "Comment",
                 Kind::Remove => "Remove this",
-                Kind::Label(l) => LABELS[l].text,
             };
             out.push_str(&format!("## {}. {title}", number + 1));
             if !place.is_empty() {
@@ -231,11 +190,6 @@ impl Review {
                 } else {
                     out.push_str(&format!("On {}\n\n", inline_code(text)));
                 }
-            }
-            if let Kind::Label(l) = c.kind
-                && let Some(tip) = LABELS[l].tip
-            {
-                out.push_str(&format!("{tip}\n\n"));
             }
             if c.kind == Kind::Remove {
                 out.push_str("I don't want this in the document.\n\n");
