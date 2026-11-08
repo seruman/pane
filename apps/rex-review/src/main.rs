@@ -322,12 +322,8 @@ fn highlights(s: &App_, index: usize, rex: &Rex) -> Vec<(Vec<Range<usize>>, High
         let Some(range) = c.range.clone() else { continue };
         let mut h = Highlight::new().bg(tint(c.kind, rex));
         if current == Some(n) {
-            // Marked plainly while the list picks it, so it's found at a glance.
-            h = if s.list.is_some() {
-                Highlight::new().bg(tint(c.kind, rex).alpha(0.45)).ring(rex.accent, 2.0)
-            } else {
-                h.ring(tint(c.kind, rex).alpha(0.9), 1.0)
-            };
+            // The same ring whether the cursor or the list picks it.
+            h = h.ring(tint(c.kind, rex).alpha(0.9), 1.0);
             // Keyed in the block it starts in, for the list to scroll to.
             if page.block_at(range.start) == index {
                 h = h.key(CURRENT_MARK);
