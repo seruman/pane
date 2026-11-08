@@ -77,6 +77,7 @@ impl Menu {
     }
 
     pub fn handle(&mut self, event: Event, tx: &mut Tx) {
+        tx.settle();
         let effects = self.model.handle(event);
         self.apply(effects, tx);
         if self.field.text != self.model.query() {
