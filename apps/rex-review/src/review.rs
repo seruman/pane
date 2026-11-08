@@ -1,5 +1,6 @@
-//! The review: comments anchored to ranges of the page's text, one general comment, and the
-//! feedback they make, as Markdown for whoever wrote the document (an agent, most often).
+//! The review: comments anchored to ranges of the page's text, general comments about the whole
+//! document, and the feedback they make, as Markdown for whoever wrote the document (an agent,
+//! most often).
 
 use std::ops::Range;
 
@@ -55,96 +56,140 @@ pub enum Kind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
     pub kind: Kind,
-    /// What it's about, in the page's text.
-    pub range: Range<usize>,
+    /// What it's about, in the page's text; `None` for a general comment, about the whole
+    /// document.
+    pub range: Option<Range<usize>>,
     /// What the reviewer wrote; may be empty for a removal or a label.
     pub body: String,
 }
 
 impl Comment {
-    /// The heading word for it: "Comment", "Remove" or the label.
+    /// A comment in words on `range`.
+    pub fn on(range: Range<usize>, body: impl Into<String>) -> Comment {
+        Comment { kind: Kind::Comment, range: Some(range), body: body.into() }
+    }
+
+    /// A general comment.
+    pub fn general(body: impl Into<String>) -> Comment {
+        Comment { kind: Kind::Comment, range: None, body: body.into() }
+    }
+
+    /// The heading word for it: "General", "Comment", "Remove" or the label.
     pub fn title(&self) -> &'static str {
-        match self.kind {
-            Kind::Comment => "Comment",
-            Kind::Remove => "Remove",
-            Kind::Label(i) => LABELS[i].text,
+        match (self.kind, &self.range) {
+            (_, None) => "General",
+            (Kind::Comment, _) => "Comment",
+            (Kind::Remove, _) => "Remove",
+            (Kind::Label(i), _) => LABELS[i].text,
         }
+    }
+
+    /// Where it sorts: general comments first, as written, then the rest in document order.
+    fn order(&self) -> (bool, usize, usize) {
+        self.range.as_ref().map_or((false, 0, 0), |r| (true, r.start, r.end))
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Review {
-    /// In document order.
+    /// General comments first, in the order they were written, then the rest in document order.
     pub comments: Vec<Comment>,
-    pub general: String,
 }
 
 impl Review {
-    /// Adds `comment` in document order and returns its index.
+    /// Adds `comment` in its place and returns its index.
     pub fn add(&mut self, comment: Comment) -> usize {
-        let at = self
-            .comments
-            .partition_point(|c| (c.range.start, c.range.end) <= (comment.range.start, comment.range.end));
+        let key = comment.order();
+        let at = self.comments.partition_point(|c| c.order() <= key);
         self.comments.insert(at, comment);
         at
     }
 
-    /// The comment `at` (a byte of the page's text) falls in; the innermost when they nest.
-    pub fn at(&self, at: usize) -> Option<usize> {
+    /// The comments on the page, with their ranges, in document order.
+    fn anchored(&self) -> Vec<(usize, Range<usize>)> {
         self.comments
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.range.contains(&at) || (c.range.is_empty() && c.range.start == at))
-            .min_by_key(|(_, c)| c.range.len())
+            .filter_map(|(i, c)| c.range.clone().map(|r| (i, r)))
+            .collect()
+    }
+
+    /// The comment `at` (a byte of the page's text) falls in; the innermost when they nest.
+    pub fn at(&self, at: usize) -> Option<usize> {
+        self.anchored()
+            .into_iter()
+            .filter(|(_, r)| r.contains(&at) || (r.is_empty() && r.start == at))
+            .min_by_key(|(_, r)| r.len())
             .map(|(i, _)| i)
     }
 
-    /// The first comment starting after byte `at`, or before it with `back`, wrapping round.
-    pub fn next(&self, at: usize, back: bool) -> Option<usize> {
+    /// The comment after comment `from` in the list (general comments first, then the page's in
+    /// document order), or with `back` the one before, wrapping round. With no comment to start
+    /// from, the first on the page starting after `at` (or the last before it).
+    pub fn step(&self, from: Option<usize>, at: usize, back: bool) -> Option<usize> {
         let n = self.comments.len();
         if n == 0 {
             return None;
         }
-        if back {
-            Some(self.comments.iter().rposition(|c| c.range.start < at).unwrap_or(n - 1))
-        } else {
-            Some(self.comments.iter().position(|c| c.range.start > at).unwrap_or(0))
+        if let Some(f) = from.filter(|f| *f < n) {
+            return Some((f + if back { n - 1 } else { 1 }) % n);
         }
+        let list = self.anchored();
+        if list.is_empty() {
+            return Some(if back { n - 1 } else { 0 });
+        }
+        let found = if back {
+            list.iter().rev().find(|(_, r)| r.start < at).or(list.last())
+        } else {
+            list.iter().find(|(_, r)| r.start > at).or(list.first())
+        };
+        found.map(|(i, _)| *i)
     }
 
     pub fn is_empty(&self) -> bool {
-        self.comments.is_empty() && self.general.trim().is_empty()
+        self.comments.is_empty()
     }
 
-    /// The review as Markdown feedback: the general comment, then each comment in document
-    /// order with the lines it's on and what it quotes. `None` when there's nothing to send.
+    /// The review as Markdown feedback: the general comments, then each comment on the page in
+    /// document order with the lines it's on and what it quotes. `None` when there's nothing to
+    /// send.
     pub fn feedback(&self, source: &str, page: &Page) -> Option<String> {
         if self.is_empty() {
             return None;
         }
         let mut out = String::from("# Review feedback\n\n");
-        let general = self.general.trim();
+        let general: Vec<&str> = self
+            .comments
+            .iter()
+            .filter(|c| c.range.is_none())
+            .map(|c| c.body.trim())
+            .filter(|b| !b.is_empty())
+            .collect();
         if !general.is_empty() {
             out.push_str("## General\n\n");
-            out.push_str(&quoted(general));
-            out.push_str("\n\n");
+            for body in general {
+                out.push_str(&quoted(body));
+                out.push_str("\n\n");
+            }
         }
-        let n = self.comments.len();
+        let anchored = self.anchored();
+        let n = anchored.len();
         if n > 0 {
             out.push_str(&format!(
                 "I've reviewed this document and have {n} piece{} of feedback:\n\n",
                 if n == 1 { "" } else { "s" }
             ));
         }
-        for (i, c) in self.comments.iter().enumerate() {
-            let ranges = page.source_ranges(c.range.clone());
+        for (number, (i, range)) in anchored.into_iter().enumerate() {
+            let c = &self.comments[i];
+            let ranges = page.source_ranges(range.clone());
             let lines = match lines_of(source, &ranges) {
                 Some((a, b)) if a == b => format!("(line {a}) "),
                 Some((a, b)) => format!("(lines {a}–{b}) "),
                 None => String::new(),
             };
-            let text = page.text().get(c.range.clone()).unwrap_or_default().trim();
-            out.push_str(&format!("## {}. {lines}", i + 1));
+            let text = page.text().get(range).unwrap_or_default().trim();
+            out.push_str(&format!("## {}. {lines}", number + 1));
             match c.kind {
                 Kind::Comment => out.push_str("Comment\n\n"),
                 Kind::Remove => out.push_str("Remove this\n\n"),
@@ -152,8 +197,9 @@ impl Review {
             }
             // A quote of more than a line reads better as the Markdown it came from.
             if text.contains('\n') {
-                let fence = if source_of(source, &ranges, true).contains("```") { "````" } else { "```" };
-                out.push_str(&format!("{fence}markdown\n{}\n{fence}\n\n", source_of(source, &ranges, true).trim_end()));
+                let md = source_of(source, &ranges, true);
+                let fence = if md.contains("```") { "````" } else { "```" };
+                out.push_str(&format!("{fence}markdown\n{}\n{fence}\n\n", md.trim_end()));
             } else {
                 out.push_str(&format!("On: \"{text}\"\n\n"));
             }

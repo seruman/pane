@@ -14,8 +14,8 @@ fn press(rt: &mut Runtime<App_>, keys: &str) {
     }
 }
 
-fn key(rt: &mut Runtime<App_>, k: Key, mods: Mods) {
-    rt.key(KeyEvent { key: k, mods });
+fn key(rt: &mut Runtime<App_>, k: Key) {
+    rt.key(KeyEvent { key: k, mods: Mods::default() });
     rt.frame(1.0 / 60.0);
 }
 
@@ -24,6 +24,11 @@ fn runtime(src: &str) -> Runtime<App_> {
     rt.on_key = Some(on_key);
     rt.frame(0.0);
     rt
+}
+
+fn range(s: &App_, needle: &str) -> Range<usize> {
+    let at = s.page.text().find(needle).unwrap();
+    at..at + needle.len()
 }
 
 #[test]
@@ -41,20 +46,17 @@ fn the_page_text_is_the_whole_documents() {
 #[test]
 fn feedback_quotes_and_numbers_in_document_order() {
     let s = app(SRC);
-    let text = s.page.text().to_owned();
-    let range = |needle: &str| {
-        let at = text.find(needle).unwrap();
-        at..at + needle.len()
-    };
     let mut review = Review::default();
-    review.add(Comment { kind: Kind::Remove, range: range("let x = 1;"), body: String::new() });
-    review.add(Comment { kind: Kind::Comment, range: range("bold phrase"), body: "Why bold?\nSay it plainly.".into() });
-    review.add(Comment { kind: Kind::Label(1), range: range("one\ntwo"), body: String::new() });
-    review.general = "Fine overall.".into();
+    review.add(Comment { kind: Kind::Remove, range: Some(range(&s, "let x = 1;")), body: String::new() });
+    review.add(Comment::on(range(&s, "bold phrase"), "Why bold?\nSay it plainly."));
+    review.add(Comment { kind: Kind::Label(1), range: Some(range(&s, "one\ntwo")), body: String::new() });
+    review.add(Comment::general("Fine overall."));
+    review.add(Comment::general("One more thing."));
+    assert_eq!(review.comments[1].body, "One more thing.", "general comments first, in the order written");
     let out = review.feedback(&s.source, &s.page).unwrap();
     assert_eq!(
         out,
-        "# Review feedback\n\n## General\n\n> Fine overall.\n\n\
+        "# Review feedback\n\n## General\n\n> Fine overall.\n\n> One more thing.\n\n\
          I've reviewed this document and have 3 pieces of feedback:\n\n\
          ## 1. (line 3) Comment\n\nOn: \"bold phrase\"\n\n> Why bold?\n> Say it plainly.\n\n\
          ## 2. (lines 5–6) Verify this\n\n```markdown\n- one\n- two\n```\n\n\
@@ -72,25 +74,26 @@ fn select_comment_save_edit_and_delete() {
     assert!(rt.state.composer.is_some(), "c on a selection opens the composer");
     press(&mut rt, "Too loud");
     assert_eq!(rt.state.draft.text, "Too loud", "the field has the keys, not Vim");
-    key(&mut rt, Key::Enter, Mods::default());
+    key(&mut rt, Key::Enter);
     assert!(rt.state.composer.is_none());
     let c = &rt.state.review.comments[0];
-    assert_eq!((&rt.state.page.text()[c.range.clone()], c.body.as_str()), ("Some bold", "Too loud"));
-    assert!(rt.find(&thread_key(0)).is_some(), "the thread shows under its block");
+    assert_eq!((&rt.state.page.text()[c.range.clone().unwrap()], c.body.as_str()), ("Some bold", "Too loud"));
+    assert!(rt.find(&thread_key(0)).is_some(), "the card shows under its block");
 
-    // Vim has the keys back: `ce` on the comment edits it, Escape leaves it as it was.
-    press(&mut rt, "ce");
-    assert_eq!(rt.state.composer.as_ref().map(|c| c.target.clone()), Some(Target::Edit(0)));
+    // Enter on the comment edits it; Escape leaves it as it was.
+    key(&mut rt, Key::Enter);
+    assert_eq!(rt.state.composer, Some(Target::Edit(0)));
     press(&mut rt, "!");
-    key(&mut rt, Key::Escape, Mods::default());
+    key(&mut rt, Key::Escape);
     assert!(rt.state.composer.is_none());
     assert_eq!(rt.state.review.comments[0].body, "Too loud");
 
-    // Shift-Enter is a new line; Enter saves.
+    // `ce` too; Shift-Enter is a new line, Enter saves.
     press(&mut rt, "ce");
-    key(&mut rt, Key::Enter, Mods { shift: true, ..Mods::default() });
+    rt.key(KeyEvent { key: Key::Enter, mods: Mods { shift: true, ..Mods::default() } });
+    rt.frame(1.0 / 60.0);
     press(&mut rt, "really");
-    key(&mut rt, Key::Enter, Mods::default());
+    key(&mut rt, Key::Enter);
     assert_eq!(rt.state.review.comments[0].body, "Too loud\nreally");
 
     press(&mut rt, "dc");
@@ -98,40 +101,107 @@ fn select_comment_save_edit_and_delete() {
 }
 
 #[test]
-fn labels_removals_general_and_jumps() {
+fn several_general_comments_listed_and_stepped_through() {
+    let mut rt = runtime(SRC);
+    for body in ["First", "Second"] {
+        press(&mut rt, "C");
+        press(&mut rt, body);
+        key(&mut rt, Key::Enter);
+    }
+    let general: Vec<&str> = rt.state.review.comments.iter().map(|c| c.body.as_str()).collect();
+    assert_eq!(general, ["First", "Second"]);
+    assert!(rt.find(&thread_key(0)).is_some() && rt.find(&thread_key(1)).is_some(), "both show above the page");
+
+    key(&mut rt, Key::Tab);
+    assert!(rt.find("panel-0").is_some() && rt.find("panel-1").is_some(), "the list has them");
+
+    // ]c reaches a general comment, and Enter edits it.
+    press(&mut rt, "]c");
+    let at = rt.state.selected.unwrap();
+    key(&mut rt, Key::Enter);
+    assert_eq!(rt.state.composer, Some(Target::Edit(at)));
+}
+
+#[test]
+fn stepping_visits_comments_that_start_together() {
+    // The case from the screenshot: three comments starting at the same place.
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jVd");
+    press(&mut rt, "v1");
+    press(&mut rt, "vll2");
+    assert_eq!(rt.state.review.comments.len(), 3);
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        press(&mut rt, "]c");
+        seen.push(rt.state.selected.unwrap());
+    }
+    seen.sort();
+    assert_eq!(seen, [0, 1, 2], "]c visits each in turn");
+    press(&mut rt, "]c");
+    let first = rt.state.selected;
+    press(&mut rt, "[c[c[c");
+    assert_eq!(rt.state.selected, first, "[c comes back round");
+}
+
+#[test]
+fn labels_removals_and_jumps() {
     let mut rt = runtime(SRC);
     press(&mut rt, "jjV2"); // the list's first line, "Verify this"
     press(&mut rt, "gg");
     press(&mut rt, "dd"); // the heading, "Remove this"
     let kinds: Vec<Kind> = rt.state.review.comments.iter().map(|c| c.kind).collect();
     assert_eq!(kinds, [Kind::Remove, Kind::Label(1)], "kept in document order");
-    assert_eq!(&rt.state.page.text()[rt.state.review.comments[0].range.clone()], "Title");
 
     press(&mut rt, "]c");
-    assert_eq!(rt.state.here(), Some(1));
+    assert_eq!(rt.state.current(), Some(1));
     press(&mut rt, "]c");
-    assert_eq!(rt.state.here(), Some(0), "wraps round");
+    assert_eq!(rt.state.current(), Some(0), "wraps round");
     press(&mut rt, "[c");
-    assert_eq!(rt.state.here(), Some(1));
+    assert_eq!(rt.state.current(), Some(1));
 
-    press(&mut rt, "C");
-    press(&mut rt, "Ship it");
-    key(&mut rt, Key::Enter, Mods::default());
-    assert_eq!(rt.state.review.general, "Ship it");
-    assert!(rt.find("general").is_some());
-
-    key(&mut rt, Key::Tab, Mods::default());
-    assert!(rt.state.panel && rt.find("panel-1").is_some());
+    // Moving drops the comment picked; the cursor's own picks the comment under it again.
+    press(&mut rt, "gg");
+    assert_eq!(rt.state.current(), Some(0));
 }
 
 #[test]
-fn zq_quits_without_the_review() {
+fn quitting() {
+    let mut rt = runtime(SRC);
+    // :q with nothing written quits.
+    press(&mut rt, ":q");
+    key(&mut rt, Key::Enter);
+    assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
+
+    // With a comment, :q refuses; :q! quits without the review.
     let mut rt = runtime(SRC);
     press(&mut rt, "Vc");
     press(&mut rt, "x");
-    key(&mut rt, Key::Enter, Mods::default());
-    assert!(rt.state.feedback().is_some());
-    press(&mut rt, "ZQ");
-    assert!(rt.state.discard && rt.state.feedback().is_none());
+    key(&mut rt, Key::Enter);
+    press(&mut rt, ":q");
+    key(&mut rt, Key::Enter);
+    assert_eq!(rt.shell_request, None);
+    assert!(rt.state.note.as_deref().unwrap_or_default().contains(":wq"));
+    press(&mut rt, ":q!");
+    key(&mut rt, Key::Enter);
     assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
+    assert_eq!(rt.state.feedback(), None);
+
+    // :wq sends it; ZZ is the same.
+    let mut rt = runtime(SRC);
+    press(&mut rt, "Vc");
+    press(&mut rt, "x");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "ZZ");
+    assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
+    assert!(rt.state.feedback().is_some());
+}
+
+#[test]
+fn the_legend_shows_while_selecting() {
+    let mut rt = runtime(SRC);
+    assert!(rt.find("legend").is_none());
+    press(&mut rt, "v");
+    assert!(rt.find("legend").is_some());
+    key(&mut rt, Key::Escape);
+    assert!(rt.find("legend").is_none());
 }
