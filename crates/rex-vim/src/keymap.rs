@@ -56,7 +56,11 @@ impl Stroke {
                 if chars.next().is_some() {
                     return None;
                 }
-                if m.ctrl { Stroke::Ctrl(c.to_ascii_lowercase()) } else { Stroke::Char(c) }
+                if m.ctrl {
+                    Stroke::Ctrl(c.to_ascii_lowercase())
+                } else {
+                    Stroke::Char(c)
+                }
             }
             Key::Command(c) if m.ctrl => Stroke::Ctrl(c.to_ascii_lowercase()),
             Key::Enter => Stroke::Enter,
@@ -108,7 +112,10 @@ impl Stroke {
 /// (`g enter`).
 pub(crate) fn render(keys: &[Stroke], leader: Stroke) -> String {
     let labels: Vec<String> = keys.iter().map(|k| k.label(leader)).collect();
-    let spaced = keys.iter().zip(&labels).any(|(k, l)| !matches!(k.resolve(leader), Stroke::Ctrl(_)) && l.chars().count() > 1);
+    let spaced = keys
+        .iter()
+        .zip(&labels)
+        .any(|(k, l)| !matches!(k.resolve(leader), Stroke::Ctrl(_)) && l.chars().count() > 1);
     labels.join(if spaced { " " } else { "" })
 }
 
@@ -231,7 +238,9 @@ pub enum Command<A> {
     /// The selection's other end (`o`).
     OtherEnd,
     /// Starts typing a search (`/`, `?`).
-    Search { backward: bool },
+    Search {
+        backward: bool,
+    },
     /// The app's own ([`VimEffect::Action`](crate::VimEffect::Action)).
     App(A),
 }
@@ -240,7 +249,9 @@ impl<A> Command<A> {
     /// Hints list the app's bindings first, then Vim's commands, then its motions.
     fn group(&self) -> usize {
         match self {
-            Command::App(_) | Command::Operator(Operator::App(_)) | Command::Lines(Operator::App(_)) => 0,
+            Command::App(_)
+            | Command::Operator(Operator::App(_))
+            | Command::Lines(Operator::App(_)) => 0,
             Command::Motion(_) => 2,
             _ => 1,
         }
@@ -255,7 +266,10 @@ pub struct Hint {
 }
 
 pub fn hint(keys: &str, what: &'static str) -> Hint {
-    Hint { keys: keys.to_owned(), what }
+    Hint {
+        keys: keys.to_owned(),
+        what,
+    }
 }
 
 /// A [`Keymap`] table.
@@ -304,7 +318,13 @@ pub struct Keymap<A> {
 impl<A: Clone> Keymap<A> {
     /// No bindings, and `\` for the leader.
     pub fn empty() -> Self {
-        Keymap { leader: Stroke::Char('\\'), normal: Vec::new(), visual: Vec::new(), pending: Vec::new(), objects: Vec::new() }
+        Keymap {
+            leader: Stroke::Char('\\'),
+            normal: Vec::new(),
+            visual: Vec::new(),
+            pending: Vec::new(),
+            objects: Vec::new(),
+        }
     }
 
     /// Vim's keys for reading: motions (`h j k l`, `w b e W B E`, `0 ^ $`, `gg G`, `{ }`, `%`,
@@ -337,7 +357,11 @@ impl<A: Clone> Keymap<A> {
             (&[Stroke::End], M::LineEnd, None),
             (&[C('g'), C('g')], M::Top, Some("To the top")),
             (&[C('G')], M::Bottom, None),
-            (&[C('}')], M::ParagraphForward, Some("To the paragraph's end")),
+            (
+                &[C('}')],
+                M::ParagraphForward,
+                Some("To the paragraph's end"),
+            ),
             (&[C('{')], M::ParagraphBackward, None),
             (&[C('%')], M::MatchingBracket, None),
             (&[C('f')], M::Find(Find::To), Some("To a character")),
@@ -378,20 +402,75 @@ impl<A: Clone> Keymap<A> {
         }
         k.operator(&[C('y')], Operator::Yank, "Yank")
             .operator(&[C('g'), C('y')], Operator::YankSource, "Yank as Markdown")
-            .bind(Table::Normal, &[C('Y')], Command::Lines(Operator::Yank), None)
+            .bind(
+                Table::Normal,
+                &[C('Y')],
+                Command::Lines(Operator::Yank),
+                None,
+            )
             .bind(Table::Normal, &[C('v')], Command::Visual, "Select")
-            .bind(Table::Normal, &[C('V')], Command::VisualLine, "Select lines")
+            .bind(
+                Table::Normal,
+                &[C('V')],
+                Command::VisualLine,
+                "Select lines",
+            )
             .bind(Table::Visual, &[C('v')], Command::Visual, None)
             .bind(Table::Visual, &[C('V')], Command::VisualLine, None)
-            .bind(Table::Visual, &[C('o')], Command::OtherEnd, "Go to the other end")
-            .bind(Table::Visual, &[C('i')], Command::Inner, "Select inside an object…")
-            .bind(Table::Visual, &[C('a')], Command::Around, "Select around an object…")
-            .bind(Table::Pending, &[C('i')], Command::Inner, "Inside an object…")
-            .bind(Table::Pending, &[C('a')], Command::Around, "Around an object…")
-            .bind(Table::Normal, &[C('/')], Command::Search { backward: false }, "Search")
-            .bind(Table::Normal, &[C('?')], Command::Search { backward: true }, "Search back")
-            .bind(Table::Visual, &[C('/')], Command::Search { backward: false }, None)
-            .bind(Table::Visual, &[C('?')], Command::Search { backward: true }, None)
+            .bind(
+                Table::Visual,
+                &[C('o')],
+                Command::OtherEnd,
+                "Go to the other end",
+            )
+            .bind(
+                Table::Visual,
+                &[C('i')],
+                Command::Inner,
+                "Select inside an object…",
+            )
+            .bind(
+                Table::Visual,
+                &[C('a')],
+                Command::Around,
+                "Select around an object…",
+            )
+            .bind(
+                Table::Pending,
+                &[C('i')],
+                Command::Inner,
+                "Inside an object…",
+            )
+            .bind(
+                Table::Pending,
+                &[C('a')],
+                Command::Around,
+                "Around an object…",
+            )
+            .bind(
+                Table::Normal,
+                &[C('/')],
+                Command::Search { backward: false },
+                "Search",
+            )
+            .bind(
+                Table::Normal,
+                &[C('?')],
+                Command::Search { backward: true },
+                "Search back",
+            )
+            .bind(
+                Table::Visual,
+                &[C('/')],
+                Command::Search { backward: false },
+                None,
+            )
+            .bind(
+                Table::Visual,
+                &[C('?')],
+                Command::Search { backward: true },
+                None,
+            )
     }
 
     /// The key [`Stroke::Leader`] stands for. Panics on [`Stroke::Leader`] itself, or when the
@@ -399,7 +478,11 @@ impl<A: Clone> Keymap<A> {
     pub fn leader(mut self, key: Stroke) -> Self {
         assert!(key != Stroke::Leader, "the leader must be a real key");
         self.leader = key;
-        for (name, table) in [("Normal", &self.normal), ("Visual", &self.visual), ("Pending", &self.pending)] {
+        for (name, table) in [
+            ("Normal", &self.normal),
+            ("Visual", &self.visual),
+            ("Pending", &self.pending),
+        ] {
             check(name, table, key);
         }
         check("objects", &self.objects, key);
@@ -410,10 +493,19 @@ impl<A: Clone> Keymap<A> {
     /// `None` keeps it out of them. Panics when `keys` would start another binding there or
     /// another would start it, when it starts with a digit (`1`–`9` start a count), or when
     /// `table` is [`Table::Pending`] and `command` isn't a motion, `Inner` or `Around`.
-    pub fn bind(mut self, table: Table, keys: &[Stroke], command: Command<A>, what: impl Into<Option<&'static str>>) -> Self {
+    pub fn bind(
+        mut self,
+        table: Table,
+        keys: &[Stroke],
+        command: Command<A>,
+        what: impl Into<Option<&'static str>>,
+    ) -> Self {
         if table == Table::Pending {
             assert!(
-                matches!(command, Command::Motion(_) | Command::Inner | Command::Around),
+                matches!(
+                    command,
+                    Command::Motion(_) | Command::Inner | Command::Around
+                ),
                 "{}: after an operator only motions and text objects mean anything",
                 render(keys, self.leader)
             );
@@ -441,7 +533,12 @@ impl<A: Clone> Keymap<A> {
     }
 
     /// Binds a motion where motions go: Normal, Visual and after an operator.
-    pub fn motion(self, keys: &[Stroke], motion: Motion, what: impl Into<Option<&'static str>>) -> Self {
+    pub fn motion(
+        self,
+        keys: &[Stroke],
+        motion: Motion,
+        what: impl Into<Option<&'static str>>,
+    ) -> Self {
         let what = what.into();
         self.bind(Table::Normal, keys, Command::Motion(motion), what)
             .bind(Table::Visual, keys, Command::Motion(motion), what)
@@ -450,10 +547,20 @@ impl<A: Clone> Keymap<A> {
 
     /// Binds an operator in Normal mode, where it waits for a motion, and in Visual, where it
     /// takes the selection.
-    pub fn operator(self, keys: &[Stroke], operator: Operator<A>, what: impl Into<Option<&'static str>>) -> Self {
+    pub fn operator(
+        self,
+        keys: &[Stroke],
+        operator: Operator<A>,
+        what: impl Into<Option<&'static str>>,
+    ) -> Self {
         let what = what.into();
-        self.bind(Table::Normal, keys, Command::Operator(operator.clone()), what)
-            .bind(Table::Visual, keys, Command::Operator(operator), what)
+        self.bind(
+            Table::Normal,
+            keys,
+            Command::Operator(operator.clone()),
+            what,
+        )
+        .bind(Table::Visual, keys, Command::Operator(operator), what)
     }
 
     /// Binds an app action in Normal mode.
@@ -462,9 +569,21 @@ impl<A: Clone> Keymap<A> {
     }
 
     /// Binds a text object, for after `i` or `a`.
-    pub fn object(mut self, keys: &[Stroke], object: Object, what: impl Into<Option<&'static str>>) -> Self {
+    pub fn object(
+        mut self,
+        keys: &[Stroke],
+        object: Object,
+        what: impl Into<Option<&'static str>>,
+    ) -> Self {
         let leader = self.leader;
-        insert("objects", &mut self.objects, leader, keys, object, what.into());
+        insert(
+            "objects",
+            &mut self.objects,
+            leader,
+            keys,
+            object,
+            what.into(),
+        );
         self
     }
 
@@ -503,7 +622,8 @@ impl<A: Clone> Keymap<A> {
         for b in self.list(table) {
             let Some(what) = b.what else { continue };
             let group = b.command.group();
-            if !starts(&b.keys, typed, self.leader) || (typed.is_empty() && group == 2 && !motions) {
+            if !starts(&b.keys, typed, self.leader) || (typed.is_empty() && group == 2 && !motions)
+            {
                 continue;
             }
             groups[group].push(hint(&self.render(&b.keys[typed.len()..]), what));
@@ -527,7 +647,10 @@ fn starts(keys: &[Stroke], typed: &[Stroke], leader: Stroke) -> bool {
 }
 
 fn same(a: &[Stroke], b: &[Stroke], leader: Stroke) -> bool {
-    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.resolve(leader) == y.resolve(leader))
+    a.len() == b.len()
+        && a.iter()
+            .zip(b)
+            .all(|(x, y)| x.resolve(leader) == y.resolve(leader))
 }
 
 fn lookup<C: Clone>(list: &[Binding<C>], typed: &[Stroke], leader: Stroke) -> Lookup<C> {
@@ -544,7 +667,14 @@ fn lookup<C: Clone>(list: &[Binding<C>], typed: &[Stroke], leader: Stroke) -> Lo
     if longer { Lookup::Prefix } else { Lookup::None }
 }
 
-fn insert<C>(name: &str, list: &mut Vec<Binding<C>>, leader: Stroke, keys: &[Stroke], command: C, what: Option<&'static str>) {
+fn insert<C>(
+    name: &str,
+    list: &mut Vec<Binding<C>>,
+    leader: Stroke,
+    keys: &[Stroke],
+    command: C,
+    what: Option<&'static str>,
+) {
     assert!(!keys.is_empty(), "{name}: a binding needs a key");
     assert!(
         !matches!(keys[0], Stroke::Char('1'..='9')),
@@ -552,7 +682,11 @@ fn insert<C>(name: &str, list: &mut Vec<Binding<C>>, leader: Stroke, keys: &[Str
         render(keys, leader)
     );
     list.retain(|b| !same(&b.keys, keys, leader));
-    list.push(Binding { keys: keys.to_vec(), command, what });
+    list.push(Binding {
+        keys: keys.to_vec(),
+        command,
+        what,
+    });
     check(name, list, leader);
 }
 
@@ -561,7 +695,11 @@ fn insert<C>(name: &str, list: &mut Vec<Binding<C>>, leader: Stroke, keys: &[Str
 fn check<C>(name: &str, list: &[Binding<C>], leader: Stroke) {
     for (i, a) in list.iter().enumerate() {
         for b in &list[i + 1..] {
-            let (short, long) = if a.keys.len() <= b.keys.len() { (a, b) } else { (b, a) };
+            let (short, long) = if a.keys.len() <= b.keys.len() {
+                (a, b)
+            } else {
+                (b, a)
+            };
             let resolved: Vec<Stroke> = short.keys.iter().map(|k| k.resolve(leader)).collect();
             if starts(&long.keys, &resolved, leader) {
                 panic!(

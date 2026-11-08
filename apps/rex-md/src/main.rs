@@ -48,7 +48,8 @@ impl Default for Doc {
         Doc {
             path,
             source,
-            vim: Vim::new(Keymap::vim().action(&[Stroke::Char(' ')], Act::Tick, "Tick the task")).skip_blank_lines(true),
+            vim: Vim::new(Keymap::vim().action(&[Stroke::Char(' ')], Act::Tick, "Tick the task"))
+                .skip_blank_lines(true),
             copied: None,
         }
     }
@@ -324,7 +325,9 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
             true
         }
         // Space on a task's line ticks it, as a click on its box does.
-        Some(VimEffect::Action { action: Act::Tick, .. }) => {
+        Some(VimEffect::Action {
+            action: Act::Tick, ..
+        }) => {
             if let Some((offset, checked)) = s.task_under_cursor(&page) {
                 s.set_task(offset, !checked);
             }

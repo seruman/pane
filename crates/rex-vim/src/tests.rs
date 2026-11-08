@@ -330,12 +330,21 @@ fn hints_follow_what_is_typed() {
     assert_eq!(groups[0][0], hint("y", "The line"));
     press(&mut v, "i");
     assert_eq!(v.hints().unwrap().0, "yi");
-    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
     press(&mut v, "g");
     assert_eq!(v.hints().unwrap().0, "g");
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!((typed.as_str(), groups[0][0].clone()), ("gy", hint("gy", "The line")));
+    assert_eq!(
+        (typed.as_str(), groups[0][0].clone()),
+        ("gy", hint("gy", "The line"))
+    );
     press(&mut v, "a");
     assert_eq!(v.hints().unwrap().0, "gya");
     press(&mut v, "w");
@@ -343,10 +352,13 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "visual");
-    assert!(groups.iter().flatten().any(|h| *h == hint("gy", "Yank as Markdown")));
+    assert!(
+        groups
+            .iter()
+            .flatten()
+            .any(|h| *h == hint("gy", "Yank as Markdown"))
+    );
 }
-
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
@@ -359,7 +371,11 @@ fn app_vim() -> Vim<Act> {
     Vim::new(
         Keymap::vim()
             .operator(&[Stroke::Char('c')], Operator::App(Act::Comment), "Comment")
-            .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::Next, "Next comment")
+            .action(
+                &[Stroke::Char(']'), Stroke::Char('c')],
+                Act::Next,
+                "Next comment",
+            )
             .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit"),
     )
 }
@@ -367,14 +383,24 @@ fn app_vim() -> Vim<Act> {
 fn press_app(vim: &mut Vim<Act>, keys: &str) -> Option<VimEffect<Act>> {
     let mut last = None;
     for c in keys.chars() {
-        last = vim.key(&KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() }, TEXT);
+        last = vim.key(
+            &KeyEvent {
+                key: Key::Text(c.to_string()),
+                mods: Mods::default(),
+            },
+            TEXT,
+        );
     }
     last
 }
 
 fn operated(effect: Option<VimEffect<Act>>) -> (&'static str, bool) {
     match effect {
-        Some(VimEffect::Operator { action: Act::Comment, range, linewise }) => (&TEXT[range], linewise),
+        Some(VimEffect::Operator {
+            action: Act::Comment,
+            range,
+            linewise,
+        }) => (&TEXT[range], linewise),
         other => panic!("no operator: {other:?}"),
     }
 }
@@ -385,17 +411,29 @@ fn an_app_operator_takes_motions_objects_lines_and_selections() {
     assert_eq!(operated(press_app(&mut v, "cw")), ("fn ", false));
     assert_eq!(operated(press_app(&mut v, "c$")), ("fn main() {", false));
     assert_eq!(operated(press_app(&mut v, "cc")), ("fn main() {", true));
-    assert_eq!(operated(press_app(&mut v, "2cc")), ("fn main() {\n    let s = \"hello world\";", true));
-    assert_eq!(operated(press_app(&mut v, "cj")), ("fn main() {\n    let s = \"hello world\";", true));
+    assert_eq!(
+        operated(press_app(&mut v, "2cc")),
+        ("fn main() {\n    let s = \"hello world\";", true)
+    );
+    assert_eq!(
+        operated(press_app(&mut v, "cj")),
+        ("fn main() {\n    let s = \"hello world\";", true)
+    );
     press_app(&mut v, "jfh");
     assert_eq!(operated(press_app(&mut v, "ciw")), ("hello", false));
     assert_eq!(operated(press_app(&mut v, "ci\"")), ("hello world", false));
     assert_eq!(operated(press_app(&mut v, "vec")), ("hello", false));
     assert_eq!(v.mode(), VimMode::Normal, "an operator ends the selection");
     press_app(&mut v, "G");
-    assert_eq!(operated(press_app(&mut v, "cip")), ("second paragraph here\nand more", false));
+    assert_eq!(
+        operated(press_app(&mut v, "cip")),
+        ("second paragraph here\nand more", false)
+    );
     // The cursor went to the paragraph's start, as an operator leaves it; yank works beside it.
-    assert_eq!(yanked_app(press_app(&mut v, "yy")), "second paragraph here\n");
+    assert_eq!(
+        yanked_app(press_app(&mut v, "yy")),
+        "second paragraph here\n"
+    );
 }
 
 fn yanked_app(effect: Option<VimEffect<Act>>) -> String {
@@ -410,10 +448,28 @@ fn app_actions_sequences_and_the_leader() {
     let mut v = app_vim();
     assert_eq!(press_app(&mut v, "]"), Some(VimEffect::Moved));
     assert_eq!(v.pending(), "]");
-    assert_eq!(press_app(&mut v, "c"), Some(VimEffect::Action { action: Act::Next, count: None }));
-    assert_eq!(press_app(&mut v, "3]c"), Some(VimEffect::Action { action: Act::Next, count: Some(3) }));
+    assert_eq!(
+        press_app(&mut v, "c"),
+        Some(VimEffect::Action {
+            action: Act::Next,
+            count: None
+        })
+    );
+    assert_eq!(
+        press_app(&mut v, "3]c"),
+        Some(VimEffect::Action {
+            action: Act::Next,
+            count: Some(3)
+        })
+    );
     // The leader is `\` by default.
-    assert_eq!(press_app(&mut v, "\\q"), Some(VimEffect::Action { action: Act::Quit, count: None }));
+    assert_eq!(
+        press_app(&mut v, "\\q"),
+        Some(VimEffect::Action {
+            action: Act::Quit,
+            count: None
+        })
+    );
     // A sequence that goes nowhere is dropped; an unbound key is the app's.
     assert_eq!(press_app(&mut v, "]x"), Some(VimEffect::Moved));
     assert!(!v.is_pending());
@@ -428,14 +484,23 @@ fn app_actions_sequences_and_the_leader() {
         .unbind(Table::Pending, &comma)
         .leader(Stroke::Char(','));
     let mut v = Vim::new(keys);
-    assert_eq!(press_app(&mut v, ",q"), Some(VimEffect::Action { action: Act::Quit, count: None }));
+    assert_eq!(
+        press_app(&mut v, ",q"),
+        Some(VimEffect::Action {
+            action: Act::Quit,
+            count: None
+        })
+    );
 }
 
 #[test]
 fn hints_come_from_the_keymap() {
     let mut v = app_vim();
     press_app(&mut v, "]");
-    assert_eq!(v.hints().unwrap(), ("]".to_owned(), vec![vec![hint("c", "Next comment")]]));
+    assert_eq!(
+        v.hints().unwrap(),
+        ("]".to_owned(), vec![vec![hint("c", "Next comment")]])
+    );
     press_app(&mut v, "x");
     press_app(&mut v, "\\");
     assert_eq!(v.hints().unwrap().1, vec![vec![hint("q", "Quit")]]);
@@ -466,7 +531,11 @@ fn hints_come_from_the_keymap() {
 #[test]
 fn objects_are_their_own_table() {
     // An app can add a text object, and it's offered after `i` and `a` only.
-    let mut v = Vim::new(Keymap::<Act>::vim().object(&[Stroke::Char('q')], Object::Quotes('"'), "Any quotes"));
+    let mut v = Vim::new(Keymap::<Act>::vim().object(
+        &[Stroke::Char('q')],
+        Object::Quotes('"'),
+        "Any quotes",
+    ));
     press_app(&mut v, "jfh");
     assert_eq!(yanked_app(press_app(&mut v, "yiq")), "hello world");
     assert_eq!(press_app(&mut v, "q"), None, "q alone is still unbound");
@@ -492,12 +561,20 @@ fn rebinding_replaces_and_unbinding_drops() {
         .action(&[Stroke::Char('n')], Act::Next, "Next comment")
         .unbind(Table::Normal, &[Stroke::Char('N')]);
     let mut v = Vim::new(keys);
-    assert_eq!(press_app(&mut v, "n"), Some(VimEffect::Action { action: Act::Next, count: None }));
+    assert_eq!(
+        press_app(&mut v, "n"),
+        Some(VimEffect::Action {
+            action: Act::Next,
+            count: None
+        })
+    );
     assert_eq!(press_app(&mut v, "N"), None);
 }
 
 #[test]
 #[should_panic(expected = "Normal: , starts ,q")]
 fn a_leader_vim_already_uses_panics() {
-    let _ = Keymap::<Act>::vim().action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None).leader(Stroke::Char(','));
+    let _ = Keymap::<Act>::vim()
+        .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None)
+        .leader(Stroke::Char(','));
 }
