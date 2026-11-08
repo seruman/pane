@@ -28,7 +28,7 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use rex_ui::{Badge, Button, Rex, Tone, icons, kbd};
-use rex_vim::{Hint, Vim, VimEffect, VimMode, hint};
+use rex_vim::{Hint, Keymap, Operator, Stroke, Table, Vim, VimEffect, VimMode, hint};
 use rune::{App, AppSpec, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, row, text, text_input};
 use rune_kit::markdown::Highlight;
 use rune_kit::{Markdown, MarkdownStyle};
@@ -59,15 +59,50 @@ enum Target {
     Edit(usize),
 }
 
-/// Keys after the first of a two-key command (`]c`, `ce`, `ZZ`).
+/// What the review adds to Vim's keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Prefix {
-    Bracket(bool),
-    C,
-    D,
-    Z,
-    /// Space: every key, as a leader key shows.
-    Space,
+enum Act {
+    /// `c{motion}`, `cc`, `v…c`: comment on what it covers.
+    Comment,
+    /// `d{motion}`, `dd`, `v…d`: mark it to be removed.
+    Remove,
+    /// `C`: a comment on the whole document.
+    General,
+    /// `]c`, `[c`.
+    NextComment,
+    PreviousComment,
+    /// `\e`, Enter: edit the comment picked, or under the cursor.
+    Edit,
+    /// `\x`: delete it.
+    Delete,
+    /// Tab: the comment list.
+    List,
+    /// `\?`: every key.
+    Keys,
+    /// `:`: a command line.
+    CommandLine,
+    /// `ZZ`, `ZQ`.
+    SendAndQuit,
+    QuitWithoutSending,
+}
+
+/// Vim's keys, and the review's on top of them.
+fn keymap() -> Keymap<Act> {
+    use Stroke::{Char as C, Leader};
+    Keymap::vim()
+        .operator(&[C('c')], Operator::App(Act::Comment), "Comment")
+        .operator(&[C('d')], Operator::App(Act::Remove), "Remove this")
+        .action(&[C('C')], Act::General, "General comment")
+        .action(&[C(']'), C('c')], Act::NextComment, "Next comment")
+        .action(&[C('['), C('c')], Act::PreviousComment, "Previous comment")
+        .action(&[Stroke::Enter], Act::Edit, "Edit the comment")
+        .action(&[Leader, C('e')], Act::Edit, None)
+        .action(&[Leader, C('x')], Act::Delete, "Delete the comment")
+        .action(&[Stroke::Tab], Act::List, "List the comments")
+        .action(&[Leader, C('?')], Act::Keys, "Every key")
+        .action(&[C(':')], Act::CommandLine, None)
+        .action(&[C('Z'), C('Z')], Act::SendAndQuit, "Send the review and quit")
+        .action(&[C('Z'), C('Q')], Act::QuitWithoutSending, "Quit without sending")
 }
 
 struct App_ {
@@ -79,7 +114,7 @@ struct App_ {
     out: Option<String>,
     source: String,
     page: Page,
-    vim: Vim,
+    vim: Vim<Act>,
     review: Review,
     /// The comment being written. Its text is `draft`, kept while the composer is closed too:
     /// Rune reaches a field's `TextEdit` once more after it goes, to clear its focus.
@@ -88,7 +123,8 @@ struct App_ {
     /// The comment `]c`, `[c` or a click went to, until the cursor moves; it tells comments
     /// apart that start at the same place, and it's how a general comment is picked.
     selected: Option<usize>,
-    prefix: Option<Prefix>,
+    /// `\\?` asked for every key; the next key closes the list.
+    all_keys: bool,
     /// The `:` command being typed.
     cmdline: Option<String>,
     /// The comment list floating over the page, and the row its cursor is on; `None` while
@@ -116,12 +152,12 @@ impl App_ {
             out,
             page: Page::new(&source),
             source,
-            vim: Vim::new().skip_blank_lines(true),
+            vim: Vim::new(keymap()).skip_blank_lines(true),
             review: Review::default(),
             composer: None,
             draft: TextEdit::default(),
             selected: None,
-            prefix: None,
+            all_keys: false,
             cmdline: None,
             list: None,
             send: false,
@@ -131,18 +167,6 @@ impl App_ {
 
     fn cursor(&self) -> usize {
         self.vim.cursor(self.page.text()).start
-    }
-
-    /// What `c` and `d` act on: the selection, or the cursor's line.
-    fn target_range(&self) -> Range<usize> {
-        let text = self.page.text();
-        if let Some(sel) = self.vim.selection(text) {
-            return sel;
-        }
-        let at = self.cursor();
-        let start = text[..at].rfind('\n').map_or(0, |i| i + 1);
-        let end = text[at..].find('\n').map_or(text.len(), |i| at + i);
-        start..end
     }
 
     /// The comment Enter, `ce` and `dc` act on, and the one the page marks: the comment list's
@@ -206,8 +230,7 @@ impl App_ {
     }
 
     /// Marks the selection (or the line) to be removed. Enter adds words to it.
-    fn remove(&mut self) {
-        let range = self.target_range();
+    fn remove(&mut self, range: Range<usize>) {
         self.vim.set_cursor(range.start, self.page.text());
         let n = self.review.add(Comment { kind: Kind::Remove, range: Some(range), body: String::new() });
         self.selected = Some(n);
@@ -673,70 +696,23 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
         .child(status_line(s, &rex))
 }
 
-/// The keys that can follow what's been typed, for the which-key panel: the review's own
-/// prefixes (`c`, `d`, `]`, `[`, `Z`), every key at once after Space, and otherwise whatever
-/// Vim has half typed (`y`, `gy`, `yi`, `f`) or the visual mode, with the review's keys for a
-/// selection ahead of Vim's. `None` when nothing is half typed.
+/// The keys that can follow what's been typed, for the which-key panel, all from the keymap:
+/// what Vim has half typed (`y`, `gy`, `ci`, `]`, the leader) or the visual mode, or every key
+/// after `\\?`. `None` when nothing is half typed.
 fn pending_keys(s: &App_) -> Option<(String, Vec<Vec<Hint>>)> {
     if s.composer.is_some() || s.cmdline.is_some() {
         return None;
     }
-    let on_comment = s.current().is_some();
-    let one = |typed: &str, rows: Vec<Hint>| Some((typed.to_owned(), vec![rows]));
-    match s.prefix {
-        Some(Prefix::C) => {
-            let mut g = vec![hint("c", "Comment on the line")];
-            if on_comment {
-                g.push(hint("e", "Edit this comment"));
-            }
-            return one("c", g);
-        }
-        Some(Prefix::D) => {
-            let mut g = vec![hint("d", "Remove the line")];
-            if on_comment {
-                g.push(hint("c", "Delete this comment"));
-            }
-            return one("d", g);
-        }
-        Some(Prefix::Bracket(true)) => return one("]", vec![hint("c", "Next comment")]),
-        Some(Prefix::Bracket(false)) => return one("[", vec![hint("c", "Previous comment")]),
-        Some(Prefix::Z) => return one("Z", vec![hint("Z", "Send the review and quit"), hint("Q", "Quit without sending")]),
-        Some(Prefix::Space) => return Some(("space".into(), all_keys())),
-        None => {}
-    }
-    let (typed, mut groups) = s.vim.hints()?;
-    if s.vim.pending().is_empty() && matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) {
-        groups.insert(0, vec![hint("c", "Comment"), hint("d", "Remove this")]);
-    }
-    Some((typed, groups))
-}
-
-/// Every key, after Space.
-fn all_keys() -> Vec<Vec<Hint>> {
-    vec![
-        vec![
-            hint("v V", "Select, then comment or remove"),
-            hint("cc", "Comment on the line"),
-            hint("dd", "Remove the line"),
-            hint("C", "General comment"),
-        ],
-        vec![
-            hint("]c [c", "Next, previous comment"),
-            hint("Enter", "Edit the comment"),
-            hint("dc", "Delete the comment"),
-            hint("Tab", "List the comments, go to one"),
-        ],
-        vec![
-            hint("y", "Yank\u{2026}"),
-            hint("gy", "Yank as Markdown\u{2026}"),
-            hint("/ ?", "Search"),
-        ],
-        vec![
-            hint(":wq ZZ", "Send the review and quit"),
+    if s.all_keys {
+        let mut groups = s.vim.keymap().hints(Table::Normal);
+        groups.push(vec![
+            hint(":wq", "Send the review and quit"),
             hint(":q", "Quit, with nothing to send"),
-            hint(":q! ZQ", "Quit without sending"),
-        ],
-    ]
+            hint(":q!", "Quit without sending"),
+        ]);
+        return Some(("keys".into(), groups));
+    }
+    s.vim.hints()
 }
 
 /// The keys that can follow, in a floating panel: the mode or prefix as a pill, Escape to
@@ -750,7 +726,7 @@ fn which_key(s: &App_, rex: &Rex) -> Option<El> {
             .gap(24.0)
             .center_y()
             .child(text(r.what).font(rex.ty.caption).color(rex.text).grow(1.0).shrink())
-            .child(text(r.keys).font(rex.ty.mono).color(rex.text_secondary))
+            .child(text(r.keys.clone()).font(rex.ty.mono).color(rex.text_secondary))
     };
     let mut list = col().w_full();
     for (i, group) in groups.iter().enumerate() {
@@ -815,7 +791,7 @@ fn bar(s: &App_, rex: &Rex) -> El {
         .child(hint("Tab", "comments"))
         .child(hint(":wq", "send"))
         .child(hint(":q!", "quit"))
-        .child(hint("space", "keys"))
+        .child(hint("\\?", "keys"))
 }
 
 fn status_line(s: &App_, rex: &Rex) -> El {
@@ -845,15 +821,7 @@ fn status_line(s: &App_, rex: &Rex) -> El {
     let count = s.review.comments.len();
     let summary = format!("{count} comment{}", if count == 1 { "" } else { "s" });
     let note = s.note.clone().or_else(|| s.vim.message().map(str::to_owned)).unwrap_or_default();
-    let pending = match s.prefix {
-        Some(Prefix::Bracket(true)) => "]".to_owned(),
-        Some(Prefix::Bracket(false)) => "[".to_owned(),
-        Some(Prefix::C) => "c".to_owned(),
-        Some(Prefix::D) => "d".to_owned(),
-        Some(Prefix::Z) => "Z".to_owned(),
-        Some(Prefix::Space) => String::new(),
-        None => s.vim.pending(),
-    };
+    let pending = s.vim.pending();
     row()
         .key("status")
         .w_full()
@@ -870,6 +838,7 @@ fn status_line(s: &App_, rex: &Rex) -> El {
         .child(text(format!("{line}:{lines}")).font(rex.ty.mono).color(rex.text_tertiary))
 }
 
+/// The character a key types, without Cmd or Ctrl.
 fn ch(k: &KeyEvent) -> Option<char> {
     match &k.key {
         Key::Text(t) if !k.mods.cmd && !k.mods.ctrl => {
@@ -914,86 +883,22 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
         list_key_press(s, k, tx);
         return true;
     }
-    let c = ch(k);
-    let searching = s.vim.mode() == VimMode::Search;
-    let visual = matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine);
-    // A command Vim is in the middle of (`yi`, `f`, `2`) has its next key.
-    let vim_busy = !s.vim.pending().is_empty();
-
-    // Space only shows the keys: the next key closes the list and does what it does.
-    if s.prefix == Some(Prefix::Space) {
-        s.prefix = None;
-        if k.key == Key::Escape || c == Some(' ') {
-            return true;
-        }
-    }
-    if let Some(prefix) = s.prefix.take() {
-        if k.key == Key::Escape {
-            return true;
-        }
-        match (prefix, c) {
-            (Prefix::Bracket(forward), Some('c')) => match s.review.step(s.current(), s.cursor(), !forward) {
-                Some(n) => s.jump(n, tx),
-                None => s.note = Some("No comments".into()),
-            },
-            (Prefix::C, Some('e')) => match s.current() {
-                Some(n) => s.open(Target::Edit(n)),
-                None => s.note = Some("No comment here".into()),
-            },
-            (Prefix::C, Some('c')) => s.open(Target::New { kind: Kind::Comment, range: Some(s.target_range()) }),
-            (Prefix::D, Some('c')) => match s.current() {
-                Some(n) => s.delete(n),
-                None => s.note = Some("No comment here".into()),
-            },
-            (Prefix::D, Some('d')) => s.remove(),
-            (Prefix::Z, Some('Z')) => s.command("wq", tx),
-            (Prefix::Z, Some('Q')) => s.command("q!", tx),
-            _ => {}
-        }
+    // The list of every key only shows them: the next key closes it and does what it does.
+    if std::mem::take(&mut s.all_keys) && k.key == Key::Escape {
         return true;
     }
-
-    if searching || vim_busy {
-        return vim_key(s, k, tx);
-    }
-    if k.key == Key::Tab {
-        s.open_list(tx);
-        return true;
-    }
-    if k.key == Key::Enter && !visual {
-        match s.current() {
-            Some(n) => s.open(Target::Edit(n)),
-            None => s.note = Some("No comment here: v selects, c comments".into()),
-        }
-        return true;
-    }
-    let Some(c) = c else { return vim_key(s, k, tx) };
-    match c {
-        'c' if visual => s.open(Target::New { kind: Kind::Comment, range: Some(s.target_range()) }),
-        'd' if visual => s.remove(),
-        'c' => s.prefix = Some(Prefix::C),
-        'd' => s.prefix = Some(Prefix::D),
-        'C' => s.open(Target::New { kind: Kind::Comment, range: None }),
-        ']' | '[' => s.prefix = Some(Prefix::Bracket(c == ']')),
-        'Z' => s.prefix = Some(Prefix::Z),
-        ' ' => s.prefix = Some(Prefix::Space),
-        ':' => s.cmdline = Some(String::new()),
-        _ => return vim_key(s, k, tx),
-    }
-    true
-}
-
-fn vim_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
-    match s.vim.key(k, s.page.text()) {
+    let before = (s.cursor(), s.vim.mode());
+    let effect = s.vim.key(k, s.page.text());
+    match effect {
         Some(VimEffect::Moved) => {
-            s.selected = None;
+            // The comment `]c` picked holds until the cursor moves; a key toward a command
+            // (the `]` of `]c`) isn't a move.
+            if (s.cursor(), s.vim.mode()) != before {
+                s.selected = None;
+            }
             tx.scroll_into_view("vim-cursor");
-            true
         }
-        Some(VimEffect::Copy(yanked)) => {
-            tx.copy(yanked);
-            true
-        }
+        Some(VimEffect::Copy(yanked)) => tx.copy(yanked),
         Some(VimEffect::CopySource { range, linewise }) => {
             let ranges = s.page.source_ranges(range);
             let mut md = page::source_of(&s.source, &ranges, linewise);
@@ -1001,9 +906,41 @@ fn vim_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
                 md.push('\n');
             }
             tx.copy(md);
-            true
         }
-        None => false,
+        Some(VimEffect::Operator { action, range, .. }) => match action {
+            Act::Comment => s.open(Target::New { kind: Kind::Comment, range: Some(range) }),
+            Act::Remove => s.remove(range),
+            _ => {}
+        },
+        Some(VimEffect::Action { action, .. }) => act(s, action, tx),
+        None => return false,
+    }
+    true
+}
+
+/// An action the review bound.
+fn act(s: &mut App_, action: Act, tx: &mut Tx) {
+    match action {
+        Act::General => s.open(Target::New { kind: Kind::Comment, range: None }),
+        Act::NextComment | Act::PreviousComment => match s.review.step(s.current(), s.cursor(), action == Act::PreviousComment) {
+            Some(n) => s.jump(n, tx),
+            None => s.note = Some("No comments".into()),
+        },
+        Act::Edit => match s.current() {
+            Some(n) => s.open(Target::Edit(n)),
+            None => s.note = Some("No comment here: v selects, c comments".into()),
+        },
+        Act::Delete => match s.current() {
+            Some(n) => s.delete(n),
+            None => s.note = Some("No comment here".into()),
+        },
+        Act::List => s.open_list(tx),
+        Act::Keys => s.all_keys = true,
+        Act::CommandLine => s.cmdline = Some(String::new()),
+        Act::SendAndQuit => s.command("wq", tx),
+        Act::QuitWithoutSending => s.command("q!", tx),
+        // Operators come back as `VimEffect::Operator`.
+        Act::Comment | Act::Remove => {}
     }
 }
 
@@ -1143,7 +1080,7 @@ fn main() {
                     s.vim.key(&KeyEvent { key: Key::Text(c.to_string()), mods: rune::Mods::default() }, &text);
                 }
             }),
-            ("keys", |s| s.prefix = Some(Prefix::Space)),
+            ("keys", |s| s.all_keys = true),
             ("yank", |s| {
                 let text = s.page.text().to_owned();
                 for c in "gy".chars() {
@@ -1152,7 +1089,8 @@ fn main() {
             }),
             ("prefix", |s| {
                 s.review.add(Comment::on(0..4, "x"));
-                s.prefix = Some(Prefix::C);
+                let text = s.page.text().to_owned();
+                s.vim.key(&KeyEvent { key: Key::Text("c".into()), mods: rune::Mods::default() }, &text);
             }),
         ],
         on_key: Some(on_key),

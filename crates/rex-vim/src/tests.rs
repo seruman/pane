@@ -4,7 +4,7 @@ use super::*;
 
 const TEXT: &str = "fn main() {\n    let s = \"hello world\";\n    print(s);\n}\n\nsecond paragraph here\nand more";
 
-fn press(vim: &mut Vim, keys: &str) -> Option<VimEffect> {
+fn press(vim: &mut Vim, keys: &str) -> Option<VimEffect<NoAction>> {
     let mut last = None;
     for c in keys.chars() {
         let ev = KeyEvent {
@@ -32,7 +32,7 @@ fn at(vim: &Vim) -> &'static str {
     &TEXT[vim.cursor(TEXT).start..]
 }
 
-fn yanked(effect: Option<VimEffect>) -> String {
+fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
     match effect {
         Some(VimEffect::Copy(s)) => s,
         other => panic!("no yank: {other:?}"),
@@ -41,7 +41,7 @@ fn yanked(effect: Option<VimEffect>) -> String {
 
 #[test]
 fn word_motions() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "w");
     assert!(at(&v).starts_with("main"));
     press(&mut v, "w");
@@ -56,7 +56,7 @@ fn word_motions() {
 
 #[test]
 fn lines_columns_and_counts() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "j");
     assert!(at(&v).starts_with(" "));
     press(&mut v, "^");
@@ -75,7 +75,7 @@ fn lines_columns_and_counts() {
 
 #[test]
 fn find_and_repeat() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "jfo");
     assert!(at(&v).starts_with("o world"));
     press(&mut v, ";");
@@ -88,7 +88,7 @@ fn find_and_repeat() {
 
 #[test]
 fn paragraphs_and_brackets() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "}");
     assert_eq!(v.cursor(TEXT).start, TEXT.find("\n\n").unwrap() + 1);
     press(&mut v, "{");
@@ -101,7 +101,7 @@ fn paragraphs_and_brackets() {
 
 #[test]
 fn yank_motions_and_lines() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     assert_eq!(yanked(press(&mut v, "yw")), "fn ");
     assert_eq!(yanked(press(&mut v, "ye")), "fn");
     assert_eq!(yanked(press(&mut v, "y$")), "fn main() {");
@@ -116,7 +116,7 @@ fn yank_motions_and_lines() {
 
 #[test]
 fn text_objects() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "jfh");
     assert_eq!(yanked(press(&mut v, "yiw")), "hello");
     assert_eq!(yanked(press(&mut v, "yaw")), "hello ");
@@ -138,7 +138,7 @@ fn text_objects() {
 
 #[test]
 fn visual_selections() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "vee");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "fn main");
     press(&mut v, "o");
@@ -161,7 +161,7 @@ fn visual_selections() {
 
 #[test]
 fn search_smart_case_and_star() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "/s");
     assert_eq!(v.status(), "/s");
     v.key(
@@ -193,7 +193,7 @@ fn search_smart_case_and_star() {
 
 #[test]
 fn half_pages_and_escape() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     ctrl(&mut v, 'd');
     assert!(at(&v).starts_with("and more"));
     ctrl(&mut v, 'u');
@@ -237,7 +237,7 @@ fn press_on(vim: &mut Vim, text: &str, keys: &str) {
 
 #[test]
 fn skipping_blank_lines() {
-    let mut v = Vim::new().skip_blank_lines(true);
+    let mut v = Vim::default().skip_blank_lines(true);
     let at = |v: &Vim| &PAGE[v.cursor(PAGE).start..];
     press_on(&mut v, PAGE, "j");
     assert!(at(&v).starts_with("First"));
@@ -259,7 +259,7 @@ fn skipping_blank_lines() {
 
 #[test]
 fn escape_hides_search_matches() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     press(&mut v, "/s");
     v.key(
         &KeyEvent {
@@ -284,7 +284,7 @@ fn escape_hides_search_matches() {
     assert!(!v.matches(TEXT).is_empty());
 }
 
-fn source(effect: Option<VimEffect>) -> (std::ops::Range<usize>, bool) {
+fn source(effect: Option<VimEffect<NoAction>>) -> (std::ops::Range<usize>, bool) {
     match effect {
         Some(VimEffect::CopySource { range, linewise }) => (range, linewise),
         other => panic!("no source yank: {other:?}"),
@@ -293,7 +293,7 @@ fn source(effect: Option<VimEffect>) -> (std::ops::Range<usize>, bool) {
 
 #[test]
 fn gy_asks_for_the_source() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     let (range, linewise) = source(press(&mut v, "gyw"));
     assert_eq!((&TEXT[range], linewise), ("fn ", false));
     assert_eq!(v.message(), Some("3 characters yanked as source"));
@@ -314,7 +314,7 @@ fn gy_asks_for_the_source() {
 
 #[test]
 fn gy_text_object_after_a_visual_yank() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     yanked(press(&mut v, "vey"));
     let (range, _) = source(press(&mut v, "gyiw"));
     assert_eq!(&TEXT[range], "fn");
@@ -322,7 +322,7 @@ fn gy_text_object_after_a_visual_yank() {
 
 #[test]
 fn hints_follow_what_is_typed() {
-    let mut v = Vim::new();
+    let mut v = Vim::default();
     assert_eq!(v.hints(), None, "nothing half typed");
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
@@ -335,7 +335,7 @@ fn hints_follow_what_is_typed() {
     assert_eq!(v.hints().unwrap().0, "g");
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!((typed.as_str(), groups[0][0]), ("gy", hint("gy", "The line")));
+    assert_eq!((typed.as_str(), groups[0][0].clone()), ("gy", hint("gy", "The line")));
     press(&mut v, "a");
     assert_eq!(v.hints().unwrap().0, "gya");
     press(&mut v, "w");
@@ -343,5 +343,161 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "visual");
-    assert!(groups[0].contains(&hint("gy", "Yank as Markdown")));
+    assert!(groups.iter().flatten().any(|h| *h == hint("gy", "Yank as Markdown")));
+}
+
+
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Act {
+    Comment,
+    Next,
+    Quit,
+}
+
+fn app_vim() -> Vim<Act> {
+    Vim::new(
+        Keymap::vim()
+            .operator(&[Stroke::Char('c')], Operator::App(Act::Comment), "Comment")
+            .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::Next, "Next comment")
+            .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit"),
+    )
+}
+
+fn press_app(vim: &mut Vim<Act>, keys: &str) -> Option<VimEffect<Act>> {
+    let mut last = None;
+    for c in keys.chars() {
+        last = vim.key(&KeyEvent { key: Key::Text(c.to_string()), mods: Mods::default() }, TEXT);
+    }
+    last
+}
+
+fn operated(effect: Option<VimEffect<Act>>) -> (&'static str, bool) {
+    match effect {
+        Some(VimEffect::Operator { action: Act::Comment, range, linewise }) => (&TEXT[range], linewise),
+        other => panic!("no operator: {other:?}"),
+    }
+}
+
+#[test]
+fn an_app_operator_takes_motions_objects_lines_and_selections() {
+    let mut v = app_vim();
+    assert_eq!(operated(press_app(&mut v, "cw")), ("fn ", false));
+    assert_eq!(operated(press_app(&mut v, "c$")), ("fn main() {", false));
+    assert_eq!(operated(press_app(&mut v, "cc")), ("fn main() {", true));
+    assert_eq!(operated(press_app(&mut v, "2cc")), ("fn main() {\n    let s = \"hello world\";", true));
+    assert_eq!(operated(press_app(&mut v, "cj")), ("fn main() {\n    let s = \"hello world\";", true));
+    press_app(&mut v, "jfh");
+    assert_eq!(operated(press_app(&mut v, "ciw")), ("hello", false));
+    assert_eq!(operated(press_app(&mut v, "ci\"")), ("hello world", false));
+    assert_eq!(operated(press_app(&mut v, "vec")), ("hello", false));
+    assert_eq!(v.mode(), VimMode::Normal, "an operator ends the selection");
+    press_app(&mut v, "G");
+    assert_eq!(operated(press_app(&mut v, "cip")), ("second paragraph here\nand more", false));
+    // The cursor went to the paragraph's start, as an operator leaves it; yank works beside it.
+    assert_eq!(yanked_app(press_app(&mut v, "yy")), "second paragraph here\n");
+}
+
+fn yanked_app(effect: Option<VimEffect<Act>>) -> String {
+    match effect {
+        Some(VimEffect::Copy(s)) => s,
+        other => panic!("no yank: {other:?}"),
+    }
+}
+
+#[test]
+fn app_actions_sequences_and_the_leader() {
+    let mut v = app_vim();
+    assert_eq!(press_app(&mut v, "]"), Some(VimEffect::Moved));
+    assert_eq!(v.pending(), "]");
+    assert_eq!(press_app(&mut v, "c"), Some(VimEffect::Action { action: Act::Next, count: None }));
+    assert_eq!(press_app(&mut v, "3]c"), Some(VimEffect::Action { action: Act::Next, count: Some(3) }));
+    // The leader is `\` by default.
+    assert_eq!(press_app(&mut v, "\\q"), Some(VimEffect::Action { action: Act::Quit, count: None }));
+    // A sequence that goes nowhere is dropped; an unbound key is the app's.
+    assert_eq!(press_app(&mut v, "]x"), Some(VimEffect::Moved));
+    assert!(!v.is_pending());
+    assert_eq!(press_app(&mut v, "Q"), None);
+
+    // Another leader. `,` is Vim's (find back), so it's unbound first.
+    let comma = [Stroke::Char(',')];
+    let keys = Keymap::vim()
+        .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit")
+        .unbind(Table::Normal, &comma)
+        .unbind(Table::Visual, &comma)
+        .unbind(Table::Pending, &comma)
+        .leader(Stroke::Char(','));
+    let mut v = Vim::new(keys);
+    assert_eq!(press_app(&mut v, ",q"), Some(VimEffect::Action { action: Act::Quit, count: None }));
+}
+
+#[test]
+fn hints_come_from_the_keymap() {
+    let mut v = app_vim();
+    press_app(&mut v, "]");
+    assert_eq!(v.hints().unwrap(), ("]".to_owned(), vec![vec![hint("c", "Next comment")]]));
+    press_app(&mut v, "x");
+    press_app(&mut v, "\\");
+    assert_eq!(v.hints().unwrap().1, vec![vec![hint("q", "Quit")]]);
+    press_app(&mut v, "x");
+
+    // In Visual mode the app's operator comes first, then Vim's.
+    press_app(&mut v, "v");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!(typed, "visual");
+    assert_eq!(groups[0], vec![hint("c", "Comment")]);
+    assert!(groups[1].contains(&hint("gy", "Yank as Markdown")));
+    assert!(groups[1].contains(&hint("o", "Go to the other end")));
+    press_app(&mut v, "v");
+
+    // After an operator: the line, then text objects and motions.
+    press_app(&mut v, "c");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!(typed, "c");
+    assert_eq!(groups[0], vec![hint("c", "The line")]);
+    assert!(groups[1].contains(&hint("i", "Inside an object…")));
+    assert!(groups[2].contains(&hint("w", "To the next word")));
+    press_app(&mut v, "i");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!(typed, "ci");
+    assert!(groups[0].contains(&hint("p", "Paragraph")));
+}
+
+#[test]
+fn objects_are_their_own_table() {
+    // An app can add a text object, and it's offered after `i` and `a` only.
+    let mut v = Vim::new(Keymap::<Act>::vim().object(&[Stroke::Char('q')], Object::Quotes('"'), "Any quotes"));
+    press_app(&mut v, "jfh");
+    assert_eq!(yanked_app(press_app(&mut v, "yiq")), "hello world");
+    assert_eq!(press_app(&mut v, "q"), None, "q alone is still unbound");
+}
+
+#[test]
+#[should_panic(expected = "] starts ]c; with no timeout, ]c could never be typed")]
+fn a_binding_that_starts_another_panics() {
+    let _ = Keymap::<Act>::vim()
+        .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::Next, None)
+        .action(&[Stroke::Char(']')], Act::Quit, None);
+}
+
+#[test]
+#[should_panic(expected = "starts with a digit")]
+fn a_binding_on_a_digit_panics() {
+    let _ = Keymap::<Act>::vim().action(&[Stroke::Char('1')], Act::Quit, None);
+}
+
+#[test]
+fn rebinding_replaces_and_unbinding_drops() {
+    let keys = Keymap::<Act>::vim()
+        .action(&[Stroke::Char('n')], Act::Next, "Next comment")
+        .unbind(Table::Normal, &[Stroke::Char('N')]);
+    let mut v = Vim::new(keys);
+    assert_eq!(press_app(&mut v, "n"), Some(VimEffect::Action { action: Act::Next, count: None }));
+    assert_eq!(press_app(&mut v, "N"), None);
+}
+
+#[test]
+#[should_panic(expected = "Normal: , starts ,q")]
+fn a_leader_vim_already_uses_panics() {
+    let _ = Keymap::<Act>::vim().action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None).leader(Stroke::Char(','));
 }

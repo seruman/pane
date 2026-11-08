@@ -15,7 +15,7 @@
 use std::time::{Duration, Instant};
 
 use rex_ui::{Badge, Button, Rex, icons, kbd};
-use rex_vim::{Vim, VimEffect, VimMode};
+use rex_vim::{Keymap, Stroke, Vim, VimEffect, VimMode};
 use rune::{AppSpec, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text};
 use rune_kit::markdown::{Highlight, RenderedText};
 use rune_kit::{CodeFrame, Markdown, MarkdownStyle};
@@ -23,10 +23,17 @@ use rune_kit::{CodeFrame, Markdown, MarkdownStyle};
 const SAMPLE: &str = include_str!("sample.md");
 const COPIED_FOR: Duration = Duration::from_millis(1500);
 
+/// What the viewer adds to Vim's keys.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Act {
+    /// Space: tick or clear the task on the cursor's line.
+    Tick,
+}
+
 struct Doc {
     path: Option<String>,
     source: String,
-    vim: Vim,
+    vim: Vim<Act>,
     /// The code block whose copy button shows a check, and since when.
     copied: Option<(usize, Instant)>,
 }
@@ -41,7 +48,7 @@ impl Default for Doc {
         Doc {
             path,
             source,
-            vim: Vim::new().skip_blank_lines(true),
+            vim: Vim::new(Keymap::vim().action(&[Stroke::Char(' ')], Act::Tick, "Tick the task")).skip_blank_lines(true),
             copied: None,
         }
     }
@@ -132,7 +139,7 @@ fn style(rex: &Rex) -> MarkdownStyle {
 
 /// The Vim cursor, selection and search matches as highlights on the page.
 fn vim_highlights(
-    vim: &Vim,
+    vim: &Vim<Act>,
     page: &RenderedText,
     rex: &Rex,
 ) -> Vec<(Vec<std::ops::Range<usize>>, Highlight)> {
@@ -253,7 +260,7 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
 
 /// Vim's status line: the mode (or the search being typed), a note, half-typed keys and the
 /// cursor's line.
-fn status_line(vim: &Vim, page: &RenderedText, rex: &Rex) -> El {
+fn status_line(vim: &Vim<Act>, page: &RenderedText, rex: &Rex) -> El {
     let text_of = page.text();
     let line = text_of[..vim.cursor(text_of).start].matches('\n').count() + 1;
     let lines = text_of.matches('\n').count() + 1;
@@ -301,14 +308,6 @@ fn status_line(vim: &Vim, page: &RenderedText, rex: &Rex) -> El {
 
 fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
     let page = RenderedText::new(&s.source);
-    // Space on a task's line ticks it, as a click on its box does.
-    if k.key == rune::Key::Text(" ".into()) && s.vim.mode() == VimMode::Normal {
-        let Some((offset, checked)) = s.task_under_cursor(&page) else {
-            return false;
-        };
-        s.set_task(offset, !checked);
-        return true;
-    }
     match s.vim.key(k, page.text()) {
         Some(VimEffect::Moved) => {
             tx.scroll_into_view("vim-cursor");
@@ -324,6 +323,14 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
             tx.scroll_into_view("vim-cursor");
             true
         }
+        // Space on a task's line ticks it, as a click on its box does.
+        Some(VimEffect::Action { action: Act::Tick, .. }) => {
+            if let Some((offset, checked)) = s.task_under_cursor(&page) {
+                s.set_task(offset, !checked);
+            }
+            true
+        }
+        Some(VimEffect::Operator { .. }) => true,
         None => false,
     }
 }
