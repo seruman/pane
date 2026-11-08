@@ -65,19 +65,27 @@ fn system(operation: &str, error: io::Error) -> CommandError {
 /// Signals a command starts with at their default action, whatever rmenu does with them.
 const DEFAULT_SIGNALS: [libc::c_int; 5] = [libc::SIGPIPE, libc::SIGINT, libc::SIGTERM, libc::SIGQUIT, libc::SIGHUP];
 
-/// `program` resolved against PATH from the command's own environment, as a shell would:
-/// posix_spawnp would search rmenu's PATH instead.
+/// `program` resolved against PATH from the command's own environment, as execvp would:
+/// posix_spawnp would search rmenu's PATH instead. Without PATH, execvp's default applies.
+/// When no candidate is executable but one exists, the error is EACCES, not ENOENT.
 fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError> {
-    let not_found = || CommandError::System { operation: "posix_spawn".into(), code: libc::ENOENT };
     let cstring = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(|_| CommandError::InvalidArguments);
     if program.contains('/') { return cstring(Path::new(program)); }
-    for dir in std::env::split_paths(path.ok_or_else(not_found)?) {
+    let mut denied = false;
+    for dir in std::env::split_paths(path.unwrap_or(OsStr::new("/usr/bin:/bin"))) {
         let candidate = dir.join(program);
         let Ok(c) = cstring(&candidate) else { continue };
         // SAFETY: access only reads the NUL-terminated path.
-        if unsafe { libc::access(c.as_ptr(), libc::X_OK) } == 0 && candidate.is_file() { return Ok(c); }
+        if unsafe { libc::access(c.as_ptr(), libc::X_OK) } != 0 {
+            denied |= io::Error::last_os_error().raw_os_error() == Some(libc::EACCES);
+        } else if candidate.is_file() {
+            return Ok(c);
+        } else {
+            denied = true;
+        }
     }
-    Err(not_found())
+    let code = if denied { libc::EACCES } else { libc::ENOENT };
+    Err(CommandError::System { operation: "posix_spawn".into(), code })
 }
 
 /// A pipe whose ends are close-on-exec, so no other command inherits them.
@@ -480,6 +488,19 @@ mod tests {
         assert_eq!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments));
         assert_eq!(quick(&["missing-command-rmenu-test"]),
                    Err(CommandError::System { operation: "posix_spawn".into(), code: libc::ENOENT }));
+    }
+
+    #[test]
+    fn a_candidate_on_path_that_is_not_executable_is_denied_not_missing() {
+        let dir = TempDir::new("denied");
+        std::fs::write(dir.0.join("script"), "#!/bin/sh\n").unwrap();
+        let result = run_with(&["script"], Some(b""), &[("PATH", dir.0.to_str().unwrap())], Duration::from_secs(10), 1 << 20);
+        assert_eq!(result, Err(CommandError::System { operation: "posix_spawn".into(), code: libc::EACCES }));
+    }
+
+    #[test]
+    fn without_path_commands_resolve_against_usr_bin_and_bin() {
+        assert_eq!(resolve("true", None).unwrap().as_c_str(), c"/usr/bin/true");
     }
 
     #[test]
