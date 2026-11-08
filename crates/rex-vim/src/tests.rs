@@ -319,3 +319,29 @@ fn gy_text_object_after_a_visual_yank() {
     let (range, _) = source(press(&mut v, "gyiw"));
     assert_eq!(&TEXT[range], "fn");
 }
+
+#[test]
+fn hints_follow_what_is_typed() {
+    let mut v = Vim::new();
+    assert_eq!(v.hints(), None, "nothing half typed");
+    press(&mut v, "y");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!(typed, "y");
+    assert_eq!(groups[0][0], hint("y", "The line"));
+    press(&mut v, "i");
+    assert_eq!(v.hints().unwrap().0, "yi");
+    v.key(&KeyEvent { key: Key::Escape, mods: Mods::default() }, TEXT);
+    press(&mut v, "g");
+    assert_eq!(v.hints().unwrap().0, "g");
+    press(&mut v, "y");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!((typed.as_str(), groups[0][0]), ("gy", hint("gy", "The line")));
+    press(&mut v, "a");
+    assert_eq!(v.hints().unwrap().0, "gya");
+    press(&mut v, "w");
+    assert_eq!(v.hints(), None);
+    press(&mut v, "v");
+    let (typed, groups) = v.hints().unwrap();
+    assert_eq!(typed, "visual");
+    assert!(groups[0].contains(&hint("gy", "Yank as Markdown")));
+}

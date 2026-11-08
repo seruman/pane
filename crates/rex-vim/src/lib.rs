@@ -15,6 +15,42 @@ use std::ops::Range;
 
 use rune::{Key, KeyEvent};
 
+/// A key that can come next and what it does, for a which-key panel ([`Vim::hints`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hint {
+    pub keys: &'static str,
+    pub what: &'static str,
+}
+
+pub const fn hint(keys: &'static str, what: &'static str) -> Hint {
+    Hint { keys, what }
+}
+
+/// What a yank can run to, as [`Vim::hints`] lists them.
+const MOTIONS: [Hint; 8] = [
+    hint("w", "To the next word"),
+    hint("e", "To the word's end"),
+    hint("b", "Back a word"),
+    hint("$", "To the line's end"),
+    hint("0", "From the line's start"),
+    hint("}", "To the paragraph's end"),
+    hint("f", "To a character"),
+    hint("t", "Up to a character"),
+];
+
+/// The text objects after `i` or `a`.
+const OBJECTS: [Hint; 9] = [
+    hint("w", "Word"),
+    hint("W", "WORD, to spaces"),
+    hint("p", "Paragraph"),
+    hint("\"", "Double quotes"),
+    hint("'", "Single quotes"),
+    hint("`", "Backticks"),
+    hint("( b", "Parentheses"),
+    hint("[ {", "Brackets, braces"),
+    hint("<", "Angle brackets"),
+];
+
 /// What [`Vim`] is doing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VimMode {
@@ -233,6 +269,48 @@ impl Vim {
             Pending::Object { around } => s.push_str(if around { "ya" } else { "yi" }),
         }
         s
+    }
+
+    /// What can follow the keys typed so far, for a which-key panel: what's been typed (`y`,
+    /// `gy`, `yi`, `g`), or the visual mode, and the keys that can come next in groups. `None`
+    /// in Normal mode with nothing half typed, and while a search is being typed.
+    pub fn hints(&self) -> Option<(String, Vec<Vec<Hint>>)> {
+        let visual = matches!(self.mode, VimMode::Visual | VimMode::VisualLine);
+        let gy = if self.source_yank { "gy" } else { "y" };
+        match self.pending {
+            Pending::G => Some(("g".into(), vec![vec![hint("g", "Go to the top"), hint("y", "Yank as Markdown…")]])),
+            Pending::Find(kind) => Some((
+                kind.to_string(),
+                vec![vec![hint("any", if matches!(kind, 'f' | 'F') { "The character to go to" } else { "The character to stop before" })]],
+            )),
+            Pending::Object { around } => {
+                let typed = match (visual, around) {
+                    (true, false) => "i".to_owned(),
+                    (true, true) => "a".to_owned(),
+                    (false, false) => format!("{gy}i"),
+                    (false, true) => format!("{gy}a"),
+                };
+                Some((typed, vec![OBJECTS.to_vec()]))
+            }
+            Pending::Yank => Some((
+                gy.into(),
+                vec![
+                    vec![hint(gy, "The line"), hint("i", "Inside an object…"), hint("a", "Around an object…")],
+                    MOTIONS.to_vec(),
+                ],
+            )),
+            Pending::None if visual => Some((
+                if self.mode == VimMode::Visual { "visual" } else { "v-line" }.into(),
+                vec![vec![
+                    hint("y", "Yank"),
+                    hint("gy", "Yank as Markdown"),
+                    hint("o", "Go to the other end"),
+                    hint("i", "Select inside an object…"),
+                    hint("a", "Select around an object…"),
+                ]],
+            )),
+            Pending::None => None,
+        }
     }
 
     /// A one-off note from the last command, as "3 lines yanked" or "Pattern not found".

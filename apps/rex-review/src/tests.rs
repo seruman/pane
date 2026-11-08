@@ -231,18 +231,29 @@ fn quitting() {
 
 #[test]
 fn which_key_shows_what_can_follow() {
+    let keys = |rt: &Runtime<App_>, group: usize| -> Vec<&'static str> {
+        pending_keys(&rt.state).unwrap().1[group].iter().map(|h| h.keys).collect()
+    };
     let mut rt = runtime(SRC);
     assert!(rt.find("which-key").is_none());
     press(&mut rt, "v");
     assert!(rt.find("which-key").is_some(), "a selection lists its keys");
-    let (_, groups) = pending_keys(&rt.state).unwrap();
-    assert_eq!(groups[1].len(), LABELS.len(), "every label");
+    assert_eq!(keys(&rt, 0), ["c", "d"], "the review's first");
+    assert_eq!(keys(&rt, 1).len(), LABELS.len(), "then the labels");
+    assert!(keys(&rt, 2).contains(&"gy"), "then Vim's, Markdown yank included");
     key(&mut rt, Key::Escape);
     assert!(rt.find("which-key").is_none());
 
+    // Vim's own prefixes come from Vim.
+    press(&mut rt, "gy");
+    assert_eq!(pending_keys(&rt.state).unwrap().0, "gy");
+    press(&mut rt, "i");
+    assert_eq!(pending_keys(&rt.state).unwrap().0, "gyi");
+    key(&mut rt, Key::Escape);
+
     press(&mut rt, "d");
     let (prefix, groups) = pending_keys(&rt.state).unwrap();
-    assert_eq!((prefix, groups[0].len()), ("d", 1), "dc only shows on a comment");
+    assert_eq!((prefix.as_str(), groups[0].len()), ("d", 1), "dc only shows on a comment");
     key(&mut rt, Key::Escape);
     assert!(rt.state.prefix.is_none() && rt.find("which-key").is_none(), "Escape cancels a prefix");
     assert!(rt.state.review.comments.is_empty());
@@ -251,6 +262,16 @@ fn which_key_shows_what_can_follow() {
     press(&mut rt, "x");
     key(&mut rt, Key::Enter);
     press(&mut rt, "c");
-    let (_, groups) = pending_keys(&rt.state).unwrap();
-    assert_eq!(groups[0].iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["c", "e"]);
+    assert_eq!(keys(&rt, 0), ["c", "e"]);
+    key(&mut rt, Key::Escape);
+
+    // Space lists every key; the next key closes it.
+    let line = |rt: &Runtime<App_>| rt.state.page.text()[..rt.state.cursor()].matches('\n').count();
+    let before = line(&rt);
+    press(&mut rt, " ");
+    assert_eq!(pending_keys(&rt.state).unwrap().0, "space");
+    assert!(rt.find("which-key").is_some());
+    press(&mut rt, "j");
+    assert!(rt.find("which-key").is_none());
+    assert!(line(&rt) > before, "and the key goes on to move the cursor");
 }

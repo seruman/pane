@@ -13,7 +13,8 @@
 //! marks it to be removed, and `1`–`9` give it a label ("Clarify this", "Verify this", …); `cc`
 //! and `dd` do the same for the cursor's line. `C` adds a general comment, about the document
 //! as a whole. `]c` and `[c` step through the comments; on one, Enter or `ce` edits it and `dc`
-//! deletes it. `Tab` lists every comment beside the page and `:h` shows every key.
+//! deletes it. `Tab` lists every comment beside the page. While keys are half typed (`y`,
+//! `gy`, `c`, a selection) a panel shows what can follow; Space shows every key.
 //!
 //! In a comment, Enter saves (Shift-Enter starts a new line) and Escape cancels. `:wq`, `:x`
 //! or `ZZ` quit and send the review; `:q` quits when there's nothing to send, `:q!` or `ZQ`
@@ -27,7 +28,7 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use rex_ui::{Badge, Button, Rex, Tone, icons, kbd};
-use rex_vim::{Vim, VimEffect, VimMode};
+use rex_vim::{Hint, Vim, VimEffect, VimMode, hint};
 use rune::{App, AppSpec, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, row, text, text_input};
 use rune_kit::markdown::Highlight;
 use rune_kit::{Markdown, MarkdownStyle};
@@ -65,6 +66,8 @@ enum Prefix {
     C,
     D,
     Z,
+    /// Space: every key, as a leader key shows.
+    Space,
 }
 
 /// What shows beside the page.
@@ -72,7 +75,6 @@ enum Prefix {
 enum Side {
     None,
     Comments,
-    Help,
 }
 
 struct App_ {
@@ -241,7 +243,6 @@ impl App_ {
                 self.send = true;
                 tx.quit();
             }
-            "h" | "help" => self.side = if self.side == Side::Help { Side::None } else { Side::Help },
             "" => {}
             other => self.note = Some(format!("Not a command: {other}")),
         }
@@ -566,43 +567,6 @@ fn comments_view(s: &App_, rex: &Rex) -> El {
     side_panel(&format!("Comments · {}", s.review.comments.len()), list, rex)
 }
 
-/// Every key, and the labels on the number keys.
-fn help_view(rex: &Rex) -> El {
-    let line = |keys: &str, what: &str| {
-        row()
-            .w_full()
-            .gap(10.0)
-            .center_y()
-            .child(el().w(64.0).child(kbd(keys, rex)))
-            .child(text(what.to_owned()).font(rex.ty.caption).color(rex.text_secondary).shrink())
-    };
-    let heading = |t: &str| text(t.to_owned()).font(rex.ty.label).color(rex.text_tertiary).mt(8.0);
-    let mut c = col()
-        .w_full()
-        .gap(6.0)
-        .child(heading("COMMENT"))
-        .child(line("v V", "select, then:"))
-        .child(line("c", "comment on it"))
-        .child(line("d", "mark it to remove"))
-        .child(line("1–9", "label it"))
-        .child(line("cc dd", "the same for the line"))
-        .child(line("C", "general comment"))
-        .child(heading("COMMENTS"))
-        .child(line("]c [c", "next, previous"))
-        .child(line("Enter ce", "edit"))
-        .child(line("dc", "delete"))
-        .child(line("Tab", "list them"))
-        .child(heading("QUIT"))
-        .child(line(":wq ZZ", "send the review"))
-        .child(line(":q", "quit when there's nothing"))
-        .child(line(":q! ZQ", "quit without sending"))
-        .child(heading("LABELS"));
-    for (i, l) in LABELS.iter().enumerate() {
-        c = c.child(line(&(i + 1).to_string(), l.text));
-    }
-    side_panel("Keys", c, rex)
-}
-
 fn side_panel(title: &str, body: El, rex: &Rex) -> El {
     col()
         .key("panel")
@@ -659,7 +623,6 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
     let side = match s.side {
         Side::None => None,
         Side::Comments => Some(comments_view(s, &rex)),
-        Side::Help => Some(help_view(&rex)),
     };
     if let Some(side) = side {
         body = body.child(el().w(1.0).h_full().fill(rex.separator)).child(side);
@@ -674,66 +637,97 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
         .child(status_line(s, &rex))
 }
 
-/// One row of the which-key panel: what a key does, then the key, as Rex's prefix panel lists
-/// them.
-struct KeyRow {
-    what: &'static str,
-    key: String,
-}
-
-fn key_row(what: &'static str, key: impl Into<String>) -> KeyRow {
-    KeyRow { what, key: key.into() }
-}
-
-/// The keys that can follow what's been typed: a selection's (comment, remove, the labels),
-/// or a prefix's second key. `None` when no key is half typed.
-fn pending_keys(s: &App_) -> Option<(&'static str, Vec<Vec<KeyRow>>)> {
+/// The keys that can follow what's been typed, for the which-key panel: the review's own
+/// prefixes (`c`, `d`, `]`, `[`, `Z`), every key at once after Space, and otherwise whatever
+/// Vim has half typed (`y`, `gy`, `yi`, `f`) or the visual mode, with the review's keys for a
+/// selection ahead of Vim's. `None` when nothing is half typed.
+fn pending_keys(s: &App_) -> Option<(String, Vec<Vec<Hint>>)> {
     if s.composer.is_some() || s.cmdline.is_some() {
         return None;
     }
     let on_comment = s.current().is_some();
-    let groups = match s.prefix {
+    let one = |typed: &str, rows: Vec<Hint>| Some((typed.to_owned(), vec![rows]));
+    match s.prefix {
         Some(Prefix::C) => {
-            let mut g = vec![key_row("Comment on the line", "c")];
+            let mut g = vec![hint("c", "Comment on the line")];
             if on_comment {
-                g.push(key_row("Edit this comment", "e"));
+                g.push(hint("e", "Edit this comment"));
             }
-            ("c", vec![g])
+            return one("c", g);
         }
         Some(Prefix::D) => {
-            let mut g = vec![key_row("Remove the line", "d")];
+            let mut g = vec![hint("d", "Remove the line")];
             if on_comment {
-                g.push(key_row("Delete this comment", "c"));
+                g.push(hint("c", "Delete this comment"));
             }
-            ("d", vec![g])
+            return one("d", g);
         }
-        Some(Prefix::Bracket(true)) => ("]", vec![vec![key_row("Next comment", "c")]]),
-        Some(Prefix::Bracket(false)) => ("[", vec![vec![key_row("Previous comment", "c")]]),
-        Some(Prefix::Z) => ("Z", vec![vec![key_row("Send the review and quit", "Z"), key_row("Quit without sending", "Q")]]),
-        None if matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) && s.vim.pending().is_empty() => {
-            let labels = LABELS.iter().enumerate().map(|(i, l)| key_row(l.text, (i + 1).to_string())).collect();
-            (
-                if s.vim.mode() == VimMode::Visual { "visual" } else { "v-line" },
-                vec![vec![key_row("Comment", "c"), key_row("Remove this", "d"), key_row("Yank", "y")], labels],
-            )
-        }
-        None => return None,
-    };
-    Some(groups)
+        Some(Prefix::Bracket(true)) => return one("]", vec![hint("c", "Next comment")]),
+        Some(Prefix::Bracket(false)) => return one("[", vec![hint("c", "Previous comment")]),
+        Some(Prefix::Z) => return one("Z", vec![hint("Z", "Send the review and quit"), hint("Q", "Quit without sending")]),
+        Some(Prefix::Space) => return Some(("space".into(), all_keys())),
+        None => {}
+    }
+    let (typed, mut groups) = s.vim.hints()?;
+    if s.vim.pending().is_empty() && matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine) {
+        groups.insert(0, vec![hint("c", "Comment"), hint("d", "Remove this")]);
+        groups.insert(1, LABEL_HINTS.to_vec());
+    }
+    Some((typed, groups))
+}
+
+/// The labels on the number keys.
+const LABEL_HINTS: [Hint; 9] = {
+    let keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    let mut out = [hint("", ""); 9];
+    let mut i = 0;
+    while i < 9 {
+        out[i] = hint(keys[i], LABELS[i].text);
+        i += 1;
+    }
+    out
+};
+
+/// Every key, after Space.
+fn all_keys() -> Vec<Vec<Hint>> {
+    vec![
+        vec![
+            hint("v V", "Select, then comment or label"),
+            hint("cc", "Comment on the line"),
+            hint("dd", "Remove the line"),
+            hint("C", "General comment"),
+        ],
+        vec![
+            hint("]c [c", "Next, previous comment"),
+            hint("Enter", "Edit the comment"),
+            hint("dc", "Delete the comment"),
+            hint("Tab", "List the comments"),
+        ],
+        vec![
+            hint("y", "Yank\u{2026}"),
+            hint("gy", "Yank as Markdown\u{2026}"),
+            hint("/ ?", "Search"),
+        ],
+        vec![
+            hint(":wq ZZ", "Send the review and quit"),
+            hint(":q", "Quit, with nothing to send"),
+            hint(":q! ZQ", "Quit without sending"),
+        ],
+    ]
 }
 
 /// The keys that can follow, in a floating panel: the mode or prefix as a pill, Escape to
 /// cancel, then each key's action with the key on the right.
 fn which_key(s: &App_, rex: &Rex) -> Option<El> {
     let (prefix, groups) = pending_keys(s)?;
-    let row_of = |r: &KeyRow| {
+    let row_of = |r: &Hint| {
         row()
             .w_full()
             .h(24.0)
             .gap(24.0)
             .center_y()
             .child(text(r.what).font(rex.ty.caption).color(rex.text).grow(1.0).shrink())
-            .child(text(r.key.clone()).font(rex.ty.mono).color(rex.text_secondary))
+            .child(text(r.keys).font(rex.ty.mono).color(rex.text_secondary))
     };
     let mut list = col().w_full();
     for (i, group) in groups.iter().enumerate() {
@@ -798,7 +792,7 @@ fn bar(s: &App_, rex: &Rex) -> El {
         .child(hint("Tab", "comments"))
         .child(hint(":wq", "send"))
         .child(hint(":q!", "quit"))
-        .child(hint(":h", "keys"))
+        .child(hint("space", "keys"))
 }
 
 fn status_line(s: &App_, rex: &Rex) -> El {
@@ -834,6 +828,7 @@ fn status_line(s: &App_, rex: &Rex) -> El {
         Some(Prefix::C) => "c".to_owned(),
         Some(Prefix::D) => "d".to_owned(),
         Some(Prefix::Z) => "Z".to_owned(),
+        Some(Prefix::Space) => String::new(),
         None => s.vim.pending(),
     };
     row()
@@ -898,6 +893,13 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
     // A command Vim is in the middle of (`yi`, `f`, `2`) has its next key.
     let vim_busy = !s.vim.pending().is_empty();
 
+    // Space only shows the keys: the next key closes the list and does what it does.
+    if s.prefix == Some(Prefix::Space) {
+        s.prefix = None;
+        if k.key == Key::Escape || c == Some(' ') {
+            return true;
+        }
+    }
     if let Some(prefix) = s.prefix.take() {
         if k.key == Key::Escape {
             return true;
@@ -948,6 +950,7 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
         'C' => s.open(Target::New { kind: Kind::Comment, range: None }),
         ']' | '[' => s.prefix = Some(Prefix::Bracket(c == ']')),
         'Z' => s.prefix = Some(Prefix::Z),
+        ' ' => s.prefix = Some(Prefix::Space),
         ':' => s.cmdline = Some(String::new()),
         _ => return vim_key(s, k, tx),
     }
@@ -1083,7 +1086,13 @@ fn main() {
                     s.vim.key(&KeyEvent { key: Key::Text(c.to_string()), mods: rune::Mods::default() }, &text);
                 }
             }),
-            ("help", |s| s.side = Side::Help),
+            ("keys", |s| s.prefix = Some(Prefix::Space)),
+            ("yank", |s| {
+                let text = s.page.text().to_owned();
+                for c in "gy".chars() {
+                    s.vim.key(&KeyEvent { key: Key::Text(c.to_string()), mods: rune::Mods::default() }, &text);
+                }
+            }),
             ("prefix", |s| {
                 s.review.add(Comment::on(0..4, "x"));
                 s.prefix = Some(Prefix::C);
