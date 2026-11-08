@@ -3,6 +3,7 @@
 use std::collections::HashSet;
 
 use crate::item::MenuItem;
+use crate::items::Items;
 
 /// Filtering never silently changes marked items.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -20,7 +21,7 @@ impl MenuSelection {
 
     /// `visible` are offsets into `items`. With `prune`, marks whose item is gone are dropped.
     /// A highlight that isn't visible moves to the first visible row.
-    pub fn reconcile(&mut self, items: &[MenuItem], visible: &[u32], prune: bool) {
+    pub fn reconcile(&mut self, items: &Items, visible: &[u32], prune: bool) {
         if prune && !self.checked.is_empty() {
             let retained: HashSet<String> = items.iter().filter(|i| self.checked.contains(&i.id)).map(|i| i.id.clone()).collect();
             self.checked = retained;
@@ -32,7 +33,7 @@ impl MenuSelection {
     }
 
     /// Marked items in input order, else the highlighted one.
-    pub fn chosen(&self, items: &[MenuItem]) -> Vec<MenuItem> {
+    pub fn chosen(&self, items: &Items) -> Vec<MenuItem> {
         if !self.checked.is_empty() {
             return items.iter().filter(|i| self.checked.contains(&i.id)).cloned().collect();
         }
@@ -46,12 +47,12 @@ mod tests {
 
     #[test]
     fn selection_survives_filtering() {
-        let items = [MenuItem::new("a", "Same"), MenuItem::new("b", "Same")];
+        let items = Items::from(vec![MenuItem::new("a", "Same"), MenuItem::new("b", "Same")]);
         let mut selection = MenuSelection { highlighted_id: Some("a".into()), ..Default::default() };
         selection.toggle("b");
         selection.reconcile(&items, &[0], false);
         assert_eq!(selection.chosen(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["b"]);
-        selection.reconcile(&items[..1], &[0], true);
+        selection.reconcile(&Items::from(vec![items[0].clone()]), &[0], true);
         assert!(selection.checked.is_empty());
         assert_eq!(selection.chosen(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a"]);
     }

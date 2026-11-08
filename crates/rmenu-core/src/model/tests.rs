@@ -136,7 +136,7 @@ impl Harness {
 
     fn settled(&self) -> bool { self.model.can_act() && !self.model.is_searching() }
     fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title.clone()).collect() }
-    fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value).collect() }
+    fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect() }
     fn marked(&self) -> HashSet<String> { self.model.shown.selection.checked.clone() }
     fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title.clone()).collect() }
 
@@ -172,6 +172,7 @@ fn options(config: Value) -> Options {
         prompt: "Root".into(),
         query: String::new(),
         rows: 12,
+        list_cap: usize::MAX,
     }
 }
 
@@ -377,7 +378,7 @@ fn keys_during_a_slow_search_are_not_lost() {
     let context = h.context();
     assert_eq!(context.query, "item 9");
     assert_eq!(context.items.len(), 1);
-    assert!(context.items[0].value.contains('9'), "accepted a row matching the query typed before Enter");
+    assert!(context.items[0].value().contains('9'), "accepted a row matching the query typed before Enter");
 }
 
 #[test]
@@ -610,7 +611,7 @@ fn child_command_receives_the_parent_selection_as_data() {
     assert_eq!(argv, ["src", "child"]);
     let context: ActionContext = serde_json::from_slice(&input).unwrap();
     assert_eq!((context.action.as_str(), context.source.as_deref()), ("source", Some("child")));
-    assert_eq!(context.items.iter().map(|i| i.value.as_str()).collect::<Vec<_>>(), ["/v/b"]);
+    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["/v/b"]);
     assert_eq!(context.path, [PathEntry { source: Some("repos".into()), query: "be".into(), items: context.items.clone() }]);
     assert_eq!((env(&vars, "MMENU_VALUE"), env(&vars, "MMENU_ID")), ("/v/b", "b"));
 
@@ -893,7 +894,7 @@ fn run_receives_the_chosen_items_and_reloads_on_success() {
     assert_eq!(argv, ["star"]);
     let context: ActionContext = serde_json::from_slice(&input).unwrap();
     assert_eq!((context.action.as_str(), context.source.as_deref()), ("star", Some("s")));
-    assert_eq!(context.items.iter().map(|i| i.value.as_str()).collect::<Vec<_>>(), ["one", "two"]);
+    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["one", "two"]);
     assert_eq!(env(&vars, "MMENU_ACTION"), "star");
     h.finish_operation(0, "");
     assert_eq!(h.source_runs("s"), 2);
@@ -927,7 +928,7 @@ fn accept_waits_for_a_running_operation() {
     assert_eq!(h.beeps, 1);
     h.finish_operation(0, "");
     h.nav(Nav::Accept);
-    assert_eq!(h.context().items[0].value, "one");
+    assert_eq!(h.context().items[0].value(), "one");
 }
 
 #[test]
@@ -1007,7 +1008,7 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
     for mode in ["newline", "print0", "json"] {
         let mut h = piped(mode == "json", mode == "print0");
         let items = [("a", "first value"), ("b", "second"), ("c", "third")]
-            .map(|(id, value)| MenuItem { value: value.into(), ..MenuItem::new(id, id.to_uppercase()) });
+            .map(|(id, value)| MenuItem::new(id, id.to_uppercase()).with_value(value));
         h.send(Event::StdinItems(items.to_vec()));
         h.send(Event::StdinDone);
         h.settle();
@@ -1022,7 +1023,7 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
                 let context = h.context();
                 assert_eq!(context.action, "accept");
                 assert_eq!(context.source, None);
-                assert_eq!(context.items.iter().map(|i| i.value.as_str()).collect::<Vec<_>>(), ["first value", "third"]);
+                assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"]);
             }
         }
     }
@@ -1145,5 +1146,20 @@ fn return_accepts() {
     h.nav(Nav::Accept);
     let context = h.context();
     assert_eq!(context.action, "accept");
-    assert_eq!(context.items.iter().map(|i| i.value.as_str()).collect::<Vec<_>>(), ["one"]);
+    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["one"]);
+}
+
+#[test]
+fn the_highlight_stays_within_the_listed_rows() {
+    let mut o = options(json!({}));
+    o.list_cap = 3;
+    let mut h = Harness::new(o);
+    h.stdin("a\nb\nc\nd\ne\n");
+    h.send(Event::StdinDone);
+    h.settle();
+    for _ in 0..10 { h.nav(Nav::Down); }
+    assert_eq!(h.model.highlighted_row(), Some(2));
+    h.nav(Nav::PageDown);
+    assert_eq!(h.model.highlighted_row(), Some(2));
+    assert_eq!(h.model.result_count(), 5, "every match is still counted");
 }

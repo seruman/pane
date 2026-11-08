@@ -111,8 +111,7 @@ fn uses_menu_item_search_text() {
     let mut b = MenuItem::new("b", "Visible");
     b.subtitle = Some("Hidden".into());
     b.search = Some("Override".into());
-    let mut c = MenuItem::new("c", "Other");
-    c.value = "Secret".into();
+    let mut c = MenuItem::new("c", "Other").with_value("Secret");
     c.detail = Some("Private".into());
     let rows = SearchIndex::new(&[a, b, c]);
     assert_eq!(search(&rows, "visible"), [0]);

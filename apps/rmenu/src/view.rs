@@ -16,6 +16,10 @@ const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
 const FOOTER_H: f32 = 30.0;
 const PREVIEW_W: f32 = 380.0;
+/// Rows the list lays out. Rune keys every row of a list on each change, so a million matches
+/// would cost a million strings per keystroke; nobody scrolls past the first few thousand of
+/// a ranked list, and the footer still counts them all.
+pub const LIST_CAP: usize = 5_000;
 
 const TITLE: TextStyle = TextStyle::new(13.0, 400.0).lh(18.0);
 const SMALL: TextStyle = TextStyle::new(11.0, 400.0).lh(15.0);
@@ -131,7 +135,7 @@ fn source_strip(menu: &Menu, c: &Palette) -> El {
 
 fn results(menu: &Menu, c: &Palette) -> El {
     let model = &menu.model;
-    let count = model.result_count();
+    let count = model.result_count().min(LIST_CAP);
     if count == 0 {
         let (message, color) = if model.input_failed() {
             ("Input failed — see status below", c.error)

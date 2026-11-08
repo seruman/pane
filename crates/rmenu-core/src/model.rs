@@ -3,7 +3,7 @@
 //! their results into [`Event`]s that carry the token they were started with.
 
 use std::mem;
-use std::sync::Arc;
+use crate::items::Items;
 use std::time::Duration;
 
 use crate::command::CommandResult;
@@ -25,6 +25,8 @@ pub struct Options {
     pub query: String,
     /// Visible rows; PageUp/PageDown move by this many.
     pub rows: usize,
+    /// How many result rows the host lists; the highlight stays within them.
+    pub list_cap: usize,
 }
 
 /// A started task's identity. A result whose token is stale is dropped.
@@ -142,7 +144,7 @@ pub fn command_failure(result: &CommandResult) -> String {
 /// Rows of one source generation. Append-only; a reload gets a new store.
 #[derive(Clone, Default)]
 struct Store {
-    items: Arc<Vec<MenuItem>>,
+    items: Items,
     index: SearchIndex,
 }
 
@@ -150,7 +152,7 @@ struct Store {
 /// source generation than the level's `store` while its replacement loads.
 #[derive(Clone, Default)]
 struct Shown {
-    items: Arc<Vec<MenuItem>>,
+    items: Items,
     results: Vec<u32>,
     highlighted_row: Option<usize>,
     selection: MenuSelection,
@@ -176,7 +178,7 @@ struct Level {
 
 struct SearchRun {
     query: String,
-    items: Arc<Vec<MenuItem>>,
+    items: Items,
 }
 
 struct Operation {
@@ -394,7 +396,7 @@ impl Model {
                     None => &mut self.store,
                 };
                 store.index.append(&batch);
-                Arc::make_mut(&mut store.items).extend(batch);
+                store.items.extend(batch);
                 self.stdin_changed();
             }
             Event::StdinDone => {
@@ -495,7 +497,7 @@ impl Model {
     }
 
     fn move_by(&mut self, delta: isize) {
-        let count = self.shown.results.len();
+        let count = self.shown.results.len().min(self.options.list_cap);
         if count == 0 {
             return;
         }
@@ -532,7 +534,7 @@ impl Model {
                     self.effects.push(Effect::Beep);
                     return;
                 }
-                let values: Vec<String> = self.chosen().into_iter().map(|i| i.value).collect();
+                let values: Vec<String> = self.chosen().iter().map(|i| i.value().to_owned()).collect();
                 if values.is_empty() {
                     return;
                 }
@@ -686,7 +688,7 @@ impl Model {
         self.awaiting_source_data = false;
         match result {
             Ok(items) => {
-                self.store = Store { index: SearchIndex::new(&items), items: Arc::new(items) };
+                self.store = Store { index: SearchIndex::new(&items), items: Items::from(items) };
                 // A reload can change preview content without changing an item's ID/value.
                 self.invalidate_preview();
             }
@@ -902,13 +904,13 @@ impl Model {
         } else {
             let delimiter = if self.options.print0 { '\0' } else { '\n' };
             // A delimiter inside a value would split it into extra records downstream.
-            if items.iter().any(|i| i.value.contains(delimiter)) {
+            if items.iter().any(|i| i.value().contains(delimiter)) {
                 let hint = if self.options.print0 { "" } else { " or --print0" };
                 self.message = Some(format!("A selected value contains the output delimiter; use --json{hint}"));
                 self.effects.push(Effect::Beep);
                 return;
             }
-            items.iter().map(|i| format!("{}{delimiter}", i.value)).collect::<String>().into_bytes()
+            items.iter().map(|i| format!("{}{delimiter}", i.value())).collect::<String>().into_bytes()
         };
         self.finish(0, output);
     }

@@ -120,6 +120,7 @@ impl Cli {
                 prompt,
                 query: self.query,
                 rows: usize::from(self.rows),
+                list_cap: crate::view::LIST_CAP,
             },
             appearance: self.appearance,
             width: f32::from(self.width),

@@ -133,7 +133,7 @@ mod tests {
             let items = decode(text, Lines, size).unwrap();
             assert_eq!(titles(&items), ["café", "東京🧑‍💻", "", "repeat", "repeat", "last"]);
             assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["0", "1", "2", "3", "4", "5"]);
-            assert!(items.iter().all(|i| i.value == i.title));
+            assert!(items.iter().all(|i| i.value() == i.title));
         }
     }
 
@@ -167,8 +167,7 @@ mod tests {
         a.subtitle = Some("sub".into());
         a.search = Some("find".into());
         a.detail = Some("detail".into());
-        let mut b = MenuItem::new("b", "café 東京");
-        b.value = "different".into();
+        let b = MenuItem::new("b", "café 東京").with_value("different");
         for size in 1..=text.len() {
             assert_eq!(decode(text, Jsonl, size).unwrap(), [a.clone(), b.clone()]);
         }

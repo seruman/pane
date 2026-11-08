@@ -69,9 +69,32 @@ impl Menu {
             self.apply(pending, tx);
             changed = true;
         }
-        while let Ok(event) = self.events.try_recv() {
-            self.handle(event, tx);
-            changed = true;
+        // A bounded slice of work per frame, so input queued behind a flood of stdin (Esc,
+        // a quit) gets its turn; consecutive stdin batches become one append and one search.
+        let deadline = Instant::now() + POLL_BUDGET;
+        let mut batch: Vec<MenuItem> = Vec::new();
+        loop {
+            if Instant::now() >= deadline {
+                if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
+                if let Some(wake) = &self.waker { wake(); }
+                break;
+            }
+            match self.events.try_recv() {
+                Ok(Event::StdinItems(items)) => {
+                    if batch.is_empty() { batch = items; } else { batch.extend(items); }
+                    changed = true;
+                }
+                Ok(event) => {
+                    if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
+                    self.handle(event, tx);
+                    changed = true;
+                    if OUTCOME.lock().unwrap().is_some() { break; }
+                }
+                Err(_) => {
+                    if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
+                    break;
+                }
+            }
         }
         changed
     }
@@ -150,6 +173,9 @@ impl Menu {
         let all: Vec<Running> = self.tasks.drain().map(|(_, r)| r).chain(self.stdin.take()).chain(self.retired.drain(..)).collect();
         for running in &all { running.cancel.cancel(); }
         for running in all { let _ = running.thread.join(); }
+        // The process exits next: freeing millions of rows one by one only delays it.
+        let (empty, _) = Model::new(self.model.options().clone());
+        std::mem::forget(std::mem::replace(&mut self.model, empty));
     }
 
     /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at
@@ -158,12 +184,14 @@ impl Menu {
         if OUTCOME.lock().unwrap().is_some() { return; }
         let effects = self.model.handle(Event::Nav(rmenu_core::model::Nav::Cancel));
         let status = effects.iter().find_map(|e| match e { Effect::Finish { status, .. } => Some(*status), _ => None }).unwrap_or(130);
-        self.stop();
         let error = (status == 2).then(|| self.model.message().map(str::to_owned)).flatten();
+        self.stop();
         *OUTCOME.lock().unwrap() = Some(Outcome { status, output: Vec::new(), error });
     }
 }
 
+/// Work `poll` does per frame before yielding to input and drawing.
+const POLL_BUDGET: Duration = Duration::from_millis(8);
 const STDIN_CHUNK: usize = 64 * 1024;
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
 

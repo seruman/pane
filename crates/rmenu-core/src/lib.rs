@@ -14,6 +14,7 @@
 pub mod command;
 pub mod config;
 pub mod item;
+pub mod items;
 pub mod model;
 pub mod record;
 pub mod search;
