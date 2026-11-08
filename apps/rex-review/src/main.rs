@@ -70,13 +70,6 @@ enum Prefix {
     Space,
 }
 
-/// What shows beside the page.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Side {
-    None,
-    Comments,
-}
-
 struct App_ {
     title: String,
     /// The document's name for the feedback's title: the path given, or `None` for stdin and
@@ -98,7 +91,9 @@ struct App_ {
     prefix: Option<Prefix>,
     /// The `:` command being typed.
     cmdline: Option<String>,
-    side: Side,
+    /// The comment list floating over the page, and the row its cursor is on; `None` while
+    /// it's closed. It takes no focus: while it's open, keys move its cursor.
+    list: Option<usize>,
     /// Quitting sends the review: `ZZ`, `:wq` or `:x`. Any other way out sends nothing.
     send: bool,
     note: Option<String>,
@@ -128,7 +123,7 @@ impl App_ {
             selected: None,
             prefix: None,
             cmdline: None,
-            side: Side::None,
+            list: None,
             send: false,
             note: None,
         }
@@ -230,6 +225,13 @@ impl App_ {
             return None;
         }
         self.review.feedback(&self.source, &self.page, self.name.as_deref())
+    }
+
+    /// Opens the comment list on the comment picked or under the cursor, or the first.
+    fn open_list(&mut self, tx: &mut Tx) {
+        let at = self.current().unwrap_or(0);
+        self.list = Some(at);
+        tx.scroll_into_view(list_key(at));
     }
 
     /// Runs a `:` command.
@@ -522,11 +524,12 @@ fn general_thread(s: &App_, rex: &Rex) -> Option<El> {
     (!cards.is_empty()).then(|| thread(cards, rex).mb(20.0))
 }
 
-/// Every comment beside the page, general ones first.
-fn comments_view(s: &App_, rex: &Rex) -> El {
-    let mut list = col().w_full().gap(4.0);
+/// Every comment, general ones first, in a panel floating over the page's right side. The row
+/// `at` is on is tinted; Enter jumps to it.
+fn list_view(s: &App_, at: usize, rex: &Rex) -> El {
+    let mut rows = col().w_full().gap(2.0);
     if s.review.comments.is_empty() {
-        list = list.child(
+        rows = rows.child(
             text("No comments yet. Select with v, then c; C comments on the whole document.")
                 .font(rex.ty.caption)
                 .color(rex.text_tertiary)
@@ -534,20 +537,22 @@ fn comments_view(s: &App_, rex: &Rex) -> El {
                 .w_full(),
         );
     }
-    let current = s.current();
     for (n, c) in s.review.comments.iter().enumerate() {
         let quote = c
             .range
             .clone()
             .map(|r| s.page.text().get(r).unwrap_or_default().trim().replace('\n', " "));
         let mut item = col()
-            .key(format!("panel-{n}"))
+            .key(list_key(n))
             .w_full()
             .gap(4.0)
             .padding(8.0)
             .radius(rex.radius.row)
-            .fill(if current == Some(n) { rex.accent_soft } else { rune::Color::TRANSPARENT })
-            .on_press_tx(move |s: &mut App_, tx: &mut Tx| s.jump(n, tx))
+            .fill(if n == at { rex.accent_soft } else { rune::Color::TRANSPARENT })
+            .on_press_tx(move |s: &mut App_, tx: &mut Tx| {
+                s.list = None;
+                s.jump(n, tx);
+            })
             .child(
                 row()
                     .w_full()
@@ -560,33 +565,48 @@ fn comments_view(s: &App_, rex: &Rex) -> El {
             item = item.child(quote_view(&q, rex));
         }
         if !c.body.is_empty() {
-            item = item.child(text(c.body.clone()).font(rex.ty.body).color(rex.text).max_lines(3).w_full());
+            item = item.child(text(c.body.clone()).font(rex.ty.caption).color(rex.text).max_lines(2).w_full());
         }
-        list = list.child(item);
+        rows = rows.child(item);
     }
-    side_panel(&format!("Comments · {}", s.review.comments.len()), list, rex)
-}
-
-fn side_panel(title: &str, body: El, rex: &Rex) -> El {
+    let foot = row()
+        .w_full()
+        .gap(12.0)
+        .center_y()
+        .child(text("j k").font(rex.ty.mono).color(rex.text_tertiary))
+        .child(text("move").font(rex.ty.caption).color(rex.text_tertiary))
+        .child(text("enter").font(rex.ty.mono).color(rex.text_tertiary))
+        .child(text("go to").font(rex.ty.caption).color(rex.text_tertiary))
+        .child(el().grow(1.0))
+        .child(text("esc").font(rex.ty.mono).color(rex.text_tertiary))
+        .child(text("close").font(rex.ty.caption).color(rex.text_tertiary));
     col()
-        .key("panel")
-        .w(300.0)
-        .h_full()
+        .key("comment-list")
+        .w(320.0)
         .shrink()
-        .min_w(0.0)
-        .padding(12.0)
-        .gap(10.0)
-        .fill(rex.group)
-        .child(text(title.to_owned()).font(rex.ty.strong).color(rex.text))
+        .min_h(0.0)
+        .gap(8.0)
+        .padding(10.0)
+        .radius(rex.radius.popover)
+        .fill(rex.popover)
+        .border(1.0, rex.popover_border)
+        .shadow(12.0, 32.0, rex.shadow_strong)
+        .child(text(format!("Comments · {}", s.review.comments.len())).font(rex.ty.strong).color(rex.text))
         .child(
             col()
-                .key("panel-scroll")
+                .key("comment-list-scroll")
                 .w_full()
-                .grow(1.0)
+                .shrink()
                 .min_h(0.0)
-                .child(body)
+                .child(rows)
                 .scroll(ScrollSpec { stick_bottom: false }),
         )
+        .child(foot)
+}
+
+/// The key of the list's row for comment `n`, to scroll it into view.
+fn list_key(n: usize) -> String {
+    format!("list-{n}")
 }
 
 fn view(s: &App_, cx: &mut Cx<App_>) -> El {
@@ -614,18 +634,19 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
         .padding(24.0)
         .child(doc)
         .scroll(ScrollSpec { stick_bottom: false });
-    // The which-key panel floats over the page's bottom right, as Rex's prefix panel does.
-    let mut page_area = el().w_full().h_full().grow(1.0).min_w(0.0).child(content);
-    if let Some(keys) = which_key(s, &rex) {
-        page_area = page_area.child(keys.pin(None, None, Some(16.0), Some(16.0)));
+    // The comment list floats over the page's right side and the which-key panel over its
+    // bottom right, as Rex's prefix panel does; neither moves the page.
+    let mut body = el().w_full().grow(1.0).min_h(0.0).child(content);
+    if let Some(at) = s.list {
+        body = body.child(
+            col()
+                .pin(None, Some(16.0), Some(16.0), Some(16.0))
+                .items_end()
+                .child(list_view(s, at, &rex)),
+        );
     }
-    let mut body = row().w_full().grow(1.0).min_h(0.0).child(page_area);
-    let side = match s.side {
-        Side::None => None,
-        Side::Comments => Some(comments_view(s, &rex)),
-    };
-    if let Some(side) = side {
-        body = body.child(el().w(1.0).h_full().fill(rex.separator)).child(side);
+    if let Some(keys) = which_key(s, &rex) {
+        body = body.child(keys.pin(None, None, Some(16.0), Some(16.0)));
     }
     col()
         .w_full()
@@ -701,7 +722,7 @@ fn all_keys() -> Vec<Vec<Hint>> {
             hint("]c [c", "Next, previous comment"),
             hint("Enter", "Edit the comment"),
             hint("dc", "Delete the comment"),
-            hint("Tab", "List the comments"),
+            hint("Tab", "List the comments, go to one"),
         ],
         vec![
             hint("y", "Yank\u{2026}"),
@@ -887,6 +908,10 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     s.note = None;
+    if s.list.is_some() {
+        list_key_press(s, k, tx);
+        return true;
+    }
     let c = ch(k);
     let searching = s.vim.mode() == VimMode::Search;
     let visual = matches!(s.vim.mode(), VimMode::Visual | VimMode::VisualLine);
@@ -930,7 +955,7 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
         return vim_key(s, k, tx);
     }
     if k.key == Key::Tab {
-        s.side = if s.side == Side::Comments { Side::None } else { Side::Comments };
+        s.open_list(tx);
         return true;
     }
     if k.key == Key::Enter && !visual {
@@ -979,6 +1004,35 @@ fn vim_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
         }
         None => false,
     }
+}
+
+/// A key while the comment list is open: `j` `k` (or the arrows) move its cursor, Enter goes
+/// to the comment in the document and closes it, Escape, Tab or `q` close it where it was.
+/// Other keys do nothing, so the page stays put behind it.
+fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
+    let Some(at) = s.list else { return };
+    let n = s.review.comments.len();
+    let step = |at: usize, by: isize| (at as isize + by).clamp(0, n.saturating_sub(1) as isize) as usize;
+    let to = match (&k.key, ch(k)) {
+        (Key::Escape | Key::Tab, _) | (_, Some('q')) => {
+            s.list = None;
+            return;
+        }
+        (Key::Enter, _) => {
+            s.list = None;
+            if at < n {
+                s.jump(at, tx);
+            }
+            return;
+        }
+        (Key::Down, _) | (_, Some('j')) => step(at, 1),
+        (Key::Up, _) | (_, Some('k')) => step(at, -1),
+        (_, Some('g')) => 0,
+        (_, Some('G')) => n.saturating_sub(1),
+        _ => return,
+    };
+    s.list = Some(to);
+    tx.scroll_into_view(list_key(to));
 }
 
 /// Sends the review on the way out, when `:wq` or `ZZ` asked: to the file `-o` names, or to
@@ -1078,7 +1132,7 @@ fn main() {
                 s.review.add(Comment::general("Ship the first version without labels."));
                 s.review.add(Comment::on(at..at + 16, "Anchor on the quote."));
                 s.review.add(Comment { kind: Kind::Label(0), range: Some(at + 20..at + 30), body: String::new() });
-                s.side = Side::Comments;
+                s.list = Some(1);
             }),
             ("visual", |s| {
                 let text = s.page.text().to_owned();

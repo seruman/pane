@@ -146,7 +146,8 @@ fn several_general_comments_listed_and_stepped_through() {
     assert!(rt.find(&thread_key(0)).is_some() && rt.find(&thread_key(1)).is_some(), "both show above the page");
 
     key(&mut rt, Key::Tab);
-    assert!(rt.find("panel-0").is_some() && rt.find("panel-1").is_some(), "the list has them");
+    assert!(rt.find("list-0").is_some() && rt.find("list-1").is_some(), "the list has them");
+    key(&mut rt, Key::Escape);
 
     // ]c reaches a general comment, and Enter edits it.
     press(&mut rt, "]c");
@@ -274,4 +275,56 @@ fn which_key_shows_what_can_follow() {
     press(&mut rt, "j");
     assert!(rt.find("which-key").is_none());
     assert!(line(&rt) > before, "and the key goes on to move the cursor");
+}
+
+#[test]
+fn the_comment_list_floats_and_jumps() {
+    let mut rt = runtime(SRC);
+    // Three comments: on the heading, the paragraph and the list.
+    press(&mut rt, "Vc");
+    press(&mut rt, "one");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "jVc");
+    press(&mut rt, "two");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "jV3");
+    press(&mut rt, "gg");
+    let heading = rt.find("block-0").unwrap();
+    let cursor = rt.state.cursor();
+
+    key(&mut rt, Key::Tab);
+    assert!(rt.find("comment-list").is_some());
+    assert_eq!(rt.state.list, Some(0), "opens on the comment under the cursor");
+    assert_eq!(rt.find("block-0").unwrap(), heading, "the page doesn't move");
+
+    // j and k move the list's cursor, not Vim's; the page stays put.
+    press(&mut rt, "jj");
+    assert_eq!(rt.state.list, Some(2));
+    press(&mut rt, "j");
+    assert_eq!(rt.state.list, Some(2), "stops at the end");
+    press(&mut rt, "k");
+    assert_eq!(rt.state.list, Some(1));
+    assert_eq!(rt.state.cursor(), cursor);
+
+    // Escape closes it where it was.
+    key(&mut rt, Key::Escape);
+    assert!(rt.find("comment-list").is_none());
+    assert_eq!(rt.state.cursor(), cursor);
+
+    // Enter goes to the comment in the document.
+    key(&mut rt, Key::Tab);
+    press(&mut rt, "G");
+    key(&mut rt, Key::Enter);
+    assert!(rt.state.list.is_none());
+    assert_eq!(rt.state.current(), Some(2));
+    assert_eq!(rt.state.cursor(), rt.state.review.comments[2].range.clone().unwrap().start);
+
+    // A click on a row goes there too.
+    key(&mut rt, Key::Tab);
+    let (x, y) = rt.find("list-0").unwrap();
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.state.list.is_none());
+    assert_eq!(rt.state.current(), Some(0));
 }
