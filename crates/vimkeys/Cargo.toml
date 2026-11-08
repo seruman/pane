@@ -6,7 +6,7 @@ license.workspace = true
 description = "Vim's motions, text objects, search and yank over any text, for read-only views."
 
 [dependencies]
-rune = { workspace = true, default-features = false }
+rune.workspace = true
 
 [lints]
 workspace = true

@@ -6,7 +6,7 @@ license.workspace = true
 description = "Review a Markdown document in a terminal pane: comment on what you select with Vim's keys, and send the review as Markdown feedback."
 
 [dependencies]
-rune = { workspace = true, features = ["terminal"] }
+rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-kit = { workspace = true, features = ["markdown"] }
 pane-ui.workspace = true
 vimkeys.workspace = true

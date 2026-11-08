@@ -9,7 +9,7 @@ license = "MIT"
 # The Rune fork with the terminal shell. A local checkout while we iterate; switch to
 # `git = "...", rev = "..."` once it lives somewhere.
 [workspace.dependencies]
-rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune" }
+rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune", default-features = false }
 rune-kit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-kit" }
 pane-ui = { path = "crates/pane-ui" }
 vimkeys = { path = "crates/vimkeys" }

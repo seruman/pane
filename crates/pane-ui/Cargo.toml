@@ -6,7 +6,7 @@ license.workspace = true
 description = "Rex-style components for programs drawing inside a terminal pane with Rune, in the terminal's colours."
 
 [dependencies]
-rune = { workspace = true, default-features = false }
+rune.workspace = true
 rune-kit.workspace = true
 vimkeys.workspace = true
 

@@ -6,7 +6,7 @@ license.workspace = true
 description = "A Markdown viewer for a terminal pane, read with Vim's keys."
 
 [dependencies]
-rune = { workspace = true, features = ["terminal"] }
+rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-kit = { workspace = true, features = ["markdown", "mermaid"] }
 pane-ui.workspace = true
 vimkeys.workspace = true

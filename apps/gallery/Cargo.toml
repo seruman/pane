@@ -6,7 +6,7 @@ license.workspace = true
 description = "Every pane-ui component on one page."
 
 [dependencies]
-rune = { workspace = true, features = ["terminal"] }
+rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-kit.workspace = true
 pane-ui.workspace = true
 
