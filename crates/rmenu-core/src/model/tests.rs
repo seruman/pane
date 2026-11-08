@@ -1265,3 +1265,34 @@ fn a_stdin_failure_is_reported_from_any_level() {
     assert_eq!(h.finished.as_ref().unwrap().0, 2);
     assert_eq!(h.model.stdin_error(), Some("Record 2 contains invalid UTF-8."));
 }
+
+#[test]
+fn an_acknowledgement_after_a_failure_still_retires() {
+    let mut h = start(json!({"sources": [src("s", json!({}))], "bindings": [
+        {"key": "ctrl+d", "action": "run", "command": ["fail"]}, {"key": "ctrl+y", "action": "copy"}]}));
+    h.load("one\ntwo\n");
+    h.perform(0);
+    h.finish_operation(3, "nope\n");
+    assert!(h.model.message_is_error());
+    h.perform(1);
+    assert_eq!(h.model.message(), Some("Copied 1"));
+    h.nav(Nav::Down);
+    assert_eq!(h.model.message(), None);
+}
+
+#[test]
+fn a_highlight_past_the_listed_rows_moves_to_the_first() {
+    let mut o = options(json!({"sources": [src("s", json!({}))]}));
+    o.list_cap = 2;
+    o.sorted = true;
+    let mut h = Harness::new(o);
+    h.load("ab\nzzab\nb\n");
+    h.nav(Nav::Down);
+    assert_eq!(h.model.highlighted_row(), Some(1));
+    h.query("ab");
+    h.settle();
+    h.query("b");
+    h.settle();
+    let row = h.model.highlighted_row().unwrap();
+    assert!(row < 2, "highlight {row} is outside the 2 listed rows");
+}

@@ -31,7 +31,9 @@ struct Running {
 
 /// The window's state: the model, the query field mirroring it, and the work in flight.
 pub struct Menu {
-    pub model: Model,
+    /// Never freed: the menu lives until the process exits, and freeing millions of rows one
+    /// by one as Rune drops its runtime would only delay that exit.
+    pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
     events: Receiver<Event>,
@@ -52,7 +54,7 @@ impl Menu {
         let (sender, events) = channel();
         let mut field = TextEdit::new(model.query());
         field.focused = true;
-        Menu { model, field, appearance: launch.appearance, events, sender, waker: None, pending,
+        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, events, sender, waker: None, pending,
                tasks: HashMap::new(), stdin: None, retired: Vec::new(), revealed: None }
     }
 
@@ -173,9 +175,6 @@ impl Menu {
         let all: Vec<Running> = self.tasks.drain().map(|(_, r)| r).chain(self.stdin.take()).chain(self.retired.drain(..)).collect();
         for running in &all { running.cancel.cancel(); }
         for running in all { let _ = running.thread.join(); }
-        // The process exits next: freeing millions of rows one by one only delays it.
-        let (empty, _) = Model::new(self.model.options().clone());
-        std::mem::forget(std::mem::replace(&mut self.model, empty));
     }
 
     /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at

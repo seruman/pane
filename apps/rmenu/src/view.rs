@@ -223,16 +223,16 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     let status = match model.message() {
         Some(message) => message.to_owned(),
         None => {
-            let marked = model.chosen().into_iter().filter(|i| model.is_marked(i)).count();
+            let marked = model.marked_count();
             let mut s = format!("{} {}", model.result_count(), if model.result_count() == 1 { "result" } else { "results" });
             if marked > 0 { s += &format!(" · {marked} selected"); }
             if model.loading() { s += " · loading"; }
             s
         }
     };
-    let failed = model.input_failed() || model.message().is_some_and(|m| m.starts_with("Command") || m.starts_with("Cannot"));
+    let failed = model.input_failed() || model.message_is_error();
     // Enter during a search is queued by the model, so Choose stays lit while one runs.
-    let can_act = model.can_navigate() && !model.running_operation() && !model.chosen().is_empty();
+    let can_act = model.can_navigate() && !model.running_operation() && model.has_choice();
     let back = if model.depth() > 0 { "Back" } else { "" };
     let mut bar = row().h(FOOTER_H).w_full().px(14.0).gap(14.0).center_y()
         .child(keycap_button(back, "Esc", true, c)

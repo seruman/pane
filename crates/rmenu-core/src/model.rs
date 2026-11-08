@@ -169,13 +169,28 @@ struct Level {
     query: String,
     loading: bool,
     input_failed: bool,
-    message: Option<String>,
-    /// `message` was the "Running X…" line of an operation in flight when the child was pushed.
-    running_message: bool,
+    message: Option<Status>,
     /// What was chosen here when the child was pushed: the child's input and its path entry.
     chosen: Vec<MenuItem>,
     /// Piped stdin kept streaming into this (root) level while a child was shown.
     stdin_changed: bool,
+}
+
+/// The status line, and what retires it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Status {
+    /// Answers one action ("Copied 2", "x completed"); the next key or move retires it.
+    Ack(String),
+    /// An operation is running; it changes when the operation ends.
+    Running(String),
+    /// Something failed and the user has to see it: kept until the next action replaces it.
+    Error(String),
+}
+
+impl Status {
+    fn text(&self) -> &str {
+        match self { Status::Ack(s) | Status::Running(s) | Status::Error(s) => s }
+    }
 }
 
 struct SearchRun {
@@ -208,10 +223,7 @@ pub struct Model {
     query: String,
     loading: bool,
     input_failed: bool,
-    message: Option<String>,
-    /// The message is an operation's failure: it stays until the next action, not the next
-    /// keystroke, since the user may be typing when it lands.
-    message_sticky: bool,
+    message: Option<Status>,
     result_revision: u64,
 
     /// Piped stdin broke: the exit status is 2 and this is why, at whatever level is shown.
@@ -251,7 +263,6 @@ impl Model {
             loading: true,
             input_failed: false,
             message: None,
-            message_sticky: false,
             result_revision: 0,
             stdin_error: None,
             search: None,
@@ -319,13 +330,22 @@ impl Model {
 
     pub fn is_marked(&self, item: &MenuItem) -> bool { self.shown.selection.checked.contains(&item.id) }
 
+    /// How many rows are marked at this level.
+    pub fn marked_count(&self) -> usize { self.shown.selection.checked.len() }
+
+    /// Whether Enter would choose something: a mark, or a highlighted row.
+    pub fn has_choice(&self) -> bool { self.marked_count() > 0 || self.highlighted().is_some() }
+
     /// Rows are shown but not actionable: a source is loading or its search is running.
     pub fn is_stale(&self) -> bool { !self.can_act() }
 
     pub fn loading(&self) -> bool { self.loading }
 
     /// A status or error line (`Copied 2`, `Command exited 1: ...`).
-    pub fn message(&self) -> Option<&str> { self.message.as_deref() }
+    pub fn message(&self) -> Option<&str> { self.message.as_ref().map(Status::text) }
+
+    /// The status line reports a failure, for drawing it as one.
+    pub fn message_is_error(&self) -> bool { matches!(self.message, Some(Status::Error(_))) }
 
     /// Why piped stdin failed, if it did: what an exit 2 reports.
     pub fn stdin_error(&self) -> Option<&str> { self.stdin_error.as_deref() }
@@ -424,7 +444,7 @@ impl Model {
                 };
                 *loading = false;
                 *failed = true;
-                *message = Some(error);
+                *message = Some(Status::Error(error));
             }
             Event::SourceDone { token, result } => self.source_done(token, result),
             Event::SearchDone { token, results } => self.search_done(token, results),
@@ -494,7 +514,7 @@ impl Model {
     }
 
     fn highlight(&mut self, row: usize) {
-        if !self.can_navigate() || row >= self.shown.results.len() {
+        if !self.can_navigate() || row >= self.shown.results.len().min(self.options.list_cap) {
             return;
         }
         if self.shown.highlighted_row != Some(row) {
@@ -549,7 +569,7 @@ impl Model {
                     return;
                 }
                 self.effects.push(Effect::Copy(values.join("\n")));
-                self.message = Some(format!("Copied {}", values.len()));
+                self.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
             BindingAction::Source => {
                 if let Some(id) = &binding.source {
@@ -614,7 +634,6 @@ impl Model {
             loading: self.loading,
             input_failed: self.input_failed,
             message: self.message.clone(),
-            running_message: self.operation.is_some(),
             chosen: picked,
             stdin_changed,
         });
@@ -644,8 +663,7 @@ impl Model {
         self.loading = parent.loading;
         self.input_failed = parent.input_failed;
         // A parent's "Running X…" is stale once its operation has finished.
-        self.message = parent.message.filter(|_| self.operation.is_some() || !parent.running_message);
-        self.message_sticky = false;
+        self.message = parent.message.filter(|m| !matches!(m, Status::Running(_)) || self.operation.is_some());
         self.preview_text.clear();
         self.displayed_source_generation = self.source_generation;
         self.result_revision += 1;
@@ -658,7 +676,7 @@ impl Model {
     fn reload(&mut self) {
         match self.source().cloned() {
             Some(source) => self.load(&source),
-            None => self.message = Some("Piped input cannot be re-run".into()),
+            None => self.message = Some(Status::Ack("Piped input cannot be re-run".into())),
         }
     }
 
@@ -675,7 +693,6 @@ impl Model {
         self.awaiting_source_data = true;
         self.input_failed = false;
         self.message = None;
-        self.message_sticky = false;
         // Switching or pushing replaces the rows with another source's; a reload keeps them.
         if self.pending_selection_reset {
             self.preview_text.clear();
@@ -715,7 +732,7 @@ impl Model {
                 // Failure is a settled empty source, published like a successful empty one.
                 self.store = Store::default();
                 self.input_failed = true;
-                self.message = Some(error);
+                self.message = Some(Status::Error(error));
             }
         }
         self.request_search(true, false);
@@ -768,7 +785,8 @@ impl Model {
             self.shown.selection = MenuSelection::default();
         }
         let prune_now = self.pending_prune && !self.loading;
-        self.shown.selection.reconcile(&self.shown.items, &self.shown.results, prune_now);
+        let listed = self.shown.results.len().min(self.options.list_cap);
+        self.shown.selection.reconcile(&self.shown.items, &self.shown.results[..listed], prune_now);
         if prune_now {
             self.pending_prune = false;
         }
@@ -776,7 +794,7 @@ impl Model {
         self.displayed_source_generation = self.source_generation;
         let highlighted = self.shown.selection.highlighted_id.as_ref();
         self.shown.highlighted_row =
-            self.shown.results.iter().position(|&o| Some(&self.shown.items[o as usize].id) == highlighted);
+            self.shown.results[..listed].iter().position(|&o| Some(&self.shown.items[o as usize].id) == highlighted);
         self.update_preview();
         if self.can_act()
             && let Some(intent) = self.pending_intent.take()
@@ -840,7 +858,7 @@ impl Model {
     /// Clears a status line that answered an earlier action. Source failures stay: they
     /// describe the rows on screen.
     fn clear_transient_message(&mut self) {
-        if !self.input_failed && self.operation.is_none() && !self.message_sticky {
+        if matches!(self.message, Some(Status::Ack(_))) {
             self.message = None;
         }
     }
@@ -862,8 +880,7 @@ impl Model {
             path: self.path(chosen),
         };
         let token = self.fresh();
-        self.message = Some(format!("Running {action}…"));
-        self.message_sticky = false;
+        self.message = Some(Status::Running(format!("Running {action}…")));
         self.operation = Some(Operation { token, action, reload, source_generation: self.source_generation });
         self.effects.push(Effect::Start(Task::Operation {
             token,
@@ -877,18 +894,16 @@ impl Model {
         let Some(operation) = self.operation.take_if(|o| o.token == token) else { return };
         match result {
             Ok(r) if r.status == 0 => {
-                self.message = Some(format!("{} completed", operation.action));
+                self.message = Some(Status::Ack(format!("{} completed", operation.action)));
                 if operation.reload && operation.source_generation == self.source_generation {
                     self.reload();
                 }
             }
             Ok(r) => {
-                self.message = Some(command_failure(&r));
-                self.message_sticky = true;
+                self.message = Some(Status::Error(command_failure(&r)));
             }
             Err(error) => {
-                self.message = Some(error);
-                self.message_sticky = true;
+                self.message = Some(Status::Error(error));
             }
         }
     }
@@ -937,7 +952,7 @@ impl Model {
             // A delimiter inside a value would split it into extra records downstream.
             if items.iter().any(|i| i.value().contains(delimiter)) {
                 let hint = if self.options.print0 { "" } else { " or --print0" };
-                self.message = Some(format!("A selected value contains the output delimiter; use --json{hint}"));
+                self.message = Some(Status::Ack(format!("A selected value contains the output delimiter; use --json{hint}")));
                 self.effects.push(Effect::Beep);
                 return;
             }
