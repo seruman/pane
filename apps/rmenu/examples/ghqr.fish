@@ -85,10 +85,13 @@ function _ghqr_close --argument-names dir
     if test -s $dir/layer
         # wait returns when rmenu exits, while the layer may still hold focus. Close it and
         # focus this shell's block, so a split or tab is anchored here, not in the layer.
-        rex api call -s $REX_SESSION session.close_layer (command jq -nc --arg s $REX_SESSION --arg l (cat $dir/layer) \
-            '{session_id: $s, layer_id: $l}') >/dev/null 2>&1
+        # The layer may already be gone, because its shell exits with rmenu.
+        set -l error (rex api call -s $REX_SESSION session.close_layer (command jq -nc --arg s $REX_SESSION --arg l (cat $dir/layer) \
+            '{session_id: $s, layer_id: $l}') 2>&1 >/dev/null)
+        or string match -q -- '*code=not_found*' $error
+        or printf '%s\n' $error >&2
         rex api call -s $REX_SESSION session.focus_block (command jq -nc --arg s $REX_SESSION --arg b $REX_BLOCK \
-            '{session_id: $s, block_id: $b}') >/dev/null 2>&1
+            '{session_id: $s, block_id: $b}') >/dev/null
     end
     command rm -rf -- $dir
 end
