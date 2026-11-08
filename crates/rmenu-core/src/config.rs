@@ -176,7 +176,7 @@ impl MenuConfiguration {
 
 fn add_key(raw: &str, keys: &mut HashSet<KeyChord>) -> Result<(), ConfigurationError> {
     let chord = KeyChord::parse(raw)?;
-    if chord.is_reserved() { return error(format!("{raw} is reserved for native editing/navigation.")); }
+    if chord.is_reserved() { return error(format!("{raw} is reserved for editing and navigation.")); }
     if !keys.insert(chord) { return error(format!("Duplicate binding: {raw}")); }
     Ok(())
 }
@@ -211,7 +211,7 @@ impl KeyChord {
         }
         let unique: HashSet<_> = modifiers.iter().collect();
         if unique.len() != modifiers.len() || !modifiers.iter().all(|m| ["cmd", "ctrl", "alt", "shift"].contains(m)) {
-            return error(format!("Use cmd/ctrl/alt/shift modifiers in {raw}."));
+            return error(format!("Use the cmd, ctrl, alt, or shift modifiers in {raw}."));
         }
         let has = |m: &str| modifiers.contains(&m);
         let chord = KeyChord { key: (*key).to_owned(), command: has("cmd"), control: has("ctrl"),
@@ -370,6 +370,9 @@ mod tests {
             (format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"source"}}]}}"#),
              "Binding ctrl+w needs a source."),
             (r#"{"bindings":[{"key":"ctrl+v","id":"","action":"accept"}]}"#.to_owned(), "Binding ctrl+v has an empty ID."),
+            (r#"{"bindings":[{"key":"ctrl+n","action":"accept"}]}"#.to_owned(), "ctrl+n is reserved for editing and navigation."),
+            (r#"{"bindings":[{"key":"hyper+r","action":"accept"}]}"#.to_owned(),
+             "Use the cmd, ctrl, alt, or shift modifiers in hyper+r."),
             (r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#.to_owned(),
              "Duplicate binding ID: x"),
         ] {
