@@ -254,6 +254,7 @@ mod tests {
     fn a_tty_stdin_without_sources_is_refused() {
         let error = parse(&[]).unwrap().launch(true).unwrap_err();
         assert!(matches!(error, LaunchError::MissingInput));
+        assert!(error.to_string().contains("--config"));
     }
 
     #[test]
@@ -300,6 +301,7 @@ mod tests {
         std::fs::write(&path, r#"{"theme":"sepia"}"#).unwrap();
         let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
         assert!(matches!(error, LaunchError::Configuration { source: ConfigurationError::Json(_), .. }));
+        assert!(error.to_string().contains("sepia"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
