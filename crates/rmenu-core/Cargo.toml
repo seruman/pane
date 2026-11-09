@@ -5,6 +5,7 @@ edition.workspace = true
 version.workspace = true
 
 [dependencies]
+clap = { workspace = true, optional = true }
 libc.workspace = true
 nucleo-matcher = "0.3"
 serde.workspace = true

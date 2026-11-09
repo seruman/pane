@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum InputFormat {
     #[default]
     Lines,

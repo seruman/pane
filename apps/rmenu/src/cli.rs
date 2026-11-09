@@ -4,13 +4,6 @@ use clap::{Parser, ValueEnum};
 use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::Options;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum Input {
-    Lines,
-    Jsonl,
-    Nul,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum Appearance {
     #[default]
@@ -32,7 +25,7 @@ pub struct Cli {
     pub config: Option<String>,
     /// Input format.
     #[arg(long, value_enum, default_value = "lines")]
-    pub input: Input,
+    pub input: InputFormat,
     /// Allow multiple marked items (Tab toggles).
     #[arg(long)]
     pub multi: bool,
@@ -117,15 +110,10 @@ impl Cli {
         if configuration.root_source().is_none() && stdin_is_tty { return Err(LaunchError::MissingInput); }
         let multi = self.multi || configuration.multi();
         let prompt = self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| ">".into());
-        let input = match self.input {
-            Input::Lines => InputFormat::Lines,
-            Input::Jsonl => InputFormat::Jsonl,
-            Input::Nul => InputFormat::Nul,
-        };
         Ok(Launch {
             options: Options {
                 configuration,
-                input,
+                input: self.input,
                 multi,
                 json: self.json,
                 print0: self.print0,
@@ -168,7 +156,7 @@ mod tests {
     #[test]
     fn equals_form_is_accepted() {
         let cli = parse(&["--rows=4", "--query=-x", "--input=nul"]).unwrap();
-        assert_eq!((cli.rows, cli.query.as_str(), cli.input), (4, "-x", Input::Nul));
+        assert_eq!((cli.rows, cli.query.as_str(), cli.input), (4, "-x", InputFormat::Nul));
     }
 
     #[test]

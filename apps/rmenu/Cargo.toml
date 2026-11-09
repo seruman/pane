@@ -6,7 +6,7 @@ version.workspace = true
 
 [dependencies]
 libc.workspace = true
-rmenu-core.workspace = true
+rmenu-core = { workspace = true, features = ["clap"] }
 rune.workspace = true
 serde_json.workspace = true
 clap.workspace = true
