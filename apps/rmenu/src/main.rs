@@ -2,17 +2,20 @@ mod cli;
 mod host;
 mod view;
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
+
+use clap::Parser;
 
 use host::{Menu, OUTCOME};
 use rmenu_core::model::Outcome;
 use rune::{App, AppSpec, Tx};
 
 fn main() {
-    let launch = match cli::parse() {
+    let launch = match cli::Cli::parse().launch(std::io::stdin().is_terminal()) {
         Ok(launch) => launch,
         Err(message) => exit(Outcome::Failed(message.to_string())),
     };
+    for warning in cli::warnings(&launch.options.configuration) { eprintln!("rmenu: {warning}"); }
     // SAFETY: installs the ignored disposition before any thread starts.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
     let spec = AppSpec {

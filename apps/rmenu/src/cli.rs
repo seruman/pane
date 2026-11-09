@@ -1,7 +1,5 @@
 //! mmenu's command line: the same flags, defaults and ranges, parsed by clap.
 
-use std::io::IsTerminal;
-
 use clap::{Parser, ValueEnum};
 use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::Options;
@@ -143,18 +141,10 @@ impl Cli {
 }
 
 /// mmenu configs load unchanged, but their cmd chords are dead keys here.
-fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
+pub fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
     configuration.command_chords()
         .map(|raw| format!("{raw} can't fire because a terminal never sends Command. Bind it with ctrl+ instead."))
         .collect()
-}
-
-/// Parses the process's argv; prints help, version and usage errors and exits as clap does.
-/// Prints a warning on stderr for each cmd chord.
-pub fn parse() -> Result<Launch, LaunchError> {
-    let launch = Cli::parse().launch(std::io::stdin().is_terminal())?;
-    for warning in warnings(&launch.options.configuration) { eprintln!("rmenu: {warning}"); }
-    Ok(launch)
 }
 
 #[cfg(test)]
