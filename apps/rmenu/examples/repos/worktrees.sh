@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# The worktrees of the repository in MMENU_VALUE as JSONL, without a bare repository's own entry.
 set -o pipefail
 here=$(git rev-parse --show-toplevel 2>/dev/null)
 git -C "$MMENU_VALUE" worktree list --porcelain -z | jq -Rsc --arg here "$here" '

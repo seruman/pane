@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 cd "$MMENU_VALUE"
-# Assignments, so set -e sees a failing git. A substitution inside echo would hide it.
+# Assignment-only substitutions preserve git's exit status. Running them inside echo would hide failures.
 branch=$(git branch --show-current)
 last=$(git log -1 --format='%h %s (%cr)')
 echo "$branch  $last"

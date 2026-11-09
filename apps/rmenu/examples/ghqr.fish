@@ -3,7 +3,6 @@ source $examples/_mmenu_git.fish
 
 function ghqr --inherit-variable examples --description 'Pick a ghq repository, worktree or memo in rmenu, in a Rex floating layer'
     _mmenu_require ghqr ghq git git-memo jq; or return
-    # The split and tab keys call _git_dir_action, which lives in the user's fish config.
     if _mmenu_in_rex; and not functions -q _git_dir_action
         printf 'ghqr: missing function: _git_dir_action\n' >&2
         return 127
@@ -79,8 +78,8 @@ end
 
 function _ghqr_close --argument-names dir
     if test -s $dir/layer
-        # Rex wait can return while the picker layer still has focus.
-        # The layer may already be gone, because its shell exits with rmenu.
+        # Rex wait observes terminal child exit, not block closure.
+        # https://www.superlogical.com/rex/docs/reference/cli#rex-wait-target
         set -l error (rex api call -s $REX_SESSION session.close_layer (command jq -nc --arg s $REX_SESSION --arg l (cat $dir/layer) \
             '{session_id: $s, layer_id: $l}') 2>&1 >/dev/null)
         or string match -q -- '*code=not_found*' $error

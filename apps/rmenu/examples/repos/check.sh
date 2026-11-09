@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Runs config.json's source and preview commands against a stub ghq and throwaway repositories with awkward paths.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
