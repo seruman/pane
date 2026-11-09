@@ -1,23 +1,3 @@
-# Shared implementation for the sourceable pickers. No GUI runs on source.
-
-# Prints the mmenu executable: MMENU_BIN, then PATH, then this checkout's bundle.
-function _mmenu_bin
-    set -l menu
-    if set -q MMENU_BIN; and test -n "$MMENU_BIN"
-        set menu "$MMENU_BIN"
-    else if command -q mmenu
-        set menu (command -s mmenu)
-    else
-        set -l here (path dirname -- (status filename))
-        set menu "$here/../build/mmenu.app/Contents/MacOS/mmenu"
-    end
-    if not test -x "$menu"
-        printf 'mmenu: build the bundle first, or set MMENU_BIN to its executable path\n' >&2
-        return 127
-    end
-    printf '%s\n' "$menu"
-end
-
 # Fails with status 127 unless every named command is on PATH.
 function _mmenu_require --argument-names name
     for dependency in $argv[2..]
@@ -69,52 +49,6 @@ function _mmenu_rex_bindings
     else
         printf '[]'
     end
-end
-
-function _mmenu_git_pick --argument-names prompt query
-    set -l menu (_mmenu_bin)
-    or return
-    set -l config (command mktemp -t mmenu-git.XXXXXX)
-    or return
-    command jq -n --arg prompt "$prompt" --argjson rex (_mmenu_rex_bindings) '
-        {
-            prompt: $prompt,
-            theme: "rex",
-            bindings: $rex
-        }
-    ' >"$config"
-    set -l code $status
-    if test $code -eq 0
-        # Candidate JSONL arrives on stdin.
-        command "$menu" --config "$config" --input jsonl --json --width 720 --query "$query"
-        set code $status
-    end
-    command rm -f -- "$config"
-    return $code
-end
-
-# Shared by gwtm and gmemom: parse -C/--directory and the query words, list rows for
-# the repository with ROWS, pick one and dispatch it. A nonempty KEEP_REPO passes the
-# repository to Rex as the project label (memos are not repositories themselves).
-function _mmenu_git_standalone --argument-names name prompt rows empty keep_repo
-    argparse --name $name 'C/directory=' -- $argv[6..]; or return
-    _mmenu_require $name git jq; or return
-    set -l repo "$PWD"
-    set -q _flag_directory; and set repo "$_flag_directory"
-    test -d "$repo"; or return 1
-    # Absolute even when -C was relative: Rex gets the repository as a label.
-    set repo (path resolve -- "$repo" | string collect)
-    set -l items ($rows "$repo")
-    or return
-    if not set -q items[1]
-        printf '%s: %s\n' $name $empty >&2
-        return 1
-    end
-    set -l result (printf '%s\n' $items | _mmenu_git_pick $prompt (string join ' ' -- $argv))
-    or return
-    set -l label
-    test -n "$keep_repo"; and set label "$repo"
-    _mmenu_git_dispatch "$result" "$label"
 end
 
 function _mmenu_git_dispatch --argument-names result source_repo
