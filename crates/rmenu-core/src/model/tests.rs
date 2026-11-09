@@ -1,5 +1,5 @@
-//! Ports of mmenu's MenuModelTests, MenuStackTests, OperationTests, PipedInputTests and the
-//! model-level KeyHandlingTests. Where mmenu raced real processes, these deliver completion
+//! Ports of mmenu's `MenuModelTests`, `MenuStackTests`, `OperationTests`, `PipedInputTests` and the
+//! model-level `KeyHandlingTests`. Where mmenu raced real processes, these deliver completion
 //! events in the adversarial order directly.
 
 use std::collections::{HashMap, HashSet};
@@ -722,7 +722,7 @@ fn child_command_receives_the_parent_selection_as_data() {
     assert_eq!(argv, ["src", "child"]);
     let context: ActionContext = serde_json::from_slice(&input).unwrap();
     assert_eq!((context.action.as_str(), context.source.as_deref()), ("source", Some("child")));
-    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["/v/b"]);
+    assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["/v/b"]);
     assert_eq!(context.path, [PathEntry { source: Some("repos".into()), query: "be".into(), items: context.items.clone() }]);
     assert_eq!((env(&vars, "MMENU_VALUE"), env(&vars, "MMENU_ID")), ("/v/b", "b"));
 
@@ -1029,7 +1029,7 @@ fn run_receives_the_chosen_items_and_reloads_on_success() {
     assert_eq!(argv, ["star"]);
     let context: ActionContext = serde_json::from_slice(&input).unwrap();
     assert_eq!((context.action.as_str(), context.source.as_deref()), ("star", Some("s")));
-    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["one", "two"]);
+    assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["one", "two"]);
     assert_eq!(env(&vars, "MMENU_ACTION"), "star");
     h.finish_operation(0, "");
     assert_eq!(h.source_runs("s"), 2);
@@ -1095,6 +1095,22 @@ fn piped(json_output: bool, print0: bool) -> Harness {
 }
 
 #[test]
+fn page_navigation_saturates_for_large_model_steps() {
+    for rows in [usize::MAX, isize::MAX.unsigned_abs()] {
+        let mut options = options(json!({}));
+        options.rows = rows;
+        let mut h = Harness::new(options);
+        h.stdin("first\nsecond\nthird\n");
+        h.settle();
+        h.send(Event::Highlight(1));
+        h.nav(Nav::PageDown);
+        assert_eq!(h.model.highlighted_row(), Some(2));
+        h.nav(Nav::PageUp);
+        assert_eq!(h.model.highlighted_row(), Some(0));
+    }
+}
+
+#[test]
 fn stdin_helper_assigns_distinct_ids_across_appends() {
     let mut h = piped(true, false);
     h.stdin("same\n");
@@ -1105,7 +1121,7 @@ fn stdin_helper_assigns_distinct_ids_across_appends() {
     h.nav(Nav::Accept);
     let context = h.context();
     assert_eq!(context.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), ["0", "1"]);
-    assert_eq!(context.items.iter().map(|item| item.value()).collect::<Vec<_>>(), ["same", "same"]);
+    assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["same", "same"]);
 }
 
 #[test]
@@ -1192,7 +1208,7 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
             let context = h.context();
             assert_eq!(context.action, "accept", "json={json}, print0={print0}");
             assert_eq!(context.source, None, "json={json}, print0={print0}");
-            assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"], "json={json}, print0={print0}");
+            assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["first value", "third"], "json={json}, print0={print0}");
         }
     }
 }
@@ -1329,7 +1345,7 @@ fn return_accepts() {
     h.nav(Nav::Accept);
     let context = h.context();
     assert_eq!(context.action, "accept");
-    assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["one"]);
+    assert_eq!(context.items.iter().map(super::super::item::MenuItem::value).collect::<Vec<_>>(), ["one"]);
 }
 
 #[test]

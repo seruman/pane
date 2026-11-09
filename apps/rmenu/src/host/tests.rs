@@ -1,3 +1,5 @@
+#![allow(clippy::float_cmp, reason = "Exact equality checks for no clipping or animation must not use a tolerance.")]
+
 use super::*;
 use clap::Parser;
 use std::sync::Arc;

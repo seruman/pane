@@ -160,7 +160,7 @@ mod tests {
         Ok(items)
     }
 
-    fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(|i| i.title()).collect() }
+    fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(MenuItem::title).collect() }
 
     #[test]
     fn whole_input_matches_streamed_input() {

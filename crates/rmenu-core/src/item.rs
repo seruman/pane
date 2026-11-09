@@ -90,7 +90,7 @@ pub struct ActionContext {
 }
 
 impl ActionContext {
-    /// MMENU_ACTION, MMENU_QUERY, MMENU_SOURCE, MMENU_VALUE, MMENU_ID.
+    /// `MMENU_ACTION`, `MMENU_QUERY`, `MMENU_SOURCE`, `MMENU_VALUE`, `MMENU_ID`.
     pub fn environment(&self) -> Vec<(String, String)> {
         let first = self.items.first();
         [

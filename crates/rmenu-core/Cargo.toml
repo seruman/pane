@@ -4,6 +4,9 @@ description = "rmenu's data, matching, commands and menu state: everything but d
 edition.workspace = true
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 clap = { workspace = true, optional = true }
 libc.workspace = true

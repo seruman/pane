@@ -50,7 +50,7 @@ pub struct Cli {
     /// letting mmenu's callers run rmenu unchanged.
     #[arg(long, hide = true)]
     pub width: Option<String>,
-    /// Rows to move with PageUp and PageDown.
+    /// Rows to move with `PageUp` and `PageDown`.
     #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u8).range(4..=30))]
     pub rows: u8,
     /// Light or dark; system follows the terminal.
@@ -58,7 +58,7 @@ pub struct Cli {
     pub appearance: Appearance,
     #[arg(long, hide = true)]
     pub theme: Option<Theme>,
-    /// Trusted preview shell command. Selection is in MMENU_VALUE, not interpolated into code.
+    /// Trusted preview shell command. Selection is in `MMENU_VALUE`, not interpolated into code.
     #[arg(long)]
     pub preview: Option<String>,
 }

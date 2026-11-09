@@ -1,5 +1,5 @@
 //! The palette: query row, source strip, result rows, footer and preview, filling the
-//! terminal. Modelled on mmenu's PaletteView.
+//! terminal. Modelled on mmenu's `PaletteView`.
 
 use std::borrow::Cow;
 
@@ -219,15 +219,12 @@ fn preview_pane(preview: &str, c: &Palette, width: f32) -> El {
 
 fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     let model = &menu.model;
-    let status = match model.message() {
-        Some(message) => message.to_owned(),
-        None => {
-            let marked = model.marked_count();
-            let mut s = format!("{} {}", model.result_count(), if model.result_count() == 1 { "result" } else { "results" });
-            if marked > 0 { s += &format!(" · {marked} selected"); }
-            if model.loading() { s += " · loading"; }
-            s
-        }
+    let status = if let Some(message) = model.message() { message.to_owned() } else {
+        let marked = model.marked_count();
+        let mut s = format!("{} {}", model.result_count(), if model.result_count() == 1 { "result" } else { "results" });
+        if marked > 0 { s += &format!(" · {marked} selected"); }
+        if model.loading() { s += " · loading"; }
+        s
     };
     let failed = model.input_failed() || model.message_is_error();
     // Enter during a search is queued by the model, so Choose stays lit while one runs.

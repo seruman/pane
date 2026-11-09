@@ -4,6 +4,9 @@ description = "mmenu's command-line contract, drawn by Rune inside a terminal."
 edition.workspace = true
 version.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 libc.workspace = true
 rmenu-core = { workspace = true, features = ["clap"] }

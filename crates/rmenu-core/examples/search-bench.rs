@@ -11,7 +11,7 @@ fn main() {
     assert!(args.len() <= 3 && args.iter().all(|&n| n > 0), "usage: search-bench [rows] [runs] [calls]");
     let counts = args.first().map_or_else(|| vec![10, 100_000], |&count| vec![count]);
     let runs = args.get(1).copied().unwrap_or(5);
-    println!("available_parallelism={}", std::thread::available_parallelism().map_or(1, |n| n.get()));
+    println!("available_parallelism={}", std::thread::available_parallelism().map_or(1, std::num::NonZero::get));
     println!("Times include scheduling, matching, ranking, and result allocation. Index construction is separate.");
     for count in counts {
         let calls = args.get(2).copied().unwrap_or(if count <= 10 { 100 } else { 1 });
@@ -19,6 +19,7 @@ fn main() {
     }
 }
 
+#[allow(clippy::cast_precision_loss, reason = "Call counts divide measured durations, not row offsets.")]
 fn bench(count: usize, runs: usize, calls: usize) {
     let modules = ["MenuCore", "Networking", "Storage", "Authentication", "Workspace", "Rendering", "Utilities"];
     let names = ["SearchIndex", "RecordDecoder", "HTTPClient", "UserProfile", "CacheStore", "Settings", "MainWindow"];

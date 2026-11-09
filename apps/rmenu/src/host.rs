@@ -188,7 +188,7 @@ impl Menu {
 // draining queued messages before yielding to input and drawing. A reducer call can overrun it.
 // The ignored poll_budget_measurement test measures draining and verifies the follow-up wake.
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
-const POLL_BUDGET: Duration = Duration::from_millis(STDIN_BATCH_INTERVAL.as_millis() as u64 / 2);
+const POLL_BUDGET: Duration = STDIN_BATCH_INTERVAL.checked_div(2).expect("nonzero divisor");
 const STDIN_CHUNK: usize = 64 * 1024;
 
 /// Emits the first decoded batch immediately, then batches at `STDIN_BATCH_INTERVAL`.
@@ -208,7 +208,7 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
         if cancel.is_cancelled() { return; }
         let mut request = libc::pollfd { fd: libc::STDIN_FILENO, events: libc::POLLIN, revents: 0 };
         // SAFETY: one live pollfd, its count passed.
-        let ready = unsafe { libc::poll(&mut request, 1, STDIN_BATCH_INTERVAL.as_millis() as libc::c_int) };
+        let ready = unsafe { libc::poll(&raw mut request, 1, STDIN_BATCH_INTERVAL.as_millis().try_into().expect("stdin poll interval fits c_int")) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
             if error.kind() == std::io::ErrorKind::Interrupted { continue; }
@@ -226,7 +226,7 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
             if matches!(error.kind(), std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) { continue; }
             return emit(Event::StdinFailed(format!("Cannot read stdin: {error}")));
         }
-        match decoder.append(&buffer[..count as usize]) {
+        match decoder.append(&buffer[..count.cast_unsigned()]) {
             Ok(items) => batch.extend(items),
             Err(error) => return emit(Event::StdinFailed(error.to_string())),
         }

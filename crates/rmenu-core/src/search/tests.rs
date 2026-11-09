@@ -122,7 +122,7 @@ fn uses_menu_item_search_text() {
 
 #[test]
 fn cancellation_including_the_empty_fast_path() {
-    let rows = index(&["Sources/MenuCore/SearchIndex.swift"; 2_000]);
+    let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; 2_000]);
     for query in ["", "srch", "not-present"] {
         for order in [Order::Ranked, Order::Input] {
             assert_eq!(rows.search(query, order, &|| true), Err(Cancelled), "{query:?} {order:?}");
@@ -132,14 +132,14 @@ fn cancellation_including_the_empty_fast_path() {
 
 #[test]
 fn workers_can_observe_cancellation_directly() {
-    let rows = index(&["Sources/MenuCore/SearchIndex.swift"; CHUNK * 2]);
+    let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; CHUNK * 2]);
     let caller = std::thread::current().id();
     assert_eq!(rows.search("swift", Order::Ranked, &|| std::thread::current().id() != caller), Err(Cancelled));
 }
 
 #[test]
 fn cancellation_mid_scan_stops_early() {
-    let rows = index(&["Sources/MenuCore/SearchIndex.swift"; 50_000]);
+    let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; 50_000]);
     let polls = AtomicUsize::new(0);
     let result = rows.search("swift", Order::Ranked, &|| polls.fetch_add(1, Ordering::Relaxed) >= 3);
     assert_eq!(result, Err(Cancelled));

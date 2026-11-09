@@ -35,7 +35,7 @@ pub struct Options {
     pub sorted: bool,
     pub prompt: String,
     pub query: String,
-    /// PageUp and PageDown move by this many rows.
+    /// `PageUp` and `PageDown` move by this many rows.
     pub rows: usize,
     /// The highlight stays within the rows the host lists.
     pub list_cap: usize,
@@ -564,7 +564,7 @@ impl Model {
     }
 
     fn nav(&mut self, nav: Nav, effects: &mut Vec<Effect>) {
-        let rows = self.options.rows as isize;
+        let rows = isize::try_from(self.options.rows).unwrap_or(isize::MAX);
         match nav {
             Nav::Up | Nav::BackTab => self.move_by(-1, effects),
             Nav::Down => self.move_by(1, effects),
@@ -633,8 +633,8 @@ impl Model {
         if count == 0 {
             return;
         }
-        let row = (self.highlighted_row().unwrap_or(0) as isize + delta).clamp(0, count as isize - 1);
-        self.highlight(row as usize, effects);
+        let row = self.highlighted_row().unwrap_or(0).saturating_add_signed(delta).min(count - 1);
+        self.highlight(row, effects);
     }
 
     fn toggle(&mut self, effects: &mut Vec<Effect>) {
@@ -753,12 +753,9 @@ impl Model {
     }
 
     fn reload(&mut self, effects: &mut Vec<Effect>) {
-        match self.source().cloned() {
-            Some(source) => self.load(&source, LoadKind::Reload, effects),
-            None => {
-                self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
-                effects.push(Effect::Beep);
-            }
+        if let Some(source) = self.source().cloned() { self.load(&source, LoadKind::Reload, effects) } else {
+            self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
+            effects.push(Effect::Beep);
         }
     }
 

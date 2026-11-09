@@ -91,7 +91,7 @@ impl SearchIndex {
         if pattern.atoms.is_empty() {
             return Ok((0..self.len).map(|offset| Ranked { score: 0, len: 0, offset: RowOffset::try_from(offset).expect("row offset exceeds u32") }).collect());
         }
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.chunks.len());
+        let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get).min(self.chunks.len());
         let next = AtomicUsize::new(0);
         let mut chunks = if threads <= 1 {
             self.match_chunks(&pattern, &next, cancelled)?

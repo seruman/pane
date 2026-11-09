@@ -88,7 +88,7 @@ fn system(operation: &'static str, error: io::Error) -> CommandError {
 const DEFAULT_SIGNALS: [libc::c_int; 5] = [libc::SIGPIPE, libc::SIGINT, libc::SIGTERM, libc::SIGQUIT, libc::SIGHUP];
 
 /// `program` resolved against PATH from the command's own environment, as execvp would:
-/// posix_spawnp would search rmenu's PATH instead. Without PATH, execvp's default applies.
+/// `posix_spawnp` would search rmenu's PATH instead. Without PATH, execvp's default applies.
 /// When no candidate is executable but one exists, the error is EACCES, not ENOENT.
 fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError> {
     let cstring = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(|_| CommandError::InvalidArguments);
@@ -128,7 +128,7 @@ fn set_cloexec(fd: RawFd) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// Fails with the operation's name when a posix_spawn* call returns an error number.
+/// Fails with the operation's name when a `posix_spawn*` call returns an error number.
 fn spawn_call(code: libc::c_int, operation: &'static str) -> Result<(), CommandError> {
     if code == 0 { Ok(()) } else { Err(system(operation, io::Error::from_raw_os_error(code))) }
 }
@@ -145,7 +145,7 @@ impl SpawnActions {
 
 impl Drop for SpawnActions {
     fn drop(&mut self) {
-        unsafe { libc::posix_spawn_file_actions_destroy(&mut self.0) };
+        unsafe { libc::posix_spawn_file_actions_destroy(&raw mut self.0) };
     }
 }
 
@@ -161,7 +161,7 @@ impl SpawnAttributes {
 
 impl Drop for SpawnAttributes {
     fn drop(&mut self) {
-        unsafe { libc::posix_spawnattr_destroy(&mut self.0) };
+        unsafe { libc::posix_spawnattr_destroy(&raw mut self.0) };
     }
 }
 
@@ -173,13 +173,13 @@ struct Spawned {
     stderr: File,
 }
 
-/// Starts `program` in a new process group with only stdio. POSIX_SPAWN_CLOEXEC_DEFAULT closes
+/// Starts `program` in a new process group with only stdio. `POSIX_SPAWN_CLOEXEC_DEFAULT` closes
 /// every other descriptor in the exec itself, as mmenu does, so a descriptor another thread
 /// opens at the same moment can't slip through.
 fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> Result<Spawned, CommandError> {
-    let mut arg_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr() as *mut _).collect();
+    let mut arg_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr().cast_mut()).collect();
     arg_ptrs.push(std::ptr::null_mut());
-    let mut env_ptrs: Vec<*mut libc::c_char> = envp.iter().map(|e| e.as_ptr() as *mut _).collect();
+    let mut env_ptrs: Vec<*mut libc::c_char> = envp.iter().map(|e| e.as_ptr().cast_mut()).collect();
     env_ptrs.push(std::ptr::null_mut());
 
     let stdin = if input { Some(pipe()?) } else { None };
@@ -190,23 +190,23 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
     let mut actions = SpawnActions::new()?;
     let mut attrs = SpawnAttributes::new()?;
     match &stdin {
-        Some((read, _)) => spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, read.as_raw_fd(), 0) }, "spawn dup2")?,
-        None => spawn_call(unsafe { libc::posix_spawn_file_actions_addopen(&mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) }, "spawn open")?,
+        Some((read, _)) => spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, read.as_raw_fd(), 0) }, "spawn dup2")?,
+        None => spawn_call(unsafe { libc::posix_spawn_file_actions_addopen(&raw mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) }, "spawn open")?,
     }
-    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, out_w.as_raw_fd(), 1) }, "spawn dup2")?;
-    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, err_w.as_raw_fd(), 2) }, "spawn dup2")?;
-    spawn_call(unsafe { libc::posix_spawnattr_setpgroup(&mut attrs.0, 0) }, "spawn process group")?;
+    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, out_w.as_raw_fd(), 1) }, "spawn dup2")?;
+    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, err_w.as_raw_fd(), 2) }, "spawn dup2")?;
+    spawn_call(unsafe { libc::posix_spawnattr_setpgroup(&raw mut attrs.0, 0) }, "spawn process group")?;
     let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
-    unsafe { libc::sigemptyset(&mut empty) };
-    spawn_call(unsafe { libc::posix_spawnattr_setsigmask(&mut attrs.0, &empty) }, "spawn signal mask")?;
+    unsafe { libc::sigemptyset(&raw mut empty) };
+    spawn_call(unsafe { libc::posix_spawnattr_setsigmask(&raw mut attrs.0, &raw const empty) }, "spawn signal mask")?;
     let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
-    unsafe { libc::sigemptyset(&mut defaults) };
-    for signal in DEFAULT_SIGNALS { unsafe { libc::sigaddset(&mut defaults, signal) }; }
-    spawn_call(unsafe { libc::posix_spawnattr_setsigdefault(&mut attrs.0, &defaults) }, "spawn signal defaults")?;
+    unsafe { libc::sigemptyset(&raw mut defaults) };
+    for signal in DEFAULT_SIGNALS { unsafe { libc::sigaddset(&raw mut defaults, signal) }; }
+    spawn_call(unsafe { libc::posix_spawnattr_setsigdefault(&raw mut attrs.0, &raw const defaults) }, "spawn signal defaults")?;
     let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-    spawn_call(unsafe { libc::posix_spawnattr_setflags(&mut attrs.0, flags as libc::c_short) }, "spawn flags")?;
+    spawn_call(unsafe { libc::posix_spawnattr_setflags(&raw mut attrs.0, flags.try_into().expect("spawn flags fit c_short")) }, "spawn flags")?;
     let mut pid: libc::pid_t = 0;
-    spawn_call(unsafe { libc::posix_spawn(&mut pid, program.as_ptr(), &actions.0, &attrs.0, arg_ptrs.as_ptr(), env_ptrs.as_ptr()) }, "posix_spawn")?;
+    spawn_call(unsafe { libc::posix_spawn(&raw mut pid, program.as_ptr(), &raw const actions.0, &raw const attrs.0, arg_ptrs.as_ptr(), env_ptrs.as_ptr()) }, "posix_spawn")?;
     Ok(Spawned { pid, stdin: stdin.map(|(_, write)| write), stdout: out_r, stderr: err_r })
 }
 
@@ -249,7 +249,7 @@ pub struct Limits {
 pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], limits: Limits,
            cancel: &Cancel) -> Result<CommandResult, CommandError> {
     if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
-    if argv.first().is_none_or(|program| program.is_empty())
+    if argv.first().is_none_or(String::is_empty)
         || env.iter().any(|(k, _)| k.is_empty() || k.contains('=')) {
         return Err(CommandError::InvalidArguments);
     }
@@ -280,7 +280,7 @@ impl Group {
         // SAFETY: the descriptor was just created and has no other owner.
         let queue = unsafe { OwnedFd::from_raw_fd(queue) };
         let change = libc::kevent {
-            ident: self.pid as libc::uintptr_t,
+            ident: self.pid.try_into().expect("spawned pid is positive"),
             filter: libc::EVFILT_PROC,
             flags: libc::EV_ADD | libc::EV_ONESHOT,
             fflags: libc::NOTE_EXIT,
@@ -288,13 +288,13 @@ impl Group {
             udata: std::ptr::null_mut(),
         };
         let mut event = change;
-        let timeout = libc::timespec { tv_sec: limit.as_secs() as libc::time_t, tv_nsec: limit.subsec_nanos().into() };
+        let timeout = libc::timespec { tv_sec: limit.as_secs().try_into().expect("bounded exit wait fits time_t"), tv_nsec: limit.subsec_nanos().into() };
         // SAFETY: one change and room for one event, both live locals; the timeout is a live local.
-        let ready = unsafe { libc::kevent(queue.as_raw_fd(), &change, 1, &mut event, 1, &timeout) };
+        let ready = unsafe { libc::kevent(queue.as_raw_fd(), &raw const change, 1, &raw mut event, 1, &raw const timeout) };
         let error = if ready < 0 {
             Some(io::Error::last_os_error())
         } else if ready > 0 && event.flags & libc::EV_ERROR != 0 {
-            Some(io::Error::from_raw_os_error(event.data as i32))
+            Some(io::Error::from_raw_os_error(event.data.try_into().expect("kernel errno fits c_int")))
         } else {
             None
         };
@@ -310,7 +310,7 @@ impl Group {
         let mut status = 0;
         loop {
             // SAFETY: waits on our own child without blocking.
-            let pid = unsafe { libc::waitpid(self.pid, &mut status, libc::WNOHANG) };
+            let pid = unsafe { libc::waitpid(self.pid, &raw mut status, libc::WNOHANG) };
             if pid == 0 { return Ok(None); }
             if pid < 0 {
                 let error = io::Error::last_os_error();
@@ -335,7 +335,7 @@ impl Drop for Group {
         unsafe {
             libc::kill(-self.pid, libc::SIGKILL);
             let mut status = 0;
-            while libc::waitpid(self.pid, &mut status, 0) < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {}
+            while libc::waitpid(self.pid, &raw mut status, 0) < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {}
         }
     }
 }
@@ -366,7 +366,7 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             (outputs[1].0.as_ref(), libc::POLLIN),
             (stdin.as_ref(), libc::POLLOUT),
         ].map(|(file, events)| libc::pollfd { fd: file.map_or(-1, AsRawFd::as_raw_fd), events, revents: 0 });
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL.as_millis() as libc::c_int) } < 0 {
+        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len().try_into().expect("poll slots fit nfds_t"), POLL_INTERVAL.as_millis().try_into().expect("poll interval fits c_int")) } < 0 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted { continue; }
             return Err(system("poll", error));
@@ -407,7 +407,7 @@ mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
 
-    fn strings(argv: &[&str]) -> Vec<String> { argv.iter().map(|s| s.to_string()).collect() }
+    fn strings(argv: &[&str]) -> Vec<String> { argv.iter().map(ToString::to_string).collect() }
 
     fn run_with(argv: &[&str], input: Option<&[u8]>, env: &[(&str, &str)], timeout: Duration, limit: usize)
                 -> Result<CommandResult, CommandError> {
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn simultaneous_stdout_stderr_and_large_stdin() {
         // Both writers exceed pipe capacity before stdin is consumed; sequential I/O deadlocks.
-        let input: Vec<u8> = (0..400_000u32).map(|i| i as u8).collect();
+        let input: Vec<u8> = (0..=u8::MAX).cycle().take(400_000).collect();
         let script = "/usr/bin/head -c 200000 /dev/zero &\n/usr/bin/head -c 200000 /dev/zero >&2 &\nwait\n/bin/cat";
         let result = run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
         assert_eq!(result.stdout, [vec![0; 200_000], input].concat());
@@ -705,7 +705,7 @@ mod tests {
     #[test]
     fn timeout_with_blocked_stdin_and_term_ignoring_child() {
         let start = Instant::now();
-        let result = run_with(&["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"], Some(&[1; 1_000_000]), &[],
+        let result = run_with(&["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"], Some(&vec![1; 1_000_000]), &[],
                               Duration::from_millis(100), 1 << 20);
         assert!(matches!(result, Err(CommandError::TimedOut)));
         assert!(start.elapsed() < Duration::from_secs(2));
