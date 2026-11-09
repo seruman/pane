@@ -1,7 +1,3 @@
-//! Ports of mmenu's `MenuModelTests`, `MenuStackTests`, `OperationTests`, `PipedInputTests` and the
-//! model-level `KeyHandlingTests`. Where mmenu raced real processes, these deliver completion
-//! events in the adversarial order directly.
-
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{Value, json};
@@ -123,7 +119,6 @@ fn view_queries_follow_published_rows_and_filtered_marks() {
 
 struct Harness {
     model: Model,
-    /// The live task of each kind: starting one replaces the previous, Cancel removes it.
     tasks: HashMap<TaskKind, Task>,
     started: Vec<Task>,
     cancelled: Vec<TaskKind>,
@@ -216,7 +211,6 @@ impl Harness {
         self.tasks.remove(&kind).unwrap_or_else(|| panic!("no running {kind:?} task"))
     }
 
-    /// Runs the live search to completion and returns its event, undelivered.
     fn run_search(&mut self) -> Event {
         let Task::Search { token, index, query, order } = self.take(TaskKind::Search) else { unreachable!() };
         Event::SearchDone { token, results: index.search(&query, order, &|| false).unwrap() }
@@ -229,7 +223,6 @@ impl Harness {
         }
     }
 
-    /// Decodes `text` as the live source's format, delivers it, but does not search.
     fn source_event(&mut self, text: &str) -> Event {
         let Task::Source { token, format, .. } = self.take(TaskKind::Source) else { unreachable!() };
         let result = RecordDecoder::decode_all(format, text.as_bytes()).map_err(|e| e.to_string());
@@ -356,7 +349,6 @@ fn start(config: Value) -> Harness {
     Harness::new(options(config))
 }
 
-/// JSONL rows whose value is `/v/<id>`.
 fn jsonl(rows: &[(&str, &str)]) -> String {
     rows.iter()
         .map(|(id, title)| format!("{}\n", json!({"id": id, "title": title, "value": format!("/v/{id}")})))
@@ -388,8 +380,6 @@ fn cancelling_carries_the_original_stdin_error_in_the_finish_effect() {
     assert!(matches!(effects.as_slice(), [Effect::Finish(Outcome::Failed(message))]
         if message == "invalid input record"));
 }
-
-// MenuModelTests
 
 #[test]
 fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
@@ -510,7 +500,6 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         assert!(!h.model.has_choice(), "failure={failure:?}");
         assert_eq!(h.model.can_navigate(), failure.is_none(), "failure={failure:?}");
 
-        // Failure is local to this source generation, not a permanent disabled state.
         h.switch("good");
         h.load(&jsonl(&[("a", "alpha")]));
         h.query("");
@@ -588,10 +577,8 @@ fn navigation_and_accept_during_search_use_the_published_query_results() {
     h.load(&rows);
     h.query("item 9");
     assert!(h.model.is_searching());
-    // Navigation acts on the rows still shown.
     h.nav(Nav::Down);
     assert_eq!(h.model.highlighted_row(), Some(1));
-    // Enter is kept and applied to the typed query's results, not dropped or applied to old rows.
     h.nav(Nav::Accept);
     assert!(h.is_open());
     h.settle();
@@ -759,8 +746,6 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     assert_eq!(h.model.result_count(), 0);
 }
 
-// MenuStackTests
-
 fn push_binding() -> Value {
     json!({"key": "ctrl+w", "id": "worktrees", "label": "Worktrees", "action": "push", "source": "child"})
 }
@@ -907,7 +892,6 @@ fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
     assert_eq!(h.titles(), ["fresh"]);
 
-    // A second push while the child loads is refused, not queued onto stale rows.
     h.nav(Nav::Back);
     h.perform(1);
     h.perform(0);
@@ -1210,8 +1194,6 @@ fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
     assert!(h.model.can_navigate());
 }
 
-// OperationTests
-
 fn operations(bindings: Value) -> Harness {
     start(json!({"sources": [src("s", json!({}))], "bindings": bindings}))
 }
@@ -1356,8 +1338,6 @@ fn command_failure_trims_and_bounds_stderr() {
     assert_eq!(command_failure(&result(stderr)), format!("Command exited 3: {}", "a".repeat(2048)));
 }
 
-// PipedInputTests
-
 fn piped(json_output: bool, print0: bool) -> Harness {
     let mut o = options(json!({}));
     o.output = if json_output {
@@ -1476,7 +1456,6 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
         h.send(Event::StdinItems(items.to_vec()));
         h.stdin_done();
         h.settle();
-        // Mark out of order; output follows source order.
         h.toggle(2);
         h.toggle(0);
         h.nav(Nav::Accept);
@@ -1524,8 +1503,6 @@ fn plain_cancel_exits_130_with_no_output() {
     h.stdin_done();
     assert_eq!(h.output().0, 130, "nothing happens after finishing");
 }
-
-// KeyHandlingTests (model level: the host maps keys to Nav and chords to `target`)
 
 fn keys(multi: bool) -> Harness {
     let mut o = options(json!({
@@ -1652,8 +1629,6 @@ fn the_highlight_stays_within_the_listed_rows() {
     assert_eq!(h.model.highlighted_row(), Some(2));
     assert_eq!(h.model.result_count(), 5, "every match is still counted");
 }
-
-// Review fixes.
 
 #[test]
 fn a_query_with_no_matches_clears_the_preview() {
