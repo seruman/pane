@@ -188,6 +188,14 @@ impl<A: Clone> Vim<A> {
         matches!(self.mode, VimMode::Visual | VimMode::VisualLine)
     }
 
+    fn table(&self) -> Table {
+        if self.visual() {
+            Table::Visual
+        } else {
+            Table::Normal
+        }
+    }
+
     /// The mode for a status line: `NORMAL`, `VISUAL`, `V-LINE`, or the search being typed.
     pub fn status(&self) -> String {
         match self.mode {
@@ -252,22 +260,10 @@ impl<A: Clone> Vim<A> {
             )),
             // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
-                let table = if self.visual() {
-                    Table::Visual
-                } else {
-                    Table::Normal
-                };
-                Some((typed, self.keys.next(table, &[], true)))
+                Some((typed, self.keys.next(self.table(), &[], true)))
             }
             Pending::None => None,
-            Pending::Keys(keys) => {
-                let table = if self.visual() {
-                    Table::Visual
-                } else {
-                    Table::Normal
-                };
-                Some((typed, self.keys.next(table, keys, true)))
-            }
+            Pending::Keys(keys) => Some((typed, self.keys.next(self.table(), keys, true))),
             Pending::Operator {
                 keys,
                 typed: motion,
@@ -485,12 +481,7 @@ impl<A: Clone> Vim<A> {
     ) -> Option<VimEffect<A>> {
         let first = typed.is_empty();
         typed.push(stroke);
-        let table = if self.visual() {
-            Table::Visual
-        } else {
-            Table::Normal
-        };
-        match self.keys.lookup(table, &typed) {
+        match self.keys.lookup(self.table(), &typed) {
             Lookup::Exact(command) => self.run(command, typed, text, b),
             Lookup::Prefix => {
                 self.pending = Pending::Keys(typed);
