@@ -104,7 +104,7 @@ enum Pending<A> {
 /// that says what keys do. Positions are byte offsets into the text passed with each key.
 #[derive(Clone, Debug)]
 pub struct Vim<A = NoAction> {
-    keys: Keymap<A>,
+    keymap: Keymap<A>,
     mode: VimMode,
     cursor: usize,
     anchor: usize,
@@ -138,9 +138,9 @@ impl Default for Vim<NoAction> {
 }
 
 impl<A: Clone> Vim<A> {
-    pub fn new(keys: Keymap<A>) -> Vim<A> {
+    pub fn new(keymap: Keymap<A>) -> Vim<A> {
         Vim {
-            keys,
+            keymap,
             mode: VimMode::Normal,
             cursor: 0,
             anchor: 0,
@@ -177,7 +177,7 @@ impl<A: Clone> Vim<A> {
     }
 
     pub fn keymap(&self) -> &Keymap<A> {
-        &self.keys
+        &self.keymap
     }
 
     pub fn mode(&self) -> VimMode {
@@ -214,7 +214,7 @@ impl<A: Clone> Vim<A> {
     /// Keys typed toward a command that isn't finished, as `2y` or `yi`.
     pub fn pending(&self) -> String {
         let count = |n: Option<usize>| n.map(|n| n.to_string()).unwrap_or_default();
-        let r = |k: &[Stroke]| self.keys.render(k);
+        let r = |k: &[Stroke]| self.keymap.render(k);
         let op_keys = |op: &Option<OpState<A>>| match op {
             Some((_, keys, c)) => format!("{}{}", count(*c), r(keys)),
             None => String::new(),
@@ -247,7 +247,7 @@ impl<A: Clone> Vim<A> {
     /// grouped: the app's, then Vim's commands, then motions. `None` in Normal mode with
     /// nothing half typed, and while a search is being typed.
     pub fn hints(&self) -> Option<(String, Vec<Vec<Hint>>)> {
-        let typed = self.pending();
+        let header = self.pending();
         match &self.pending {
             Pending::None if self.visual() && self.count.is_none() => Some((
                 if self.mode == VimMode::Visual {
@@ -256,31 +256,25 @@ impl<A: Clone> Vim<A> {
                     "v-line"
                 }
                 .into(),
-                self.keys.next(Table::Visual, &[], false),
+                self.keymap.next(Table::Visual, &[], false),
             )),
             // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
-                Some((typed, self.keys.next(self.table(), &[], true)))
+                Some((header, self.keymap.next(self.table(), &[], true)))
             }
             Pending::None => None,
-            Pending::Keys(keys) => Some((typed, self.keys.next(self.table(), keys, true))),
-            Pending::Operator {
-                keys,
-                typed: motion,
-                ..
-            } => {
+            Pending::Keys(keys) => Some((header, self.keymap.next(self.table(), keys, true))),
+            Pending::Operator { keys, typed, .. } => {
                 let mut groups = Vec::new();
-                if motion.is_empty() {
-                    groups.push(vec![hint(&self.keys.render(keys), "The line")]);
+                if typed.is_empty() {
+                    groups.push(vec![hint(&self.keymap.render(keys), "The line")]);
                 }
-                groups.extend(self.keys.next(Table::Pending, motion, true));
-                Some((typed, groups))
+                groups.extend(self.keymap.next(Table::Pending, typed, true));
+                Some((header, groups))
             }
-            Pending::Object { typed: keys, .. } => {
-                Some((typed, vec![self.keys.next_objects(keys)]))
-            }
+            Pending::Object { typed, .. } => Some((header, vec![self.keymap.next_objects(typed)])),
             Pending::Find { find, .. } => Some((
-                typed,
+                header,
                 vec![vec![hint(
                     "any",
                     if find.till() {
@@ -412,7 +406,7 @@ impl<A: Clone> Vim<A> {
                     return Some(self.operate_lines(op, count, text, &b));
                 }
                 let line_prefix = keys.starts_with(&typed);
-                match self.keys.lookup(Table::Pending, &typed) {
+                match self.keymap.lookup(Table::Pending, &typed) {
                     Lookup::Exact(Command::Motion(m)) => {
                         self.finish_motion(m, typed, Some((op, keys, count)), text, &b)
                     }
@@ -447,7 +441,7 @@ impl<A: Clone> Vim<A> {
                 mut typed,
             } => {
                 typed.push(stroke);
-                match self.keys.lookup_object(&typed) {
+                match self.keymap.lookup_object(&typed) {
                     Lookup::Exact(object) => {
                         self.count = opened.0;
                         self.finish_object(object, around, op, text, &b)
@@ -481,7 +475,7 @@ impl<A: Clone> Vim<A> {
     ) -> Option<VimEffect<A>> {
         let first = typed.is_empty();
         typed.push(stroke);
-        match self.keys.lookup(self.table(), &typed) {
+        match self.keymap.lookup(self.table(), &typed) {
             Lookup::Exact(command) => self.run(command, typed, text, b),
             Lookup::Prefix => {
                 self.pending = Pending::Keys(typed);
