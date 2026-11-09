@@ -57,7 +57,7 @@ pub struct Cli {
     /// letting mmenu's callers run rmenu unchanged.
     #[arg(long, hide = true)]
     pub width: Option<String>,
-    /// Visible rows.
+    /// Rows to move with PageUp and PageDown.
     #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u8).range(4..=30))]
     pub rows: u8,
     /// Light or dark; system follows the terminal.
