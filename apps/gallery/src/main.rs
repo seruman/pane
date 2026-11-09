@@ -43,14 +43,43 @@ const TABS: [&str; 3] = ["Overview", "Activity", "Settings"];
 
 const THEMES: [&str; 3] = ["Follow terminal", "Light", "Dark"];
 
-/// (name, detail, changed)
-const FILES: [(&str, &str, bool); 6] = [
-    ("Cargo.toml", "1.2 KB · 2 min ago", true),
-    ("README.md", "4.8 KB · yesterday", false),
-    ("src/main.rs", "12 KB · 5 min ago", true),
-    ("src/server.rs", "7.1 KB · last week", false),
-    ("tests/api.rs", "3.3 KB · 3 days ago", false),
-    ("deploy/staging.yaml", "880 B · just now", true),
+struct File {
+    name: &'static str,
+    detail: &'static str,
+    changed: bool,
+}
+
+const FILES: [File; 6] = [
+    File {
+        name: "Cargo.toml",
+        detail: "1.2 KB · 2 min ago",
+        changed: true,
+    },
+    File {
+        name: "README.md",
+        detail: "4.8 KB · yesterday",
+        changed: false,
+    },
+    File {
+        name: "src/main.rs",
+        detail: "12 KB · 5 min ago",
+        changed: true,
+    },
+    File {
+        name: "src/server.rs",
+        detail: "7.1 KB · last week",
+        changed: false,
+    },
+    File {
+        name: "tests/api.rs",
+        detail: "3.3 KB · 3 days ago",
+        changed: false,
+    },
+    File {
+        name: "deploy/staging.yaml",
+        detail: "880 B · just now",
+        changed: true,
+    },
 ];
 
 /// ANSI slots offered as label colours.
@@ -200,9 +229,12 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .justify_between()
                 .child(heading("Files", &theme))
                 .child(
-                    Badge::new(format!("{} changed", FILES.iter().filter(|f| f.2).count()))
-                        .tone(Tone::Warning)
-                        .build(&theme),
+                    Badge::new(format!(
+                        "{} changed",
+                        FILES.iter().filter(|f| f.changed).count()
+                    ))
+                    .tone(Tone::Warning)
+                    .build(&theme),
                 ),
             files(s, &theme),
         ))
@@ -422,14 +454,14 @@ fn files(s: &State, theme: &Theme) -> El {
     let rows = FILES
         .iter()
         .enumerate()
-        .filter(|(_, (name, _, _))| name.to_lowercase().contains(&filter))
-        .map(|(i, (name, detail, changed))| {
-            let mut row = ListRow::new(*name)
-                .detail(*detail)
+        .filter(|(_, file)| file.name.to_lowercase().contains(&filter))
+        .map(|(i, file)| {
+            let mut row = ListRow::new(file.name)
+                .detail(file.detail)
                 .selected(s.file == Some(i))
-                .leading(icon(file_icon(name), 16.0).color(theme.text_secondary))
+                .leading(icon(file_icon(file.name), 16.0).color(theme.text_secondary))
                 .on_press(move |s: &mut State| s.file = Some(i));
-            if *changed {
+            if file.changed {
                 row = row.trailing(Badge::new("M").tone(Tone::Warning).build(theme));
             }
             row
