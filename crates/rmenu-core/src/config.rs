@@ -22,13 +22,33 @@ pub enum MarkScope {
     Global,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[serde(alias = "warm")]
+    Rex,
+    Native,
+}
+
+impl std::str::FromStr for Theme {
+    type Err = ConfigurationError;
+
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        match raw {
+            "rex" => Ok(Self::Rex),
+            "native" => Ok(Self::Native),
+            _ => error(format!("Unknown theme: {raw}")),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MenuConfiguration {
     pub prompt: Option<String>,
     #[serde(default, deserialize_with = "null_as_false")]
     pub multi: bool,
-    pub theme: Option<String>,
+    pub theme: Option<Theme>,
     #[serde(default)]
     pub sources: Vec<MenuSource>,
     #[serde(default)]
@@ -106,13 +126,6 @@ pub struct KeyChord {
 }
 
 impl MenuConfiguration {
-    const THEMES: [&str; 2] = ["native", "rex"];
-
-    /// The configured theme with former names mapped to their replacement.
-    fn theme_name(&self) -> Option<&str> {
-        self.theme.as_deref().map(|theme| if theme == "warm" { "rex" } else { theme })
-    }
-
     pub fn source(&self, id: Option<&str>) -> Option<&MenuSource> {
         self.sources.iter().find(|source| Some(source.id.as_str()) == id)
     }
@@ -130,9 +143,6 @@ impl MenuConfiguration {
     }
 
     pub fn validate(&self) -> Result<(), ConfigurationError> {
-        if let Some(theme) = self.theme_name().filter(|theme| !Self::THEMES.contains(theme)) {
-            return error(format!("Unknown theme: {theme}"));
-        }
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
         for source in &self.sources {
@@ -440,7 +450,7 @@ mod tests {
         for theme in ["rex", "native", "warm"] {
             parse(&format!(r#"{{"theme":"{theme}"}}"#)).validate().unwrap();
         }
-        assert_eq!(parse(r#"{"theme":"warm"}"#).theme_name(), Some("rex"));
-        assert!(parse(r#"{"theme":"sepia"}"#).validate().is_err());
+        assert_eq!(parse(r#"{"theme":"warm"}"#).theme, Some(Theme::Rex));
+        assert!(serde_json::from_str::<MenuConfiguration>(r#"{"theme":"sepia"}"#).is_err());
     }
 }

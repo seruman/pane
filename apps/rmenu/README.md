@@ -16,7 +16,8 @@ bindings, push levels, preview), stdin formats, `--json` / `--print0` output and
 Differences:
 
 - Matching is nucleo's, with its query syntax (`!x`, `^x`, `x$`, `'x`) and smart case.
-- Colours come from the terminal, so `--theme` and `--appearance` are accepted and ignored.
+- `--appearance system` uses the terminal's foreground and background colours. `light` and `dark` use Rune's theme colours.
+  `--theme` and the config's `theme` field are accepted for mmenu compatibility and ignored.
 - A terminal never sends Command, so `cmd+…` bindings parse but can't fire. Ctrl chords work.
 - Usage and config errors are clap's, exit 2.
 

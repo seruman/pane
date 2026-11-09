@@ -3,7 +3,7 @@
 use std::io::IsTerminal;
 
 use clap::{Parser, ValueEnum};
-use rmenu_core::config::{InputFormat, MenuConfiguration};
+use rmenu_core::config::{InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::Options;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -19,12 +19,6 @@ pub enum Appearance {
     System,
     Light,
     Dark,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
-pub enum Theme {
-    Rex,
-    Native,
 }
 
 #[derive(Debug, Parser)]
@@ -69,8 +63,7 @@ pub struct Cli {
     /// Light or dark; system follows the terminal.
     #[arg(long, value_enum, default_value = "system")]
     pub appearance: Appearance,
-    /// Accepted for mmenu compatibility; rmenu always draws with the terminal's colours.
-    #[arg(long, value_enum)]
+    #[arg(long, hide = true)]
     pub theme: Option<Theme>,
     /// Trusted preview shell command. Selection is in MMENU_VALUE, not interpolated into code.
     #[arg(long)]
@@ -185,6 +178,18 @@ mod tests {
     }
 
     #[test]
+    fn theme_is_validated_but_hidden_and_ignored() {
+        let help = parse(&["--help"]).unwrap_err().to_string();
+        assert!(!help.contains("--theme"));
+        let default = parse(&[]).unwrap().launch(false).unwrap();
+        for theme in ["rex", "native"] {
+            let launch = parse(&["--theme", theme]).unwrap().launch(false).unwrap();
+            assert_eq!(format!("{:?}", launch.options), format!("{:?}", default.options));
+            assert_eq!(launch.appearance, default.appearance);
+        }
+    }
+
+    #[test]
     fn defaults_follow_mmenu() {
         let launch = parse(&[]).unwrap().launch(false).unwrap();
         let o = &launch.options;
@@ -228,7 +233,7 @@ mod tests {
         assert_eq!(flagged.options.prompt, "Mine");
         std::fs::write(&path, r#"{"theme":"sepia"}"#).unwrap();
         let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
-        assert_eq!(error, "Unknown theme: sepia");
+        assert!(error.contains("sepia"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
