@@ -148,16 +148,22 @@ const LABEL_COLORS: [usize; 6] = [1, 3, 2, 6, 4, 5];
 
 const RUN_SECONDS: f64 = 2.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Overlay {
+    None,
+    ThemeSelect,
+    Palette,
+    ConfirmDelete,
+}
+
 struct State {
     filter: TextEdit,
     name: TextEdit,
     query: TextEdit,
-    palette_open: bool,
+    overlay: Overlay,
     selected: usize,
     tab: usize,
     theme: ThemeChoice,
-    theme_open: bool,
-    confirm_delete: bool,
     file: Option<usize>,
     /// How far the pretend run has got, 0 to 1.
     progress: f32,
@@ -181,12 +187,10 @@ impl Default for State {
             filter: TextEdit::default(),
             name: TextEdit::new("my-service"),
             query: TextEdit::default(),
-            palette_open: false,
+            overlay: Overlay::None,
             selected: 0,
             tab: 0,
             theme: ThemeChoice::Terminal,
-            theme_open: false,
-            confirm_delete: false,
             file: Some(2),
             progress: 0.0,
             menu_selected: 0,
@@ -209,16 +213,21 @@ impl State {
         self.status == Status::Working
     }
 
+    fn show_overlay(&mut self, overlay: Overlay) {
+        self.overlay = overlay;
+        self.query.focused = overlay == Overlay::Palette;
+        if overlay == Overlay::Palette {
+            self.selected = 0;
+            self.query.clear();
+        }
+    }
+
     fn open_palette(&mut self) {
-        self.palette_open = true;
-        self.selected = 0;
-        self.query.clear();
-        self.query.focused = true;
+        self.show_overlay(Overlay::Palette);
     }
 
     fn close_palette(&mut self) {
-        self.palette_open = false;
-        self.query.focused = false;
+        self.show_overlay(Overlay::None);
     }
 
     fn run_command(&mut self, index: usize) {
@@ -322,21 +331,21 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
                 .build("running", &theme),
         ));
     }
-    if s.confirm_delete {
+    if s.overlay == Overlay::ConfirmDelete {
         let dialog = Dialog::new("Delete my-service?")
             .icon(&icons::TRIANGLE_ALERT, Tone::Danger)
             .message("Its settings and run history go too. This can't be undone.")
             .action(
                 Button::new("Cancel")
                     .gray()
-                    .on_press(|s: &mut State| s.confirm_delete = false)
+                    .on_press(|s: &mut State| s.show_overlay(Overlay::None))
                     .build("cancel", &theme),
             )
             .action(
                 Button::new("Delete")
                     .destructive()
                     .on_press(|s: &mut State| {
-                        s.confirm_delete = false;
+                        s.show_overlay(Overlay::None);
                         s.toast = Some("Deleted my-service".to_owned());
                     })
                     .build("confirm", &theme),
@@ -345,11 +354,11 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         page = page.overlay(modal_layer(
             "confirm-layer",
             dialog,
-            |s: &mut State| s.confirm_delete = false,
+            |s: &mut State| s.show_overlay(Overlay::None),
             &theme,
         ));
     }
-    if s.palette_open {
+    if s.overlay == Overlay::Palette {
         page = page.overlay(modal_layer(
             "palette-layer",
             palette(s, &theme),
@@ -399,7 +408,7 @@ fn buttons(s: &State, theme: &Theme) -> El {
         .child(
             Button::new("Delete")
                 .destructive()
-                .on_press(|s: &mut State| s.confirm_delete = true)
+                .on_press(|s: &mut State| s.show_overlay(Overlay::ConfirmDelete))
                 .build("delete", theme),
         )
         .child(
@@ -446,12 +455,18 @@ fn settings(s: &State, theme: &Theme, layer: &mut Vec<El>) -> El {
     }
     let theme_picker = Select::new(ThemeChoice::ALL.map(ThemeChoice::label))
         .current(s.theme as usize)
-        .open(s.theme_open)
+        .open(s.overlay == Overlay::ThemeSelect)
         .width(170.0)
-        .on_toggle(|s: &mut State| s.theme_open = !s.theme_open)
+        .on_toggle(|s: &mut State| {
+            s.show_overlay(if s.overlay == Overlay::ThemeSelect {
+                Overlay::None
+            } else {
+                Overlay::ThemeSelect
+            });
+        })
         .on_choose(|s: &mut State, i| {
             s.theme = ThemeChoice::ALL[i];
-            s.theme_open = false;
+            s.show_overlay(Overlay::None);
         })
         .build("theme", theme, layer);
     SettingsGroup::new()
@@ -668,7 +683,7 @@ fn poll(s: &mut State, now: f64, tx: &mut Tx) -> bool {
 fn on_key(s: &mut State, k: &KeyEvent, _: &mut Tx) -> bool {
     match k.key {
         Key::Command('p') if k.mods.ctrl => {
-            if s.palette_open {
+            if s.overlay == Overlay::Palette {
                 s.close_palette()
             } else {
                 s.open_palette()
@@ -685,12 +700,12 @@ fn main() {
             ("palette", |s| s.open_palette()),
             ("palette-search", |s| {
                 s.open_palette();
-                s.query = TextEdit::new("te");
+                s.query.text = "te".to_owned();
             }),
             ("running", |s| s.status = Status::Working),
             ("toast", |s| s.toast = Some("Run finished".to_owned())),
-            ("select", |s| s.theme_open = true),
-            ("dialog", |s| s.confirm_delete = true),
+            ("select", |s| s.show_overlay(Overlay::ThemeSelect)),
+            ("dialog", |s| s.show_overlay(Overlay::ConfirmDelete)),
             ("no-files", |s| s.filter = TextEdit::new("zzz")),
         ],
         poll: Some(poll),
@@ -727,6 +742,30 @@ mod tests {
     use rune::{Env, Runtime};
 
     #[test]
+    fn changing_overlays_updates_palette_focus() {
+        let mut state = State::default();
+        let overlays = [
+            Overlay::None,
+            Overlay::ThemeSelect,
+            Overlay::Palette,
+            Overlay::ConfirmDelete,
+        ];
+        for before in overlays {
+            for after in overlays {
+                state.show_overlay(before);
+                state.show_overlay(after);
+                assert_eq!(state.overlay, after);
+                assert_eq!(state.query.focused, after == Overlay::Palette);
+            }
+        }
+        state.query.text = "old search".to_owned();
+        state.selected = 2;
+        state.open_palette();
+        assert!(state.query.text.is_empty());
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
     fn theme_commands_do_not_depend_on_display_titles() {
         let mut state = State::default();
         for choice in ThemeChoice::ALL {
@@ -741,7 +780,7 @@ mod tests {
                 choice == ThemeChoice::Terminal
             );
             assert!(state.toast.is_none());
-            assert!(!state.palette_open);
+            assert_eq!(state.overlay, Overlay::None);
         }
     }
 
