@@ -3,9 +3,7 @@
 use std::{mem, time::Duration};
 
 use crate::command::{CommandResult, Limits};
-use crate::config::{
-    BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId,
-};
+use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuConfiguration, MenuSource, SourceId};
 use crate::item::{ActionContext, MenuItem, PathEntry};
 use crate::items::Items;
 use crate::search::{Order, RowOffset, SearchIndex};
@@ -428,8 +426,8 @@ impl Model {
             closing: false,
         };
         let mut effects = Vec::new();
-        match model.options.configuration.root_source().cloned() {
-            Some(source) => model.load(&source, LoadKind::Replace, &mut effects),
+        match model.options.configuration.root_source().map(|source| source.id.clone()) {
+            Some(source) => model.load(source, LoadKind::Replace, &mut effects),
             None => effects.push(Effect::ReadStdin),
         }
         (model, effects)
@@ -607,11 +605,7 @@ impl Model {
             Event::Nav(nav) => self.nav(nav, effects),
             Event::Highlight(row) => self.highlight(row, effects),
             Event::ToggleRow(row) => self.toggle_row(row, effects),
-            Event::Perform(index) => {
-                if let Some(binding) = self.options.configuration.bindings().get(index.0).cloned() {
-                    self.perform(binding, effects);
-                }
-            }
+            Event::Perform(index) => self.perform(index, effects),
             Event::SwitchSource(id) => self.switch_source(&id, effects),
             Event::StdinItems(batch) => {
                 self.root_mut().store.extend(batch);
@@ -744,7 +738,8 @@ impl Model {
         self.highlight(row, effects);
     }
 
-    fn perform(&mut self, binding: MenuBinding, effects: &mut Vec<Effect>) {
+    fn perform(&mut self, index: BindingIndex, effects: &mut Vec<Effect>) {
+        let Some(binding) = self.options.configuration.bindings().get(index.0) else { return };
         if !binding.applies(self.source_id()) {
             return;
         }
@@ -765,7 +760,10 @@ impl Model {
                 effects.push(Effect::Copy(values.join("\n")));
                 self.current.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
-            BindingAction::Source { source } => self.switch_source(source, effects),
+            BindingAction::Source { source } => {
+                let source = source.clone();
+                self.switch_source(&source, effects);
+            }
             BindingAction::Push { source } => {
                 self.apply_intent(Intent::Push(source.clone()), effects);
             }
@@ -792,8 +790,9 @@ impl Model {
         if !self.levels.is_empty() || self.source_id() == Some(id) {
             return;
         }
-        let Some(source) = self.options.configuration.source(id).filter(|s| !s.hidden).cloned() else { return };
-        self.load(&source, LoadKind::Replace, effects);
+        if self.options.configuration.source(id).is_some_and(|source| !source.hidden) {
+            self.load(id.clone(), LoadKind::Replace, effects);
+        }
     }
 
     fn apply_intent(&mut self, intent: Intent, effects: &mut Vec<Effect>) -> IntentOutcome {
@@ -827,8 +826,7 @@ impl Model {
         let mut parent = mem::replace(&mut self.current, child);
         parent.phase = Phase::Ready;
         self.levels.push(SuspendedLevel { level: parent, chosen: picked, stdin_changed });
-        let target = self.options.configuration.source(&source).expect("validated push source").clone();
-        self.load(&target, LoadKind::Replace, effects);
+        self.load(source, LoadKind::Replace, effects);
     }
 
     fn pop(&mut self, effects: &mut Vec<Effect>) {
@@ -846,26 +844,29 @@ impl Model {
     }
 
     fn reload(&mut self, effects: &mut Vec<Effect>) {
-        if let Some(source) = self.source().cloned() {
-            self.load(&source, LoadKind::Reload, effects);
+        if let Some(source) = self.source_id().cloned() {
+            self.load(source, LoadKind::Reload, effects);
         } else {
             self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
             effects.push(Effect::Beep);
         }
     }
 
-    fn load(&mut self, source: &MenuSource, kind: LoadKind, effects: &mut Vec<Effect>) {
+    fn load(&mut self, id: SourceId, kind: LoadKind, effects: &mut Vec<Effect>) {
+        let source = self.options.configuration.source(&id).expect("validated source");
+        let format = source.format;
+        let argv = source.command.clone();
         let reset_pending = matches!(
             self.current.phase,
             Phase::AwaitingSource { selection: SelectionPolicy::Reset }
                 | Phase::Matching(SearchRun { publication: Publication::Source(SelectionPolicy::Reset), .. })
         );
-        let selection = if kind == LoadKind::Replace || source.format != InputFormat::Jsonl || reset_pending {
+        let selection = if kind == LoadKind::Replace || format != InputFormat::Jsonl || reset_pending {
             SelectionPolicy::Reset
         } else {
             SelectionPolicy::Prune
         };
-        self.current.input = Input::Command(source.id.clone());
+        self.current.input = Input::Command(id);
         self.current.source_generation = SourceGeneration(self.fresh());
         self.current.phase = Phase::AwaitingSource { selection };
         self.current.store = Items::default();
@@ -879,16 +880,16 @@ impl Model {
         let context = ActionContext {
             action: "source".into(),
             query: self.query().to_owned(),
-            source: Some(source.id.to_string()),
+            source: self.source_id().map(ToString::to_string),
             items: self.levels.last().map(|l| l.chosen.clone()).unwrap_or_default(),
             path: self.ancestors(),
         };
         effects.push(Effect::Start(Task::Source {
             token: self.current.source_generation.0,
-            argv: source.command.clone(),
+            argv,
             input: context.json(),
             env: context.environment(),
-            format: source.format,
+            format,
         }));
     }
 
