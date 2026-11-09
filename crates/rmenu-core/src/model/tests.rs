@@ -1422,7 +1422,9 @@ fn navigation_events_move_the_highlight() {
     h.nav(Nav::Down);
     assert_eq!(h.model.highlighted_row(), Some(2));
     h.nav(Nav::Up);
+    assert_eq!(h.model.highlighted_row(), Some(1));
     h.nav(Nav::BackTab);
+    assert_eq!(h.model.highlighted_row(), Some(0));
     h.nav(Nav::Up);
     assert_eq!(h.model.highlighted_row(), Some(0), "moving stops at the first row");
     h.nav(Nav::PageDown);
@@ -1438,7 +1440,9 @@ fn navigation_events_move_the_highlight() {
 fn tab_marks_and_advances_in_multi_mode() {
     let mut h = keys(true);
     h.nav(Nav::Tab);
-    assert_eq!(h.marked(), HashSet::from([h.model.result(0).id.clone()]));
+    assert_eq!(h.marked(), HashSet::from(["0".into()]));
+    h.nav(Nav::Accept);
+    assert_eq!(h.context().items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["one"]);
     assert_eq!(h.model.highlighted_row(), Some(1));
 }
 
@@ -1681,8 +1685,7 @@ fn a_highlight_past_the_listed_rows_moves_to_the_first() {
     h.settle();
     h.query("b");
     h.settle();
-    let row = h.model.highlighted_row().unwrap();
-    assert!(row < 2, "highlight {row} is outside the 2 listed rows");
+    assert_eq!(h.model.highlighted_row(), Some(0));
 }
 
 #[test]
