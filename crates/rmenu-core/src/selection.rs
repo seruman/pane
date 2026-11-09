@@ -32,12 +32,8 @@ impl MenuSelection {
         }
     }
 
-    /// Marked items in input order, else the highlighted one.
-    pub fn chosen(&self, items: &Items) -> Vec<MenuItem> {
-        if !self.checked.is_empty() {
-            return items.iter().filter(|i| self.checked.contains(&i.id)).cloned().collect();
-        }
-        items.iter().find(|i| Some(&i.id) == self.highlighted_id.as_ref()).cloned().into_iter().collect()
+    pub fn marked(&self, items: &Items) -> Vec<MenuItem> {
+        items.iter().filter(|i| self.checked.contains(&i.id)).cloned().collect()
     }
 }
 
@@ -51,9 +47,10 @@ mod tests {
         let mut selection = MenuSelection { highlighted_id: Some("a".into()), ..Default::default() };
         selection.toggle("b");
         selection.reconcile(&items, &[0], false);
-        assert_eq!(selection.chosen(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert_eq!(selection.marked(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["b"]);
         selection.reconcile(&Items::from(vec![items[0].clone()]), &[0], true);
         assert!(selection.checked.is_empty());
-        assert_eq!(selection.chosen(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert!(selection.marked(&items).is_empty());
+        assert_eq!(selection.highlighted_id.as_deref(), Some("a"));
     }
 }

@@ -420,7 +420,7 @@ impl Model {
         if self.shown.selection.checked.is_empty() {
             self.highlighted().into_iter().cloned().collect()
         } else {
-            self.shown.selection.chosen(&self.shown.items)
+            self.shown.selection.marked(&self.shown.items)
         }
     }
 
@@ -950,7 +950,7 @@ impl Model {
                     .map(|l| &l.shown)
                     .chain([&self.shown])
                     .filter(|s| !s.selection.checked.is_empty())
-                    .flat_map(|s| s.selection.chosen(&s.items))
+                    .flat_map(|s| s.selection.marked(&s.items))
                     .collect();
                 if marked.is_empty() { picked.clone() } else { marked }
             }
