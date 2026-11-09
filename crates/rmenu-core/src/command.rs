@@ -398,14 +398,27 @@ mod tests {
         fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
     }
 
+    fn run_in_child(test: &str) -> bool {
+        const CHILD_TEST: &str = "RMENU_COMMAND_CHILD_TEST";
+        if std::env::var(CHILD_TEST).as_deref() == Ok(test) { return false; }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("command::tests::{test}"), "--nocapture", "--test-threads=1"])
+            .env(CHILD_TEST, test)
+            .env("RUNE_TERMINAL", "1")
+            .output().unwrap();
+        assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
+        true
+    }
+
     #[test]
     fn commands_get_only_stdio_and_never_rmenus_terminal_mode() {
+        if run_in_child("commands_get_only_stdio_and_never_rmenus_terminal_mode") { return; }
+        assert_eq!(std::env::var("RUNE_TERMINAL").unwrap(), "1");
         let file = std::fs::File::open("/dev/null").unwrap();
         // A descriptor opened without close-on-exec, as a framework inside rmenu would.
         // A high number, so the command's own descriptors (ls opening /dev/fd) can't collide.
         let fd = unsafe { libc::dup2(file.as_raw_fd(), 200) };
         assert_eq!(fd, 200);
-        unsafe { std::env::set_var("RUNE_TERMINAL", "1") };
         let result = quick(&["/bin/sh", "-c", "ls /dev/fd; echo env=${RUNE_TERMINAL-unset}"]).unwrap();
         unsafe { libc::close(fd) };
         let out = text(&result.stdout);
@@ -415,6 +428,7 @@ mod tests {
 
     #[test]
     fn a_descriptor_another_thread_opens_during_spawn_never_leaks() {
+        if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks") { return; }
         let stop = Arc::new(AtomicBool::new(false));
         let null = std::fs::File::open("/dev/null").unwrap();
         let raw = null.as_raw_fd();
