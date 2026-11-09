@@ -168,11 +168,16 @@ fn invalid_source_references_report_the_rule_and_entry() {
 }
 
 #[test]
+fn an_empty_source_command_reports_the_source() {
+    let result = error(r#"{"sources":[{"id":"a","label":"A","command":[]}]}"#);
+    assert!(matches!(result, ConfigurationError::MissingProgram { entry } if entry == "Source a command"));
+}
+
+#[test]
 fn commands_without_a_runnable_program_fail_at_load() {
     let source = |field: &str| format!(r#"{{"sources":[{{"id":"a","label":"A",{field}}}]}}"#);
     for (json, expected) in [
         (source(r#""command":[""]"#), "Source a command"),
-        (source(r#""command":[]"#), "Source a command"),
         (source(r#""command":["echo"],"preview":[""]"#), "Source a preview command"),
         (r#"{"preview":["","x"]}"#.to_owned(), "Preview command"),
         (r#"{"preview":[]}"#.to_owned(), "Preview command"),
