@@ -1,5 +1,3 @@
-//! The rows of one source generation, in input order.
-
 use std::ops::Index;
 use std::sync::Arc;
 

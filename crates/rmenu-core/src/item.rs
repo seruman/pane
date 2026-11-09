@@ -35,6 +35,7 @@ impl MenuItem {
     }
 
     /// Returns the search override, or the title and subtitle joined by a space.
+    /// Without an override or subtitle, returns the title alone.
     pub fn search_text(&self) -> String {
         match (&self.search, &self.subtitle) {
             (Some(search), _) => search.clone(),

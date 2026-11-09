@@ -1,4 +1,4 @@
-//! Fuzzy-ranked matching on nucleo-matcher.
+//! This module matches and highlights rows with nucleo-matcher.
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -81,7 +81,6 @@ pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<
     (split(0..title), split(title + 1..title + 1 + subtitle.len()))
 }
 
-/// The search stopped after its cancellation callback returned true.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cancelled;
 
@@ -95,7 +94,8 @@ impl SearchIndex {
     /// Returns matching row offsets using nucleo's pattern syntax and smart case.
     /// `Order::Ranked` sorts by descending summed score, then shorter text, then input order.
     /// `Order::Input` keeps input order.
-    /// Workers check `cancelled` while matching. Single-chunk searches run on the calling thread.
+    /// Cancellation checks can run on worker threads.
+    /// Returns [`Cancelled`] when a cancellation check returns true.
     pub fn search(
         &self,
         query: &str,

@@ -1,5 +1,3 @@
-//! Selection tracks the highlight and marks by item identity.
-
 use std::collections::HashSet;
 
 use crate::item::MenuItem;
@@ -46,9 +44,6 @@ impl MenuSelection {
         }
     }
 
-    /// Keeps the highlighted identity if visible, or highlights the first visible row.
-    /// Clears the highlight when no rows are visible.
-    /// `Marks::Keep` preserves all marks. `Marks::Prune` removes marks for items absent from `items`.
     pub fn reconcile(&mut self, items: &Items, visible: &[RowOffset], marks: Marks) {
         if marks == Marks::Prune && !self.checked.is_empty() {
             let retained: HashSet<String> =
