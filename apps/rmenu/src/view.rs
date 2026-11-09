@@ -251,10 +251,9 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
         .on_press_tx(move |m: &mut Menu, tx: &mut Tx| {
             m.field.focused = true;
             let Some(r) = row_for(m) else { return };
-            m.handle(Event::Highlight(r), tx);
-            if tx.mods().ctrl && m.model.options().multi {
-                m.handle(Event::ToggleRow(r), tx);
-            }
+            let event =
+                if tx.mods().ctrl && m.model.options().multi { Event::ToggleRow(r) } else { Event::Highlight(r) };
+            m.handle(event, tx);
         })
         .on_double_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Accept), tx))
         .child(line)

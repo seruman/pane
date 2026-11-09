@@ -168,24 +168,34 @@ fn highlight_reveal_scrolls_the_virtual_list_without_a_glide() {
 
 #[test]
 fn row_click_and_text_input_use_the_real_view_handlers() {
-    let mut menu = menu_without_stdin();
-    menu.handle(Event::StdinItems(vec![MenuItem::new("a", "alpha"), MenuItem::new("b", "beta")]), &mut Tx::default());
-    menu.handle(Event::StdinDone, &mut Tx::default());
-    poll_until(&mut menu, |m| m.model.result_count() == 2 && !m.model.is_searching());
-    let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
-    rt.frame(0.0);
-    let beta = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("beta")).unwrap();
-    let (x, y) = (beta.rect[0] + 4.0, beta.rect[1] + 4.0);
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    rt.frame(1.0 / 60.0);
-    assert_eq!(rt.state.model.highlighted_row(), Some(1));
-    assert!(rt.state.field.focused);
-    rt.key(rune::KeyEvent { key: rune::Key::Text("beta".into()), mods: rune::Mods::default() });
-    rt.frame(1.0 / 60.0);
-    assert_eq!(rt.state.field.text, "beta");
-    assert_eq!(rt.state.model.query(), "beta");
-    rt.state.stop();
+    for (multi, ctrl) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
+        launch.options.multi = multi;
+        let mut menu = menu_with_launch(launch);
+        menu.handle(
+            Event::StdinItems(vec![MenuItem::new("a", "alpha"), MenuItem::new("b", "beta")]),
+            &mut Tx::default(),
+        );
+        menu.handle(Event::StdinDone, &mut Tx::default());
+        poll_until(&mut menu, |m| m.model.result_count() == 2 && !m.model.is_searching());
+        let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+        rt.frame(0.0);
+        let beta = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("beta")).unwrap();
+        let (x, y) = (beta.rect[0] + 4.0, beta.rect[1] + 4.0);
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods { ctrl, ..rune::Mods::default() }));
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.model.highlighted_row(), Some(1), "multi={multi}, ctrl={ctrl}");
+        assert_eq!(rt.state.model.marked_count(), usize::from(multi && ctrl), "multi={multi}, ctrl={ctrl}");
+        assert!(rt.state.field.focused, "multi={multi}, ctrl={ctrl}");
+        rt.physical_input(rune::PhysicalInput::Modifiers(rune::Mods::default()));
+        rt.key(rune::KeyEvent { key: rune::Key::Text("beta".into()), mods: rune::Mods::default() });
+        rt.frame(1.0 / 60.0);
+        assert_eq!(rt.state.field.text, "beta", "multi={multi}, ctrl={ctrl}");
+        assert_eq!(rt.state.model.query(), "beta", "multi={multi}, ctrl={ctrl}");
+        rt.state.stop();
+    }
 }
 
 #[test]
