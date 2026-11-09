@@ -2,6 +2,7 @@
 //! document, and the feedback they make, as Markdown for whoever wrote the document (an agent,
 //! most often).
 
+use std::fmt::Write as _;
 use std::ops::Range;
 
 use crate::page::{Page, lines_of, source_of};
@@ -224,6 +225,7 @@ impl Review {
     /// Markdown source where that differs, and always for a removal, so it can be found and
     /// cut as written. `name` is the document's, for the title; `None` for one read from stdin.
     /// `None` when there's nothing to send.
+    #[expect(clippy::expect_used, reason = "Formatting into a String cannot fail")]
     pub fn feedback(&self, source: &str, page: &Page, name: Option<&str>) -> Option<String> {
         if self.is_empty() {
             return None;
@@ -249,11 +251,13 @@ impl Review {
         let anchored = self.anchored();
         let n = anchored.len();
         if n > 0 {
-            out.push_str(&format!(
+            write!(
+                out,
                 "I've reviewed {} and have {n} piece{} of feedback:\n\n",
                 name.map_or("the document".to_owned(), inline_code),
                 if n == 1 { "" } else { "s" }
-            ));
+            )
+            .expect("String write");
         }
         for (number, (id, range)) in anchored.into_iter().enumerate() {
             let Some(c) = self.get(id) else { continue };
@@ -272,9 +276,9 @@ impl Review {
                 place.push(format!("under {}", inline_code(section)));
             }
             let title = c.subject.feedback_title();
-            out.push_str(&format!("## {}. {title}", number + 1));
+            write!(out, "## {}. {title}", number + 1).expect("String write");
             if !place.is_empty() {
-                out.push_str(&format!(" ({})", place.join(", ")));
+                write!(out, " ({})", place.join(", ")).expect("String write");
             }
             out.push_str("\n\n");
 
@@ -293,10 +297,10 @@ impl Review {
             } else {
                 let md = source_of(source, &ranges, false);
                 if c.kind() == Kind::Remove || md.trim() != text {
-                    out.push_str(&format!("On {}, written as:\n\n", inline_code(text)));
+                    write!(out, "On {}, written as:\n\n", inline_code(text)).expect("String write");
                     out.push_str(&fenced("markdown", md.trim()));
                 } else {
-                    out.push_str(&format!("On {}\n\n", inline_code(text)));
+                    write!(out, "On {}\n\n", inline_code(text)).expect("String write");
                 }
             }
             if c.kind() == Kind::Remove {

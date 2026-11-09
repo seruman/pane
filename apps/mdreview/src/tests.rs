@@ -1,17 +1,18 @@
 use super::*;
 use rune::{Env, Mods, Runtime};
+use std::fmt::Write as _;
 
 const SRC: &str = "# Title\n\nSome **bold phrase** and more.\n\n- one\n- two\n\n```rust\nlet x = 1;\n```\n\nA [link][r] here.\n\n[r]: https://example.com\n";
 
-fn app(src: &str) -> App_ {
-    App_::new(Input {
+fn app(src: &str) -> Reviewer {
+    Reviewer::new(Input {
         origin: Origin::Sample,
         source: src.into(),
         out: None,
     })
 }
 
-fn press(rt: &mut Runtime<App_>, keys: &str) {
+fn press(rt: &mut Runtime<Reviewer>, keys: &str) {
     for c in keys.chars() {
         rt.key(KeyEvent {
             key: Key::Text(c.to_string()),
@@ -21,7 +22,7 @@ fn press(rt: &mut Runtime<App_>, keys: &str) {
     }
 }
 
-fn key(rt: &mut Runtime<App_>, k: Key) {
+fn key(rt: &mut Runtime<Reviewer>, k: Key) {
     rt.key(KeyEvent {
         key: k,
         mods: Mods::default(),
@@ -29,7 +30,7 @@ fn key(rt: &mut Runtime<App_>, k: Key) {
     rt.frame(1.0 / 60.0);
 }
 
-fn runtime(src: &str) -> Runtime<App_> {
+fn runtime(src: &str) -> Runtime<Reviewer> {
     let mut rt = Runtime::new(
         app(src),
         view,
@@ -44,7 +45,7 @@ fn runtime(src: &str) -> Runtime<App_> {
     rt
 }
 
-fn texts_under(rt: &Runtime<App_>, key: &str) -> Vec<String> {
+fn texts_under(rt: &Runtime<Reviewer>, key: &str) -> Vec<String> {
     let elements = rt.elements();
     let root = elements
         .iter()
@@ -60,7 +61,7 @@ fn texts_under(rt: &Runtime<App_>, key: &str) -> Vec<String> {
         .collect()
 }
 
-fn card_key(rt: &Runtime<App_>, number: usize) -> String {
+fn card_key(rt: &Runtime<Reviewer>, number: usize) -> String {
     rt.elements()
         .into_iter()
         .filter(|e| !e.exiting)
@@ -71,7 +72,7 @@ fn card_key(rt: &Runtime<App_>, number: usize) -> String {
         .unwrap_or_else(|| panic!("no comment #{number} on screen"))
 }
 
-fn position(rt: &Runtime<App_>) -> Option<usize> {
+fn position(rt: &Runtime<Reviewer>) -> Option<usize> {
     rt.elements()
         .into_iter()
         .filter(|e| !e.exiting)
@@ -93,17 +94,17 @@ fn position(rt: &Runtime<App_>) -> Option<usize> {
         })
 }
 
-fn feedback(rt: &Runtime<App_>) -> Option<String> {
+fn feedback(rt: &Runtime<Reviewer>) -> Option<String> {
     rt.state
         .review
         .feedback(&rt.state.source, &rt.state.page, rt.state.origin.name())
 }
 
-fn cursor_line(rt: &Runtime<App_>) -> String {
+fn cursor_line(rt: &Runtime<Reviewer>) -> String {
     texts_under(rt, "status").last().unwrap().clone()
 }
 
-fn range(s: &App_, needle: &str) -> Range<usize> {
+fn range(s: &Reviewer, needle: &str) -> Range<usize> {
     let at = s.page.text().find(needle).unwrap();
     at..at + needle.len()
 }
@@ -127,6 +128,56 @@ fn the_page_text_is_the_whole_documents() {
         "reference syntax is resolved: {drawn:?}"
     );
     assert!(!drawn.iter().any(|text| text.contains("[r]:")));
+}
+
+#[test]
+fn parser_html_events_are_nested_and_page_ranges_stay_in_source() {
+    use pulldown_cmark::{Event, Options, Parser};
+    let fixtures = [
+        "",
+        "<div>hi</div>\n\n# Heading\n\nAfter.\n",
+        "<!-- hidden -->\n\nVisible.\n",
+        "<script>let x = 1;</script>\n",
+        "A <span>word</span> here.\n",
+        "<![CDATA[raw text]]>\n",
+        "<?processing instruction?>\n",
+    ];
+    for source in fixtures {
+        let mut depth = 0usize;
+        let options =
+            Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
+        for event in Parser::new_ext(source, options) {
+            match event {
+                Event::Start(_) => depth += 1,
+                Event::End(_) => depth = depth.checked_sub(1).expect("balanced parser events"),
+                Event::Html(_) => assert!(depth > 0, "HTML is inside its block for {source:?}"),
+                _ => {}
+            }
+        }
+        assert_eq!(depth, 0, "{source:?}");
+        let page = Page::new(source);
+        assert_eq!(
+            page.text(),
+            rune_kit::markdown::RenderedText::new(source).text(),
+            "{source:?}"
+        );
+        for range in page.source_ranges(0..page.text().len()) {
+            assert!(source.get(range).is_some(), "{source:?}");
+        }
+        for index in 0..page.blocks.len() {
+            let _ = page.section(index);
+        }
+    }
+    let page = Page::new("<div>hi</div>\n\n# Heading\n\nAfter.\n");
+    let at = page.text().find("After.").unwrap();
+    assert_eq!(page.section(page.block_at(at)), Some("Heading"));
+    assert_eq!(
+        page::lines_of(
+            "<div>hi</div>\n\n# Heading\n\nAfter.\n",
+            &page.source_ranges(at..at + 6)
+        ),
+        Some((5, 5))
+    );
 }
 
 #[test]
@@ -379,7 +430,7 @@ impl Drop for TempDir {
     }
 }
 
-fn run_command(rt: &mut Runtime<App_>, command: &str) {
+fn run_command(rt: &mut Runtime<Reviewer>, command: &str) {
     press(rt, command);
     if command.starts_with(':') {
         key(rt, Key::Enter);
@@ -429,7 +480,7 @@ fn quitting_runs_the_send_hook_only_for_send_commands() {
 
 #[test]
 fn which_key_shows_what_can_follow() {
-    let hint_shown = |rt: &Runtime<App_>, key: &str, description: &str| {
+    let hint_shown = |rt: &Runtime<Reviewer>, key: &str, description: &str| {
         let texts = texts_under(rt, "which-key");
         assert!(
             texts.windows(2).any(|pair| pair == [description, key]),
@@ -518,7 +569,7 @@ fn comment_and_remove_are_operators() {
 
 #[test]
 fn opening_an_editor_replaces_the_comment_list() {
-    let mut state = App_::default();
+    let mut state = Reviewer::default();
     let id = state.review.add(Comment::general("review"));
     let mut rt = Runtime::new(state, view, (900.0, 900.0), Env::default());
     rt.on_key = Some(on_key);
@@ -599,9 +650,10 @@ fn the_comment_list_floats_and_jumps() {
 #[test]
 fn moving_in_the_list_scrolls_the_page_to_the_comment() {
     // A page far taller than the window, with a comment near its end.
-    let src: String = (0..80)
-        .map(|i| format!("Paragraph number {i} of filler.\n\n"))
-        .collect();
+    let src = (0..80).fold(String::new(), |mut source, i| {
+        write!(source, "Paragraph number {i} of filler.\n\n").unwrap();
+        source
+    });
     let mut rt = Runtime::new(
         app(&src),
         view,
@@ -623,7 +675,7 @@ fn moving_in_the_list_scrolls_the_page_to_the_comment() {
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
     }
-    let on_screen = |rt: &Runtime<App_>| {
+    let on_screen = |rt: &Runtime<Reviewer>| {
         rt.find(CURRENT_MARK)
             .is_some_and(|(_, y)| (0.0..400.0).contains(&y))
     };
@@ -673,7 +725,7 @@ fn a_review_that_cant_be_written_is_an_error_and_still_reaches_stdout() {
         Ok(())
     );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "# Review\n");
-    assert!(stdout.is_empty(), "a written file keeps stdout clear");
+    assert_eq!(stdout, b"", "a written file keeps stdout clear");
 
     let unwritable = dir.join("no-such-dir").join("review.md");
     let mut stdout = Vec::new();
@@ -691,7 +743,7 @@ fn a_review_that_cant_be_written_is_an_error_and_still_reaches_stdout() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-fn click(rt: &mut Runtime<App_>, key_name: &str) {
+fn click(rt: &mut Runtime<Reviewer>, key_name: &str) {
     let (x, y) = rt
         .find(key_name)
         .unwrap_or_else(|| panic!("no {key_name} on screen"));
@@ -701,7 +753,7 @@ fn click(rt: &mut Runtime<App_>, key_name: &str) {
 }
 
 /// Two comments, `first` on the heading and `second` on the paragraph.
-fn two_comments() -> Runtime<App_> {
+fn two_comments() -> Runtime<Reviewer> {
     let mut rt = runtime(SRC);
     press(&mut rt, "cc");
     press(&mut rt, "first");
@@ -818,7 +870,7 @@ fn an_empty_document_accepts_general_feedback_and_sends_it() {
     let file = dir.0.join("empty-feedback.md");
     let mut rt = runtime("");
     rt.state.out = Some(file.to_str().unwrap().into());
-    assert!(texts_under(&rt, "page").is_empty());
+    assert_eq!(texts_under(&rt, "page"), Vec::<String>::new());
     assert_eq!(cursor_line(&rt), "1:1");
     press(&mut rt, "ggddccyy");
     assert!(rt.find("composer").is_none());
@@ -927,7 +979,7 @@ fn the_command_line_takes_one_document_and_an_output() {
 }
 
 /// Every text the app shows, gathered from the element tree.
-fn shown(rt: &Runtime<App_>) -> Vec<String> {
+fn shown(rt: &Runtime<Reviewer>) -> Vec<String> {
     rt.elements()
         .into_iter()
         .filter(|e| !e.exiting)

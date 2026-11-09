@@ -111,9 +111,8 @@ impl Page {
                     }
                     depth += 1;
                 }
-                Event::End(_) => depth = depth.saturating_sub(1),
+                Event::End(_) => depth -= 1,
                 Event::Rule if depth == 0 => found.push((BlockKind::Rule, range)),
-                Event::Html(_) if depth == 0 => found.push((BlockKind::Para, range)),
                 _ => {}
             }
         }
@@ -121,8 +120,11 @@ impl Page {
             .reference_definitions()
             .iter()
             .filter_map(|(_, def)| source.get(def.span.clone()))
-            .map(|line| format!("\n\n{}", line.trim_end()))
-            .collect();
+            .fold(String::new(), |mut refs, line| {
+                refs.push_str("\n\n");
+                refs.push_str(line.trim_end());
+                refs
+            });
 
         let mut page = Page::default();
         let mut prev_bottom = 0.0f32;
@@ -200,7 +202,7 @@ impl Page {
     /// The heading of the section block `index` is in: the nearest heading at or before it,
     /// as drawn. `None` before the first heading.
     pub fn section(&self, index: usize) -> Option<&str> {
-        self.blocks[..=index.min(self.blocks.len().saturating_sub(1))]
+        self.blocks[..=index]
             .iter()
             .rev()
             .find(|b| matches!(b.kind, BlockKind::Heading(_)))
@@ -231,6 +233,6 @@ fn kind_of(tag: &Tag<'_>) -> BlockKind {
 pub fn lines_of(source: &str, ranges: &[Range<usize>]) -> Option<(usize, usize)> {
     let first = ranges.first()?.start;
     let last = ranges.last()?.end.saturating_sub(1).max(first);
-    let line = |at: usize| source[..at.min(source.len())].matches('\n').count() + 1;
+    let line = |at: usize| source[..at].matches('\n').count() + 1;
     Some((line(first), line(last)))
 }
