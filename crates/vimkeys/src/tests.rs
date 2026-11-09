@@ -447,7 +447,7 @@ fn escape_hides_search_matches() {
             },
             TEXT
         ),
-        Some(VimEffect::Moved)
+        Some(VimEffect::Consumed)
     );
     assert!(v.matches(TEXT).is_empty());
     press(&mut v, "n");
@@ -476,7 +476,7 @@ fn gy_asks_for_the_source() {
     );
     // Plain `y` afterwards copies text again.
     assert_eq!(yanked(press(&mut v, "yw")), "fn ");
-    assert_eq!(press(&mut v, "g"), Some(VimEffect::Moved));
+    assert_eq!(press(&mut v, "g"), Some(VimEffect::Consumed));
     assert_eq!(v.pending(), "g");
     press(&mut v, "y");
     assert_eq!(v.pending(), "gy");
@@ -626,7 +626,7 @@ fn yanked_app(effect: Option<VimEffect<Act>>) -> String {
 #[test]
 fn app_actions_sequences_and_the_leader() {
     let mut v = app_vim();
-    assert_eq!(press_app(&mut v, "]"), Some(VimEffect::Moved));
+    assert_eq!(press_app(&mut v, "]"), Some(VimEffect::Consumed));
     assert_eq!(v.pending(), "]");
     assert_eq!(
         press_app(&mut v, "c"),
@@ -651,7 +651,7 @@ fn app_actions_sequences_and_the_leader() {
         })
     );
     // A sequence that goes nowhere is dropped; an unbound key is the app's.
-    assert_eq!(press_app(&mut v, "]x"), Some(VimEffect::Moved));
+    assert_eq!(press_app(&mut v, "]x"), Some(VimEffect::Consumed));
     assert!(!v.is_pending());
     assert_eq!(press_app(&mut v, "Q"), None);
 
