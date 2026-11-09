@@ -1,3 +1,8 @@
+#![allow(
+    clippy::unreadable_literal,
+    reason = "Six-digit RGB literals use the RRGGBB colour notation"
+)]
+
 use rune::Color;
 
 use crate::{Palette, PaletteEntry, PaletteKey, Theme, palette_matches};
@@ -251,8 +256,7 @@ fn select_overlays_show_choices_apply_them_and_dismiss() {
     assert_eq!(element(&rt, "theme").expanded, Some(false));
     assert_eq!(rt.find("theme-menu"), None);
     assert_eq!(rt.find("option-1"), None);
-    for (cycle, outside) in [false, true].into_iter().enumerate() {
-        let time = 1.0 + cycle as f64;
+    for (time, outside) in [(1.0, false), (2.0, true)] {
         click(&mut rt, "theme");
         rt.frame(time);
         assert!(rt.find("theme-menu").is_some());

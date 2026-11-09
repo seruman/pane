@@ -310,32 +310,42 @@ impl Slider {
         let change = std::rc::Rc::new(f);
         let step = change.clone();
         self.change = Some(Box::new(move |e: El| {
-            e.on_step(move |s: &mut S, steps, _| step(s, (v + steps as f32 * 0.01).clamp(0.0, 1.0)))
-                .on_drag(move |s: &mut S, d: &mut Drag, tx| {
-                    let to_value =
-                        |x: f32| ((x - KNOB / 2.0) / (d.w - KNOB).max(1.0)).clamp(0.0, 1.0);
-                    match d.phase {
-                        Phase::Down => {
-                            d.data = v;
-                            change(s, to_value(d.x));
-                        }
-                        Phase::Move => {
-                            change(s, to_value(d.x));
-                            tx.instant();
-                        }
-                        Phase::Up => {
-                            if d.cancelled() {
-                                change(s, d.data);
-                            }
+            e.on_step(move |s: &mut S, steps, _| {
+                #[allow(
+                    clippy::cast_precision_loss,
+                    reason = "At most 100 steps reach either end of the 0 to 1 slider"
+                )]
+                let steps = steps.clamp(-100, 100) as f32;
+                step(s, (v + steps * 0.01).clamp(0.0, 1.0));
+            })
+            .on_drag(move |s: &mut S, d: &mut Drag, tx| {
+                let to_value = |x: f32| ((x - KNOB / 2.0) / (d.w - KNOB).max(1.0)).clamp(0.0, 1.0);
+                match d.phase {
+                    Phase::Down => {
+                        d.data = v;
+                        change(s, to_value(d.x));
+                    }
+                    Phase::Move => {
+                        change(s, to_value(d.x));
+                        tx.instant();
+                    }
+                    Phase::Up => {
+                        if d.cancelled() {
+                            change(s, d.data);
                         }
                     }
-                })
+                }
+            })
         }));
         self
     }
 
     pub fn build(self, key: &str, theme: &Theme) -> El {
         let v = self.value;
+        #[allow(
+            clippy::cast_precision_loss,
+            reason = "Rune gradient positions use f32, including closely spaced stops"
+        )]
         let gradient: Vec<(f32, Color)> = if self.stops.len() >= 2 {
             let n = (self.stops.len() - 1) as f32;
             self.stops
@@ -347,7 +357,7 @@ impl Slider {
             vec![(0.0, theme.accent.alpha(0.35)), (1.0, theme.accent)]
         };
         let thumb_color = if self.stops.len() >= 2 {
-            self.stops[(v * (self.stops.len() - 1) as f32).round() as usize]
+            self.stops[gradient_index(v, self.stops.len())]
         } else {
             theme.accent
         };
@@ -417,6 +427,17 @@ impl Slider {
         }
         c.child(slider)
     }
+}
+
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Gradient positions use f32. Rounded indices are clamped to the last stop."
+)]
+fn gradient_index(value: f32, count: usize) -> usize {
+    let last = count - 1;
+    ((value * last as f32).round() as usize).min(last)
 }
 
 /// A colour to pick: the colour over its hex code, ringed in the accent while selected.
@@ -501,6 +522,31 @@ impl Swatch {
         match self.press {
             Some(press) => press(swatch),
             None => swatch,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gradient_index;
+
+    #[test]
+    fn a_large_gradient_keeps_its_endpoint_index_within_the_stops() {
+        let count = 16_777_220;
+        assert_eq!(gradient_index(1.0, count), count - 1);
+    }
+
+    #[test]
+    fn gradient_thumb_uses_the_nearest_stop() {
+        for (value, expected) in [
+            (0.0, 0),
+            (0.24, 0),
+            (0.25, 1),
+            (0.74, 1),
+            (0.75, 2),
+            (1.0, 2),
+        ] {
+            assert_eq!(gradient_index(value, 3), expected);
         }
     }
 }

@@ -1,5 +1,9 @@
 //! A terminal [`Palette`] and a snapshot of the shared [`Theme`] tokens derived from it.
 //! Components also use fixed sizes, type styles, and opacity values.
+#![allow(
+    clippy::unreadable_literal,
+    reason = "Six-digit RGB literals use the RRGGBB colour notation"
+)]
 
 use rune::color::{srgb_decode, srgb_encode};
 use rune::{Color, TerminalColors, TextStyle};
@@ -21,11 +25,12 @@ pub struct Palette {
 
 /// A colour from `0xRRGGBB`.
 pub fn rgb(value: u32) -> Color {
-    let channel = |shift: u32| srgb_decode(((value >> shift) & 0xff) as f32 / 255.0);
+    let [_, red, green, blue] = value.to_be_bytes();
+    let channel = |value: u8| srgb_decode(f32::from(value) / 255.0);
     Color {
-        r: channel(16),
-        g: channel(8),
-        b: channel(0),
+        r: channel(red),
+        g: channel(green),
+        b: channel(blue),
         a: 1.0,
     }
 }
