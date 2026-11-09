@@ -156,6 +156,53 @@ enum Overlay {
     ConfirmDelete,
 }
 
+enum Run {
+    Idle,
+    Starting,
+    Working { started: f64, now: f64 },
+    Done,
+}
+
+impl Run {
+    fn status(&self) -> Status {
+        match self {
+            Self::Idle => Status::Idle,
+            Self::Starting | Self::Working { .. } => Status::Working,
+            Self::Done => Status::Done,
+        }
+    }
+
+    fn progress(&self) -> f32 {
+        match self {
+            Self::Idle | Self::Starting => 0.0,
+            Self::Working { started, now } => {
+                ((now - started) / RUN_SECONDS).clamp(0.0, 1.0) as f32
+            }
+            Self::Done => 1.0,
+        }
+    }
+
+    fn advance(&mut self, time: f64) -> bool {
+        match self {
+            Self::Idle | Self::Done => return false,
+            Self::Starting => {
+                *self = Self::Working {
+                    started: time,
+                    now: time,
+                }
+            }
+            Self::Working { started, now } => {
+                if time - *started >= RUN_SECONDS {
+                    *self = Self::Done;
+                } else {
+                    *now = time;
+                }
+            }
+        }
+        true
+    }
+}
+
 struct State {
     filter: TextEdit,
     name: TextEdit,
@@ -165,16 +212,12 @@ struct State {
     tab: usize,
     theme: ThemeChoice,
     file: Option<usize>,
-    /// How far the pretend run has got, 0 to 1.
-    progress: f32,
+    run: Run,
     menu_selected: usize,
     sort_by_name: bool,
     notify: bool,
     autosave: bool,
     tasks: [bool; TASKS.len()],
-    status: Status,
-    /// When the pretend run finishes, on the app clock; set by `poll` once a run starts.
-    run_ends: Option<f64>,
     hue: f32,
     volume: f32,
     swatch: usize,
@@ -192,14 +235,12 @@ impl Default for State {
             tab: 0,
             theme: ThemeChoice::Terminal,
             file: Some(2),
-            progress: 0.0,
+            run: Run::Idle,
             menu_selected: 0,
             sort_by_name: true,
             notify: true,
             autosave: false,
             tasks: std::array::from_fn(|i| i == 0),
-            status: Status::Idle,
-            run_ends: None,
             hue: 0.7,
             volume: 0.4,
             swatch: 4,
@@ -210,7 +251,7 @@ impl Default for State {
 
 impl State {
     fn running(&self) -> bool {
-        self.status == Status::Working
+        self.run.status() == Status::Working
     }
 
     fn show_overlay(&mut self, overlay: Overlay) {
@@ -377,8 +418,7 @@ fn buttons(s: &State, theme: &Theme) -> El {
                 .icon(&icons::PLAY)
                 .disabled(running)
                 .on_press(|s: &mut State| {
-                    s.status = Status::Working;
-                    s.run_ends = None;
+                    s.run = Run::Starting;
                     s.toast = None;
                 })
                 .build("run", theme),
@@ -388,8 +428,7 @@ fn buttons(s: &State, theme: &Theme) -> El {
                 .tinted()
                 .disabled(!running)
                 .on_press(|s: &mut State| {
-                    s.status = Status::Idle;
-                    s.run_ends = None;
+                    s.run = Run::Idle;
                 })
                 .build("stop", theme),
         )
@@ -440,7 +479,7 @@ fn buttons(s: &State, theme: &Theme) -> El {
     rune::col()
         .gap(10.0)
         .child(buttons)
-        .child(progress_bar(s.progress, theme))
+        .child(progress_bar(s.run.progress(), theme))
 }
 
 fn settings(s: &State, theme: &Theme, layer: &mut Vec<El>) -> El {
@@ -600,8 +639,8 @@ fn statuses(s: &State, theme: &Theme) -> El {
             .child(text(label).font(theme.ty.body).color(theme.text))
     };
     let mut r = cluster(14.0).child(chip(
-        s.status,
-        format!("This program: {}", s.status.label()),
+        s.run.status(),
+        format!("This program: {}", s.run.status().label()),
     ));
     for status in [Status::Done, Status::Blocked, Status::Error] {
         r = r.child(chip(status, status.label().to_owned()));
@@ -665,18 +704,14 @@ fn palette(s: &State, theme: &Theme) -> El {
 
 /// Finishes the pretend run `RUN_SECONDS` after it starts.
 fn poll(s: &mut State, now: f64, tx: &mut Tx) -> bool {
-    if !s.running() {
+    if !s.run.advance(now) {
         return false;
     }
-    let ends = *s.run_ends.get_or_insert(now + RUN_SECONDS);
-    if now < ends {
-        s.progress = (1.0 - (ends - now) / RUN_SECONDS) as f32;
+    if s.running() {
         tx.wake_after(Duration::from_millis(50));
-        return true;
+    } else {
+        s.toast = Some("Run finished".to_owned());
     }
-    s.status = Status::Done;
-    s.run_ends = None;
-    s.toast = Some("Run finished".to_owned());
     true
 }
 
@@ -702,7 +737,7 @@ fn main() {
                 s.open_palette();
                 s.query.text = "te".to_owned();
             }),
-            ("running", |s| s.status = Status::Working),
+            ("running", |s| s.run = Run::Starting),
             ("toast", |s| s.toast = Some("Run finished".to_owned())),
             ("select", |s| s.show_overlay(Overlay::ThemeSelect)),
             ("dialog", |s| s.show_overlay(Overlay::ConfirmDelete)),
@@ -740,6 +775,43 @@ fn file_icon(name: &str) -> &'static rune::Icon {
 mod tests {
     use super::*;
     use rune::{Env, Runtime};
+
+    #[test]
+    fn finishing_a_run_fills_the_progress_bar() {
+        let mut state = State {
+            run: Run::Starting,
+            ..State::default()
+        };
+        let mut tx = Tx::default();
+        assert!(poll(&mut state, 10.0, &mut tx));
+        assert!(poll(&mut state, 11.0, &mut tx));
+        assert_eq!(state.run.progress(), 0.5);
+        assert!(poll(&mut state, 12.0, &mut tx));
+        assert_eq!(state.run.status(), Status::Done);
+        assert_eq!(state.run.progress(), 1.0);
+        assert!(!poll(&mut state, 13.0, &mut tx));
+    }
+
+    #[test]
+    fn stopping_and_restarting_a_run_resets_its_clock() {
+        let mut state = State {
+            run: Run::Starting,
+            ..State::default()
+        };
+        let mut tx = Tx::default();
+        poll(&mut state, 10.0, &mut tx);
+        poll(&mut state, 11.0, &mut tx);
+        state.run = Run::Idle;
+        assert!(!poll(&mut state, 12.0, &mut tx));
+        assert_eq!(state.run.progress(), 0.0);
+        assert!(state.toast.is_none());
+        state.run = Run::Starting;
+        assert_eq!(state.run.progress(), 0.0);
+        poll(&mut state, 20.0, &mut tx);
+        poll(&mut state, 21.0, &mut tx);
+        assert_eq!(state.run.status(), Status::Working);
+        assert_eq!(state.run.progress(), 0.5);
+    }
 
     #[test]
     fn changing_overlays_updates_palette_focus() {
