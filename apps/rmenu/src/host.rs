@@ -78,7 +78,7 @@ impl Menu {
         loop {
             if Instant::now() >= deadline {
                 if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
-                if let Some(wake) = &self.waker { wake(); }
+                self.waker.as_ref().expect("Menu::setup runs before poll")();
                 break;
             }
             match self.events.try_recv() {
@@ -149,13 +149,14 @@ impl Menu {
 
     fn spawn(&self, work: impl FnOnce(&Cancel, &dyn Fn(Event)) + Send + 'static) -> Running {
         let cancel = Cancel::default();
-        let (sender, waker) = (self.sender.clone(), self.waker.clone());
+        let sender = self.sender.clone();
+        let waker = self.waker.as_ref().expect("Menu::setup runs before effects").clone();
         let flag = cancel.clone();
         let thread = std::thread::spawn(move || {
             let emit = |event: Event| {
                 if flag.is_cancelled() { return; }
                 // The receiver only goes away as the process exits.
-                if sender.send(event).is_ok() && let Some(wake) = &waker { wake(); }
+                if sender.send(event).is_ok() { waker(); }
             };
             work(&flag, &emit);
         });
