@@ -142,6 +142,36 @@ fn lines_columns_and_counts() {
 }
 
 #[test]
+fn find_counts_survive_the_character_prompt() {
+    for keys in ["y2fn", "2yfn"] {
+        let mut v = Vim::default();
+        assert_eq!(yanked(press(&mut v, keys)), "fn main");
+        assert!(!v.is_pending());
+        press(&mut v, "G");
+        assert!(at(&v).starts_with("and more"));
+    }
+}
+
+#[test]
+fn vertical_moves_keep_the_requested_column() {
+    let text = "abcdef\nx\nuvwxyz";
+    for keys in ["jj", "yjjj"] {
+        let mut v = Vim::default();
+        v.set_cursor(4, text);
+        for c in keys.chars() {
+            v.key(
+                &KeyEvent {
+                    key: Key::Text(c.to_string()),
+                    mods: Mods::default(),
+                },
+                text,
+            );
+        }
+        assert_eq!(v.cursor(text), 13..14, "{keys}");
+    }
+}
+
+#[test]
 fn find_and_repeat() {
     let mut v = Vim::default();
     press(&mut v, "jfo");
