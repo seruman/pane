@@ -16,7 +16,7 @@ function ghqr --inherit-variable examples --description 'Pick a ghq repository, 
         printf 'ghqr: build rmenu first, or set RMENU_BIN\n' >&2
         return 127
     end
-    set -l query (string join ' ' -- $argv)
+    set -l query "$argv"
     # One private directory for the config and everything the picker hands back.
     set -l dir (command mktemp -d -t ghqr); or return
     function __ghqr_interrupted --on-signal INT -V dir

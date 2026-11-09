@@ -105,6 +105,14 @@ exit $code
                          f"0\0{self.selected}\0".encode())
         self.assertFalse(any("rex" in call for call in self.calls))
 
+    def test_queries_preserve_embedded_and_trailing_newlines(self):
+        for rex in (False, True):
+            for query in ("first\nsecond", "\nfirst\n\n", ""):
+                with self.subTest(rex=rex, query=query):
+                    self.log.unlink(missing_ok=True)
+                    result = self.run_picker(rex=rex, query=query)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_layer_preserves_query_and_closes(self):
         self.env["CHECK_RESULT"] = json.dumps({
             "action": "split-right", "source": "repos", "items": [{"value": str(self.selected)}]})
