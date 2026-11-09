@@ -72,16 +72,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reconciliation_owns_highlight_identity_and_position() {
+    fn reordered_rows_keep_the_highlighted_identity() {
         let items = Items::from(vec![MenuItem::new("a", "A"), MenuItem::new("b", "B")]);
         let mut selection = MenuSelection::default();
         selection.highlight(1, "b".into());
         selection.reconcile(&items, &[RowOffset(1), RowOffset(0)], Marks::Keep);
         assert_eq!(selection.highlighted_row(), Some(0));
+    }
+
+    #[test]
+    fn hidden_highlight_moves_to_the_first_visible_identity() {
+        let items = Items::from(vec![MenuItem::new("a", "A"), MenuItem::new("b", "B")]);
+        let mut selection = MenuSelection::default();
+        selection.highlight(0, "b".into());
         selection.reconcile(&items, &[RowOffset(0)], Marks::Keep);
         assert_eq!(selection.highlighted_row(), Some(0));
         selection.reconcile(&items, &[RowOffset(1), RowOffset(0)], Marks::Keep);
         assert_eq!(selection.highlighted_row(), Some(1));
+    }
+
+    #[test]
+    fn empty_visible_rows_clear_the_highlight() {
+        let items = Items::from(vec![MenuItem::new("a", "A"), MenuItem::new("b", "B")]);
+        let mut selection = MenuSelection::default();
+        selection.highlight(1, "a".into());
         selection.reconcile(&items, &[], Marks::Keep);
         assert_eq!(selection.highlighted_row(), None);
     }
