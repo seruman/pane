@@ -1,6 +1,9 @@
 //! Runs the model's effects: stdin and tasks on threads whose results come back as events
 //! through a channel, drained on the UI thread in `poll`.
 
+#[cfg(test)]
+mod tests;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -29,6 +32,11 @@ struct Running {
     thread: JoinHandle<()>,
 }
 
+enum Message {
+    Start(Vec<Effect>),
+    Event(Event),
+}
+
 /// The window's state: the model, the query field mirroring it, and the work in flight.
 pub struct Menu {
     /// Never freed: the menu lives until the process exits, and freeing millions of rows one
@@ -36,10 +44,9 @@ pub struct Menu {
     pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
-    events: Receiver<Event>,
-    sender: Sender<Event>,
+    events: Receiver<Message>,
+    sender: Sender<Message>,
     waker: Option<Waker>,
-    pending: Vec<Effect>,
     tasks: HashMap<TaskKind, Running>,
     stdin: Option<Running>,
     /// Cancelled tasks still finishing; joined before exit so their process groups are reaped.
@@ -50,11 +57,12 @@ pub struct Menu {
 
 impl Menu {
     pub fn new(launch: crate::cli::Launch) -> Menu {
-        let (model, pending) = Model::new(launch.options);
+        let (model, effects) = Model::new(launch.options);
         let (sender, events) = channel();
+        sender.send(Message::Start(effects)).expect("receiver was just created");
         let mut field = TextEdit::new(model.query());
         field.focused = true;
-        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, events, sender, waker: None, pending,
+        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, events, sender, waker: None,
                tasks: HashMap::new(), stdin: None, retired: Vec::new(), revealed: None }
     }
 
@@ -66,37 +74,32 @@ impl Menu {
     /// Drains finished work into the model; true when anything arrived.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = false;
-        let pending = std::mem::take(&mut self.pending);
-        if !pending.is_empty() {
-            self.apply(pending, tx);
-            changed = true;
-        }
         // A bounded slice of work per frame, so input queued behind a flood of stdin (Esc,
         // a quit) gets its turn; consecutive stdin batches become one append and one search.
         let deadline = Instant::now() + POLL_BUDGET;
         let mut batch: Vec<MenuItem> = Vec::new();
         loop {
-            if Instant::now() >= deadline {
-                if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
-                self.waker.as_ref().expect("Menu::setup runs before poll")();
-                break;
+            let next = loop {
+                if Instant::now() >= deadline {
+                    self.waker.as_ref().expect("Menu::setup runs before poll")();
+                    break None;
+                }
+                match self.events.try_recv() {
+                    Ok(Message::Event(Event::StdinItems(items))) => {
+                        if batch.is_empty() { batch = items; } else { batch.extend(items); }
+                        changed = true;
+                    }
+                    other => break other.ok(),
+                }
+            };
+            if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
+            match next {
+                Some(Message::Start(effects)) => self.apply(effects, tx),
+                Some(Message::Event(event)) => self.handle(event, tx),
+                None => break,
             }
-            match self.events.try_recv() {
-                Ok(Event::StdinItems(items)) => {
-                    if batch.is_empty() { batch = items; } else { batch.extend(items); }
-                    changed = true;
-                }
-                Ok(event) => {
-                    if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
-                    self.handle(event, tx);
-                    changed = true;
-                    if OUTCOME.lock().unwrap().is_some() { break; }
-                }
-                Err(_) => {
-                    if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
-                    break;
-                }
-            }
+            changed = true;
+            if OUTCOME.lock().unwrap().is_some() { break; }
         }
         changed
     }
@@ -156,7 +159,7 @@ impl Menu {
             let emit = |event: Event| {
                 if flag.is_cancelled() { return; }
                 // The receiver only goes away as the process exits.
-                if sender.send(event).is_ok() { waker(); }
+                if sender.send(Message::Event(event)).is_ok() { waker(); }
             };
             work(&flag, &emit);
         });
