@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuItem {
     pub id: String,
-    pub title: String,
+    title: String,
     /// Set only when it differs from the title: a plain line's value is its title, and
     /// storing it twice would double a large input's memory.
     value: Option<String>,
@@ -19,6 +19,8 @@ impl MenuItem {
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         MenuItem { id: id.into(), title: title.into(), value: None, subtitle: None, search: None, detail: None }
     }
+
+    pub fn title(&self) -> &str { &self.title }
 
     /// What choosing this row returns; the title unless the record gave a value.
     pub fn value(&self) -> &str { self.value.as_deref().unwrap_or(&self.title) }

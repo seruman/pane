@@ -153,10 +153,10 @@ impl Harness {
     }
 
     fn settled(&self) -> bool { self.model.can_act() && !self.model.is_searching() }
-    fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title.clone()).collect() }
+    fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect() }
     fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect() }
     fn marked(&self) -> HashSet<String> { self.model.shown.selection.checked.clone() }
-    fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title.clone()).collect() }
+    fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title().to_owned()).collect() }
 
     fn is_open(&self) -> bool { self.finished.is_none() }
 
@@ -467,7 +467,7 @@ fn reload_prunes_checks_even_when_query_changes_during_loading() {
     h.load(&jsonl(&[("a", "alpine")]));
     assert_eq!(h.model.result_revision(), revision + 1);
     assert_eq!(h.marked(), HashSet::from(["a".into()]));
-    assert_eq!(h.model.chosen()[0].title, "alpine");
+    assert_eq!(h.model.chosen()[0].title(), "alpine");
     assert_eq!(h.model.highlighted_row(), Some(0));
     assert!(!h.model.loading());
     assert!(h.settled());

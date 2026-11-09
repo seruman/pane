@@ -124,7 +124,7 @@ mod tests {
         Ok(items)
     }
 
-    fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(|i| i.title.as_str()).collect() }
+    fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(|i| i.title()).collect() }
 
     #[test]
     fn plain_streaming_at_every_chunk_size() {
@@ -133,7 +133,7 @@ mod tests {
             let items = decode(text, Lines, size).unwrap();
             assert_eq!(titles(&items), ["café", "東京🧑‍💻", "", "repeat", "repeat", "last"]);
             assert_eq!(items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["0", "1", "2", "3", "4", "5"]);
-            assert!(items.iter().all(|i| i.value() == i.title));
+            assert!(items.iter().all(|i| i.value() == i.title()));
         }
     }
 
@@ -141,8 +141,8 @@ mod tests {
     fn nul_preserves_newlines_and_cr() {
         let items = decode("a\r\n\0\0東京\0last\r".as_bytes(), Nul, 1).unwrap();
         assert_eq!(titles(&items), ["a\r\n", "", "東京", "last\r"]);
-        assert_eq!(decode(b"a\0b\n", Lines, 1).unwrap()[0].title, "a\0b");
-        assert_eq!(decode(b"a\r", Lines, 1).unwrap()[0].title, "a\r");
+        assert_eq!(decode(b"a\0b\n", Lines, 1).unwrap()[0].title(), "a\0b");
+        assert_eq!(decode(b"a\r", Lines, 1).unwrap()[0].title(), "a\r");
     }
 
     #[test]
@@ -220,7 +220,7 @@ mod tests {
         let block = [b'a'; 4096];
         let mut decoder = RecordDecoder::new(Lines);
         for _ in 0..limit / block.len() { assert!(decoder.append(&block).unwrap().is_empty()); }
-        assert_eq!(decoder.append(b"\n").unwrap()[0].title.len(), limit);
+        assert_eq!(decoder.append(b"\n").unwrap()[0].title().len(), limit);
         for _ in 0..limit / block.len() { assert!(decoder.append(&block).unwrap().is_empty()); }
         let too_large = RecordError::RecordTooLarge { record: 2 };
         assert_eq!(decoder.append(b"a"), Err(too_large.clone()));

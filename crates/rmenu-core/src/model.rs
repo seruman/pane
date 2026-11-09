@@ -334,7 +334,7 @@ impl Model {
         let label = source.map(|s| s.prompt.clone().unwrap_or_else(|| s.label.clone())).unwrap_or_default();
         let Some(first) = parent.chosen.first() else { return label };
         let more = if parent.chosen.len() > 1 { format!(" +{}", parent.chosen.len() - 1) } else { String::new() };
-        format!("{}{more} › {label}", first.title)
+        format!("{}{more} › {label}", first.title())
     }
 
     pub fn query(&self) -> &str { &self.query }

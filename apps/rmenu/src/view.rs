@@ -172,7 +172,7 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let mark = if selected { c.selected_text } else { c.accent };
     let (title_marks, subtitle_marks) = rmenu_core::search::item_highlights(query, item);
     let mut labels = col().grow(1.0).min_w(0.0).gap(0.0)
-        .child(matched(&item.title, title_marks, TITLE, text_color, mark));
+        .child(matched(item.title(), title_marks, TITLE, text_color, mark));
     if let Some(subtitle) = subtitle {
         labels = labels.child(matched(subtitle, subtitle_marks, SMALL, meta, mark));
     }

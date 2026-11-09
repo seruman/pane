@@ -48,7 +48,7 @@ impl Index<usize> for Items {
 mod tests {
     use super::*;
 
-    fn titles(items: &Items) -> Vec<String> { items.iter().map(|i| i.title.clone()).collect() }
+    fn titles(items: &Items) -> Vec<String> { items.iter().map(|i| i.title().to_owned()).collect() }
 
     #[test]
     fn appends_past_chunks_index_in_order_and_leave_snapshots_alone() {
@@ -57,8 +57,8 @@ mod tests {
         let snapshot = items.clone();
         items.extend([MenuItem::new("x", "late")]);
         assert_eq!(items.iter().count(), CHUNK + 6);
-        assert_eq!(items[CHUNK + 5].title, "late");
-        assert_eq!(items[CHUNK].title, format!("t{CHUNK}"));
+        assert_eq!(items[CHUNK + 5].title(), "late");
+        assert_eq!(items[CHUNK].title(), format!("t{CHUNK}"));
         assert_eq!(snapshot.iter().count(), CHUNK + 5);
         assert_eq!(titles(&snapshot).last().unwrap(), &format!("t{}", CHUNK + 4));
     }

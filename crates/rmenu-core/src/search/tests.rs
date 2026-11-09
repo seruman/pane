@@ -190,7 +190,7 @@ fn item_highlights_follow_the_text_the_row_matched() {
     let marked = |query, item: &MenuItem| {
         let (title, subtitle) = super::item_highlights(query, item);
         let sub = item.subtitle.as_deref().unwrap_or("");
-        (title.into_iter().map(|r| item.title[r].to_owned()).collect::<Vec<_>>(),
+        (title.into_iter().map(|r| item.title()[r].to_owned()).collect::<Vec<_>>(),
          subtitle.into_iter().map(|r| sub[r].to_owned()).collect::<Vec<_>>())
     };
     let mut item = MenuItem::new("1", "a");

@@ -62,13 +62,13 @@ fn highlights(query: &str, text: &str) -> Vec<Range<usize>> {
 /// both fields marks both. A `search` override isn't shown, so each field is matched on its own.
 pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<Range<usize>>) {
     let subtitle = item.subtitle.as_deref().unwrap_or("");
-    if item.search.is_some() { return (highlights(query, &item.title), highlights(query, subtitle)); }
+    if item.search.is_some() { return (highlights(query, item.title()), highlights(query, subtitle)); }
     let ranges = highlights(query, &item.search_text());
     let split = |field: Range<usize>| -> Vec<Range<usize>> {
         ranges.iter().map(|r| r.start.max(field.start)..r.end.min(field.end)).filter(|r| !r.is_empty())
             .map(|r| r.start - field.start..r.end - field.start).collect()
     };
-    let title = item.title.len();
+    let title = item.title().len();
     (split(0..title), split(title + 1..title + 1 + subtitle.len()))
 }
 
