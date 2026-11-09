@@ -180,11 +180,6 @@ impl SearchIndex {
         }
         Ok(out)
     }
-
-    #[cfg(test)]
-    fn scored_matches(&self, query: &str) -> Vec<(RowOffset, u32)> {
-        self.ranked(query, Order::Ranked, &|| false).unwrap().into_iter().map(|m| (m.offset, m.score)).collect()
-    }
 }
 
 struct Ranked {

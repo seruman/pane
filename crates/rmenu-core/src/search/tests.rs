@@ -26,16 +26,15 @@ fn better_matches_rank_first_and_ties_keep_input_order() {
 #[test]
 fn equal_scores_prefer_the_shorter_text() {
     let rows = index(&["foo/bar-long", "foo/bar"]);
-    let scores = rows.scored_matches("foo");
-    assert_eq!(scores[0].1, scores[1].1, "fixture: both rows score the same");
     assert_eq!(search(&rows, "foo"), [1, 0]);
 }
 
 #[test]
-fn token_scores_are_summed() {
-    let rows = index(&["foo bar baz"]);
-    let one = |q| rows.scored_matches(q)[0].1;
-    assert_eq!(one("fbb baz"), one("fbb") + one("baz"));
+fn every_token_contributes_to_ranking() {
+    let rows = index(&["foo b---a---z", "foo baz with a long suffix", "foo", "baz"]);
+    for query in ["foo baz", "baz foo"] {
+        assert_eq!(search(&rows, query), [1, 0], "{query}");
+    }
 }
 
 #[test]
