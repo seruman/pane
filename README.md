@@ -1,6 +1,6 @@
 # pane
 
-Markdown readers and review tools for [Rune](https://github.com/knipknap/rune).
+Markdown readers and review tools for [Rune](https://github.com/anomalyco/rune).
 The apps draw inside terminals that support the kitty graphics protocol, including
 Rex, Superlogical's terminal multiplexer. They use the terminal's colours.
 
