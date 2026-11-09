@@ -68,7 +68,14 @@ impl MenuItem {
         self.trailing = trailing;
         self
     }
+    /// Marks a byte range in the label. Panics if it is out of bounds or splits a character.
     pub fn highlight(mut self, range: Option<Range<usize>>) -> Self {
+        if let Some(range) = &range {
+            assert!(
+                self.label.get(range.clone()).is_some(),
+                "highlight must be a byte range within the label on UTF-8 boundaries"
+            );
+        }
         self.highlight = range;
         self
     }
@@ -123,13 +130,7 @@ impl MenuItem {
         }
         let label = &self.label;
         let style = theme.ty.row;
-        let label_el = match self.highlight.filter(|r| {
-            !self.selected
-                && !r.is_empty()
-                && r.end <= label.len()
-                && label.is_char_boundary(r.start)
-                && label.is_char_boundary(r.end)
-        }) {
+        let label_el = match self.highlight.filter(|_| !self.selected) {
             Some(r) => row()
                 .child(text(&label[..r.start]).font(style).color(fg))
                 .child(

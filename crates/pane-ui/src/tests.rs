@@ -218,6 +218,12 @@ fn select_toggle_opens_and_escape_closes_repeatedly() {
 }
 
 #[test]
+#[should_panic(expected = "highlight must be a byte range within the label")]
+fn menu_highlights_reject_split_unicode_characters() {
+    crate::MenuItem::new("éclair").highlight(Some(1..2));
+}
+
+#[test]
 fn a_menu_item_reads_as_checked_until_checked_false() {
     let on = a11y(
         |t| crate::MenuItem::new("Wrap").checked(true).build("wrap", t),
