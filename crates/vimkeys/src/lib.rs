@@ -131,23 +131,21 @@ enum Pending<A> {
 /// The state: mode, cursor, selection anchor and whatever keys are half typed, with the keymap
 /// that says what keys do. Positions are byte offsets into the text passed with each key.
 #[derive(Clone, Debug)]
+#[must_use]
 pub struct Vim<A = NoAction, O = A> {
     keymap: Keymap<A, O>,
     mode: Mode,
     cursor: usize,
     anchor: usize,
-    /// The column `j` and `k` aim for.
-    want_col: usize,
+    goal_column: usize,
     count: Option<usize>,
 
     pending: Pending<O>,
     last_find: Option<(Find, char)>,
 
     search: Search,
-    /// [`Vim::skip_blank_lines`].
-    skip_blank: bool,
-    /// Lines Ctrl-D and Ctrl-U move: half of [`Vim::page_lines`].
-    half_page: usize,
+    skip_blank_lines: bool,
+    half_page_lines: usize,
     message: Option<String>,
 }
 
@@ -164,13 +162,13 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             mode: Mode::Normal,
             cursor: 0,
             anchor: 0,
-            want_col: 0,
+            goal_column: 0,
             count: None,
             pending: Pending::None,
             last_find: None,
             search: Search::default(),
-            skip_blank: false,
-            half_page: 15,
+            skip_blank_lines: false,
+            half_page_lines: 15,
             message: None,
         }
     }
@@ -179,14 +177,14 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     /// and `{` `}` go to the start of the previous and next paragraph. For text whose blank
     /// lines only separate blocks and draw nothing, such as a rendered page.
     pub fn skip_blank_lines(mut self, on: bool) -> Self {
-        self.skip_blank = on;
+        self.skip_blank_lines = on;
         self
     }
 
     /// The page Ctrl-D and Ctrl-U move half of, in lines: the app's view of the text. Without
     /// one they move 15 lines.
     pub fn page_lines(mut self, lines: usize) -> Self {
-        self.half_page = (lines / 2).max(1);
+        self.half_page_lines = (lines / 2).max(1);
         self
     }
 
@@ -282,7 +280,6 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 HintsFor::Mode(self.mode()),
                 self.keymap.hints(Table::Visual),
             )),
-            // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
                 Some((header, self.keymap.next(self.table(), &[])))
             }
@@ -342,7 +339,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
         let i = b.index(at);
         self.cursor = b.byte(i);
-        self.want_col = i - b.line_start(i);
+        self.goal_column = i - b.line_start(i);
         self.mode = Mode::Normal;
         self.reset_pending();
     }
@@ -391,14 +388,13 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
         if ev.key == Key::Escape {
             let busy = self.is_pending() || self.visual();
-            // With nothing else to cancel, Escape hides the search's matches, as `:noh` does.
-            let shown = !busy && !self.search.hidden && !self.search.query.text.is_empty();
-            if shown {
+            let hide_matches = !busy && !self.search.hidden && !self.search.query.text.is_empty();
+            if hide_matches {
                 self.search.hidden = true;
             }
             self.reset_pending();
             self.mode = Mode::Normal;
-            return (busy || shown).then_some(VimEffect::Consumed);
+            return (busy || hide_matches).then_some(VimEffect::Consumed);
         }
         let stroke = Stroke::from_event(ev)?;
 
@@ -433,10 +429,9 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             (Pending::Keys(typed), stroke) => self.lookup(stroke, typed, text, &b),
             (Pending::Operator { op, mut typed }, stroke) => {
                 typed.push(stroke);
-                // The operator's keys again, or its last key, take the line (`yy`, `cc`, `gyy`
-                // and `gygy`), as Vim's `gUU` and `gUgU` do.
                 let last = &op.keys[op.keys.len() - 1..];
-                if typed == op.keys || typed == last {
+                let operator_takes_line = typed == op.keys || typed == last;
+                if operator_takes_line {
                     return Some(self.operate_lines(op.op, op.count, text, &b));
                 }
                 let line_prefix = op.keys.starts_with(&typed);
@@ -506,7 +501,6 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 self.pending = Pending::Keys(typed);
                 Some(VimEffect::Consumed)
             }
-            // An unbound first key is the app's; a sequence that went nowhere is dropped.
             Lookup::None if first && self.count.is_none() => None,
             Lookup::None => Some(self.cancel()),
         }
@@ -647,24 +641,23 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             Motion::Right => ((cur + n).min(b.line_last(cur)), Kind::Exclusive),
             Motion::Down | Motion::Up | Motion::HalfPageDown | Motion::HalfPageUp => {
                 let step = if matches!(m, Motion::HalfPageDown | Motion::HalfPageUp) {
-                    self.half_page * n
+                    self.half_page_lines * n
                 } else {
                     n
                 };
                 let down = matches!(m, Motion::Down | Motion::HalfPageDown);
                 let line = b.line_of(cur);
-                let line = if self.skip_blank {
-                    // Count only lines that draw something.
-                    let solid: Vec<usize> = (0..b.line_count())
-                        .filter(|&l| !b.blank_line(b.nth_line(l)))
+                let line = if self.skip_blank_lines {
+                    let drawn_lines: Vec<usize> = (0..b.line_count())
+                        .filter(|&line| !b.blank_line(b.nth_line(line)))
                         .collect();
-                    let here = solid.partition_point(|&l| l < line);
+                    let here = drawn_lines.partition_point(|&candidate| candidate < line);
                     let to = if down {
-                        (here + step).min(solid.len().saturating_sub(1))
+                        (here + step).min(drawn_lines.len().saturating_sub(1))
                     } else {
                         here.saturating_sub(step)
                     };
-                    solid.get(to).copied().unwrap_or(line)
+                    drawn_lines.get(to).copied().unwrap_or(line)
                 } else if down {
                     (line + step).min(b.line_count() - 1)
                 } else {
@@ -672,7 +665,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 };
                 let start = b.nth_line(line);
                 (
-                    start + self.want_col.min(b.line_last(start) - start),
+                    start + self.goal_column.min(b.line_last(start) - start),
                     Kind::Linewise,
                 )
             }
@@ -706,10 +699,10 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 let big = m == Motion::BigWordEnd;
                 (repeat(n, cur, |i| word_end(b, i, big)), Kind::Inclusive)
             }
-            Motion::ParagraphForward if self.skip_blank => {
+            Motion::ParagraphForward if self.skip_blank_lines => {
                 (repeat(n, cur, |i| next_paragraph(b, i)), Kind::Exclusive)
             }
-            Motion::ParagraphBackward if self.skip_blank => (
+            Motion::ParagraphBackward if self.skip_blank_lines => (
                 repeat(n, cur, |i| previous_paragraph(b, i)),
                 Kind::Exclusive,
             ),
@@ -790,7 +783,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             return self.apply(op.op, range, kind == Kind::Linewise, text, b, keep_column);
         }
         let mut target = target.min(b.n() - 1);
-        if self.skip_blank && b.at(target) == '\n' && b.blank_line(target) {
+        if self.skip_blank_lines && b.at(target) == '\n' && b.blank_line(target) {
             let solid = |j: &usize| b.chars[*j] != '\n';
             let ahead = (target..b.n()).find(solid);
             let behind = (0..target).rev().find(solid);
@@ -803,7 +796,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
         self.cursor = b.byte(target);
         if !keep_column {
-            self.want_col = target - b.line_start(target);
+            self.goal_column = target - b.line_start(target);
         }
         self.cancel()
     }
@@ -868,7 +861,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         self.mode = Mode::Normal;
         self.cursor = b.byte(b.index(range.start));
         if !keep_column {
-            self.want_col = b.index(range.start) - b.line_start(b.index(range.start));
+            self.goal_column = b.index(range.start) - b.line_start(b.index(range.start));
         }
         match op {
             Operator::Yank | Operator::YankSource => {
@@ -1145,19 +1138,19 @@ fn repeat(n: usize, from: usize, step: impl Fn(usize) -> usize) -> usize {
     (0..n).fold(from, |i, _| step(i))
 }
 
-fn word_forward(b: &Buf, i: usize, big: bool) -> usize {
-    let n = b.n();
-    let mut j = i;
-    let c = class(b.at(j), big);
-    if c != CharClass::Space {
-        while j < n && class(b.at(j), big) == c {
-            j += 1;
+fn word_forward(buffer: &Buf, start: usize, big: bool) -> usize {
+    let end = buffer.n();
+    let mut cursor = start;
+    let word_class = class(buffer.at(cursor), big);
+    if word_class != CharClass::Space {
+        while cursor < end && class(buffer.at(cursor), big) == word_class {
+            cursor += 1;
         }
     }
-    while j < n && class(b.at(j), big) == CharClass::Space {
-        j += 1;
+    while cursor < end && class(buffer.at(cursor), big) == CharClass::Space {
+        cursor += 1;
     }
-    j.min(n - 1)
+    cursor.min(end - 1)
 }
 
 fn word_backward(b: &Buf, i: usize, big: bool) -> usize {
@@ -1175,20 +1168,20 @@ fn word_backward(b: &Buf, i: usize, big: bool) -> usize {
     j
 }
 
-fn word_end(b: &Buf, i: usize, big: bool) -> usize {
-    let n = b.n();
-    let mut j = i + 1;
-    while j < n && class(b.at(j), big) == CharClass::Space {
-        j += 1;
+fn word_end(buffer: &Buf, start: usize, big: bool) -> usize {
+    let end = buffer.n();
+    let mut cursor = start + 1;
+    while cursor < end && class(buffer.at(cursor), big) == CharClass::Space {
+        cursor += 1;
     }
-    if j >= n {
-        return n - 1;
+    if cursor >= end {
+        return end - 1;
     }
-    let c = class(b.at(j), big);
-    while j + 1 < n && class(b.at(j + 1), big) == c {
-        j += 1;
+    let word_class = class(buffer.at(cursor), big);
+    while cursor + 1 < end && class(buffer.at(cursor + 1), big) == word_class {
+        cursor += 1;
     }
-    j
+    cursor
 }
 
 /// The next (or previous) blank line.
@@ -1252,18 +1245,24 @@ fn previous_paragraph(b: &Buf, i: usize) -> usize {
     b.nth_line(first_of(line))
 }
 
-fn find_char(b: &Buf, cur: usize, find: Find, c: char, n: usize) -> Option<usize> {
-    let (s, e) = (b.line_start(cur), b.line_end(cur));
-    let mut at = cur;
-    for k in 0..n {
-        // `t` again from just before a match moves on to the next one.
-        let skip = usize::from(k == 0 && find.till());
+fn find_char(
+    buffer: &Buf,
+    cursor: usize,
+    find: Find,
+    character: char,
+    count: usize,
+) -> Option<usize> {
+    let (line_start, line_end) = (buffer.line_start(cursor), buffer.line_end(cursor));
+    let mut at = cursor;
+    for occurrence in 0..count {
+        let skip_adjacent_match = usize::from(occurrence == 0 && find.till());
         at = if find.forward() {
-            (at + 1 + skip..e).find(|&j| b.chars[j] == c)?
+            (at + 1 + skip_adjacent_match..line_end)
+                .find(|&index| buffer.chars[index] == character)?
         } else {
-            (s..at.saturating_sub(skip))
+            (line_start..at.saturating_sub(skip_adjacent_match))
                 .rev()
-                .find(|&j| b.chars[j] == c)?
+                .find(|&index| buffer.chars[index] == character)?
         };
     }
     Some(match find {
@@ -1304,22 +1303,21 @@ fn match_bracket(b: &Buf, cur: usize) -> Option<usize> {
     }
 }
 
-/// The word (or space run) under `i`.
-fn word_at(b: &Buf, i: usize, big: bool) -> Option<Range<usize>> {
-    if b.at(i) == '\n' {
+fn word_at(buffer: &Buf, cursor: usize, big: bool) -> Option<Range<usize>> {
+    if buffer.at(cursor) == '\n' {
         return None;
     }
-    let c = class(b.at(i), big);
-    let (s, e) = (b.line_start(i), b.line_end(i));
-    let mut lo = i;
-    while lo > s && class(b.at(lo - 1), big) == c {
-        lo -= 1;
+    let word_class = class(buffer.at(cursor), big);
+    let (line_start, line_end) = (buffer.line_start(cursor), buffer.line_end(cursor));
+    let mut start = cursor;
+    while start > line_start && class(buffer.at(start - 1), big) == word_class {
+        start -= 1;
     }
-    let mut hi = i + 1;
-    while hi < e && class(b.at(hi), big) == c {
-        hi += 1;
+    let mut end = cursor + 1;
+    while end < line_end && class(buffer.at(end), big) == word_class {
+        end += 1;
     }
-    Some(lo..hi)
+    Some(start..end)
 }
 
 /// A text object at `cur`, as character indices.
@@ -1381,21 +1379,21 @@ fn text_object(b: &Buf, cur: usize, object: Object, around: bool) -> Option<Rang
             if !around {
                 return Some(word);
             }
-            // `aw` takes the space after the word, or before it at the end of a line.
-            let e = b.line_end(cur);
-            let mut hi = word.end;
-            while hi < e && b.at(hi).is_whitespace() {
-                hi += 1;
+            let line_end = b.line_end(cur);
+            let mut trailing_space_end = word.end;
+            while trailing_space_end < line_end && b.at(trailing_space_end).is_whitespace() {
+                trailing_space_end += 1;
             }
-            if hi > word.end {
-                return Some(word.start..hi);
+            if trailing_space_end > word.end {
+                return Some(word.start..trailing_space_end);
             }
-            let s = b.line_start(cur);
-            let mut lo = word.start;
-            while lo > s && b.at(lo - 1).is_whitespace() {
-                lo -= 1;
+            let line_start = b.line_start(cur);
+            let mut leading_space_start = word.start;
+            while leading_space_start > line_start && b.at(leading_space_start - 1).is_whitespace()
+            {
+                leading_space_start -= 1;
             }
-            Some(lo..word.end)
+            Some(leading_space_start..word.end)
         }
         Object::Paragraph => {
             let blank = b.blank_line(cur);

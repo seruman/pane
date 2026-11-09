@@ -386,6 +386,7 @@ pub(crate) enum Lookup<T> {
 ///     .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit");
 /// ```
 #[derive(Clone, Debug)]
+#[must_use]
 pub struct Keymap<A, O = A> {
     leader: KeyStroke,
     tables: [Vec<Binding<Command<A, O>>>; 2],
@@ -831,14 +832,13 @@ fn check<C>(name: &str, list: &[Binding<C>], leader: KeyStroke) {
             } else {
                 (b, a)
             };
-            if starts(&long.keys, &short.keys, leader) {
-                panic!(
-                    "{name}: {} starts {}; with no timeout, {} could never be typed",
-                    render(&short.keys, leader),
-                    render(&long.keys, leader),
-                    render(&long.keys, leader)
-                );
-            }
+            assert!(
+                !starts(&long.keys, &short.keys, leader),
+                "{name}: {} starts {}. With no timeout, {} could never be typed",
+                render(&short.keys, leader),
+                render(&long.keys, leader),
+                render(&long.keys, leader)
+            );
         }
     }
 }

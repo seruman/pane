@@ -886,7 +886,7 @@ fn objects_are_their_own_table() {
 #[test]
 #[should_panic(expected = "]c")]
 fn a_binding_that_starts_another_panics() {
-    let _ = Keymap::<Act>::vim()
+    let _keys = Keymap::<Act>::vim()
         .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::Next, None)
         .action(&[Stroke::Char(']')], Act::Quit, None);
 }
@@ -894,7 +894,7 @@ fn a_binding_that_starts_another_panics() {
 #[test]
 #[should_panic(expected = "starts with a digit")]
 fn a_binding_on_a_digit_panics() {
-    let _ = Keymap::<Act>::vim().action(&[Stroke::Char('1')], Act::Quit, None);
+    let _keys = Keymap::<Act>::vim().action(&[Stroke::Char('1')], Act::Quit, None);
 }
 
 #[test]
@@ -916,7 +916,7 @@ fn rebinding_replaces_and_unbinding_drops() {
 #[test]
 #[should_panic(expected = ",q")]
 fn a_leader_vim_already_uses_panics() {
-    let _ = Keymap::<Act>::vim()
+    let _keys = Keymap::<Act>::vim()
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None)
         .leader(KeyStroke::Char(','));
 }
@@ -1092,7 +1092,7 @@ fn half_a_page_is_the_page_the_app_sets() {
 #[test]
 #[should_panic(expected = "OtherEnd")]
 fn binding_other_end_outside_visual_mode_panics() {
-    let _ = Keymap::<NoAction>::vim().bind(
+    let _keys = Keymap::<NoAction>::vim().bind(
         Table::Normal,
         &[Stroke::Char('o')],
         Command::OtherEnd,
@@ -1103,7 +1103,7 @@ fn binding_other_end_outside_visual_mode_panics() {
 #[test]
 #[should_panic(expected = "Lines")]
 fn binding_a_lines_operator_in_visual_mode_panics() {
-    let _ = Keymap::<NoAction>::vim().bind(
+    let _keys = Keymap::<NoAction>::vim().bind(
         Table::Visual,
         &[Stroke::Char('Y')],
         Command::Lines(Operator::Yank),
