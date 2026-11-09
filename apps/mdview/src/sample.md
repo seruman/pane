@@ -17,12 +17,14 @@ such as https://github.com/anomalyco/rune.
 
 Tick a box: with a file open, the change is written back.
 
-## Frame timing
+## Example timings
 
-| Build | Click → frame | Hover → frame | Startup |
-| :---- | ------------: | ------------: | ------: |
-| GPUI  |       10.4 ms |       10.8 ms |   80 ms |
-| Rune  |        6.1 ms |        5.8 ms |   51 ms |
+These made-up values demonstrate table alignment. They are not measurements.
+
+| Build   | Click to frame | Hover to frame | Startup |
+| :------ | -------------: | -------------: | ------: |
+| Build A |        10.4 ms |        10.8 ms |   80 ms |
+| Build B |         6.1 ms |         5.8 ms |   51 ms |
 
 ## Code
 
