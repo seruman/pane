@@ -81,7 +81,7 @@ pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<
     (split(0..title), split(title + 1..title + 1 + subtitle.len()))
 }
 
-/// Search was cancelled before finishing.
+/// The search stopped after its cancellation callback returned true.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cancelled;
 
@@ -92,9 +92,10 @@ pub enum Order {
 }
 
 impl SearchIndex {
-    /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
-    /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
-    /// Workers poll `cancelled` while matching. Single-chunk searches run on the caller.
+    /// Returns matching row offsets using nucleo's pattern syntax and smart case.
+    /// `Order::Ranked` sorts by descending summed score, then shorter text, then input order.
+    /// `Order::Input` keeps input order.
+    /// Workers check `cancelled` while matching. Single-chunk searches run on the calling thread.
     pub fn search(
         &self,
         query: &str,

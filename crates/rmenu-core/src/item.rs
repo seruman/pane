@@ -22,7 +22,7 @@ impl MenuItem {
         &self.title
     }
 
-    /// What choosing this row returns; the title unless the record gave a value.
+    /// Returns the value for this row, or its title if the record omitted a value.
     pub fn value(&self) -> &str {
         self.value.as_deref().unwrap_or(&self.title)
     }
@@ -34,7 +34,7 @@ impl MenuItem {
         self
     }
 
-    /// `search`, else the title and subtitle joined by a space.
+    /// Returns the search override, or the title and subtitle joined by a space.
     pub fn search_text(&self) -> String {
         match (&self.search, &self.subtitle) {
             (Some(search), _) => search.clone(),
@@ -89,7 +89,7 @@ impl<'de> Deserialize<'de> for MenuItem {
     }
 }
 
-/// One level of a pushed menu: what was chosen there, root first.
+/// Records the chosen items and query for one menu level.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathEntry {
     pub items: Vec<MenuItem>,
@@ -98,11 +98,12 @@ pub struct PathEntry {
     pub source: Option<String>,
 }
 
-/// JSON on command stdin and `--json` stdout.
+/// Commands receive this context as JSON on stdin, and `--json` prints it on stdout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionContext {
     pub action: String,
     pub items: Vec<MenuItem>,
+    /// Lists menu levels in root-first order.
     pub path: Vec<PathEntry>,
     pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -110,7 +111,9 @@ pub struct ActionContext {
 }
 
 impl ActionContext {
-    /// `MMENU_ACTION`, `MMENU_QUERY`, `MMENU_SOURCE`, `MMENU_VALUE`, `MMENU_ID`.
+    /// Returns command environment variables for this context.
+    /// `MMENU_VALUE` and `MMENU_ID` describe the first chosen item, or are empty when none exists.
+    /// `MMENU_SOURCE` is empty when the context has no source.
     pub fn environment(&self) -> Vec<(String, String)> {
         let first = self.items.first();
         [
@@ -125,6 +128,7 @@ impl ActionContext {
         .collect()
     }
 
+    /// Serializes JSON with sorted keys, unescaped slashes, and no trailing newline.
     pub fn json(&self) -> Vec<u8> {
         serde_json::to_vec(self).expect("an ActionContext is always representable")
     }

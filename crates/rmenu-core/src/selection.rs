@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use crate::item::MenuItem;
 use crate::items::{Items, RowOffset};
 
-/// Filtering never silently changes marked items.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MenuSelection {
     highlight: Option<Highlight>,
@@ -47,7 +46,9 @@ impl MenuSelection {
         }
     }
 
-    /// A highlight that isn't visible moves to the first visible row.
+    /// Keeps the highlighted identity if visible, or highlights the first visible row.
+    /// Clears the highlight when no rows are visible.
+    /// `Marks::Keep` preserves all marks. `Marks::Prune` removes marks for items absent from `items`.
     pub fn reconcile(&mut self, items: &Items, visible: &[RowOffset], marks: Marks) {
         if marks == Marks::Prune && !self.checked.is_empty() {
             let retained: HashSet<String> =
