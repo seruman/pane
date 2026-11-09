@@ -976,6 +976,33 @@ fn accept_at_depth_two_returns_the_path() {
 }
 
 #[test]
+fn global_marks_without_any_marks_accept_the_current_highlight() {
+    for output in [OutputFormat::Json, OutputFormat::Lines] {
+        let mut o = options(json!({
+            "sources": [repos(json!({})), hidden("child", json!({}))],
+            "bindings": [push_binding()], "marks": "global"
+        }));
+        o.output = output;
+        let mut h = Harness::new(o);
+        h.load(&jsonl(&REPOS));
+        h.perform(0);
+        h.load(&jsonl(&[("x", "xray"), ("y", "yankee")]));
+        h.highlight(1);
+        assert_eq!(h.model.marked_count(), 0, "output={output:?}");
+        h.nav(Nav::Accept);
+        match output {
+            OutputFormat::Json => {
+                let context = h.context();
+                assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["/v/y"]);
+                assert_eq!(context.path[0].items[0].value(), "/v/a");
+            }
+            OutputFormat::Lines => assert_eq!(h.output(), (0, "/v/y\n".into())),
+            OutputFormat::Nul => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn global_marks_include_the_current_levels_marks_in_plain_output() {
     let mut h = two_levels(MarkScope::Global, false);
     h.toggle(0);
