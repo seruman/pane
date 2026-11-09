@@ -18,7 +18,7 @@ pub struct SegmentedControl {
     selected: usize,
     size: ControlSize,
     fill: bool,
-    select: Option<Rc<dyn Fn(usize) -> Transform>>,
+    select: Option<crate::IndexedPress>,
 }
 
 impl SegmentedControl {
@@ -50,11 +50,7 @@ impl SegmentedControl {
     }
 
     pub fn on_select<S: 'static>(mut self, f: impl Fn(&mut S, usize) + 'static) -> Self {
-        let f = Rc::new(f);
-        self.select = Some(Rc::new(move |index| {
-            let f = f.clone();
-            Box::new(move |e: El| e.on_press(move |s: &mut S| f(s, index)))
-        }));
+        self.select = Some(crate::indexed_press(f));
         self
     }
 
@@ -141,7 +137,7 @@ pub struct Select {
     size: ControlSize,
     width: crate::layout::Width,
     toggle: Option<(Transform, Transform)>,
-    choose: Option<Rc<dyn Fn(usize) -> Transform>>,
+    choose: Option<crate::IndexedPress>,
 }
 
 impl Select {
@@ -198,11 +194,7 @@ impl Select {
 
     /// An option chosen, with its index.
     pub fn on_choose<S: 'static>(mut self, f: impl Fn(&mut S, usize) + 'static) -> Self {
-        let f = Rc::new(f);
-        self.choose = Some(Rc::new(move |index| {
-            let f = f.clone();
-            Box::new(move |e: El| e.on_press(move |s: &mut S| f(s, index)))
-        }));
+        self.choose = Some(crate::indexed_press(f));
         self
     }
 

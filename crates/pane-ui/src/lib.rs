@@ -56,3 +56,12 @@ pub use settings::*;
 pub use theme::*;
 
 type Transform<T = rune::El> = Box<dyn FnOnce(T) -> T>;
+type IndexedPress = std::rc::Rc<dyn Fn(usize) -> Transform>;
+
+fn indexed_press<S: 'static>(f: impl Fn(&mut S, usize) + 'static) -> IndexedPress {
+    let f = std::rc::Rc::new(f);
+    std::rc::Rc::new(move |index| {
+        let f = f.clone();
+        Box::new(move |element: rune::El| element.on_press(move |state: &mut S| f(state, index)))
+    })
+}

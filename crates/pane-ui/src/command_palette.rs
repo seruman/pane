@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use rune::{El, Icon, Key, TextEdit, el, row, text};
 
-use crate::{MenuItem, MenuTrailing, TextField, Theme, Transform, kbd, menu_section, popover};
+use crate::{MenuItem, MenuTrailing, TextField, Theme, kbd, menu_section, popover};
 
 /// One command in the palette.
 #[derive(Clone, Copy, Debug, Default)]
@@ -115,7 +115,7 @@ pub struct CommandPalette<'a> {
     selected: usize,
     hints: Vec<(String, String)>,
     width: f32,
-    choose: Option<std::rc::Rc<dyn Fn(usize) -> Transform>>,
+    choose: Option<crate::IndexedPress>,
 }
 
 impl<'a> CommandPalette<'a> {
@@ -175,11 +175,7 @@ impl<'a> CommandPalette<'a> {
 
     /// A row clicked, with its index in the entries.
     pub fn on_choose<S: 'static>(mut self, f: impl Fn(&mut S, usize) + 'static) -> Self {
-        let f = std::rc::Rc::new(f);
-        self.choose = Some(std::rc::Rc::new(move |index| {
-            let f = f.clone();
-            Box::new(move |e: El| e.on_press(move |s: &mut S| f(s, index)))
-        }));
+        self.choose = Some(crate::indexed_press(f));
         self
     }
 
