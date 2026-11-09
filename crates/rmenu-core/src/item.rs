@@ -29,6 +29,7 @@ impl MenuItem {
         self.value.as_deref().unwrap_or(&self.title)
     }
 
+    #[must_use]
     pub fn with_value(mut self, value: impl Into<String>) -> Self {
         let value = value.into();
         self.value = (value != self.title).then_some(value);
