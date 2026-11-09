@@ -1,5 +1,12 @@
 #!/bin/sh
-# Your ghq repositories in rmenu, with worktrees (Ctrl-W), a preview (Alt-P) and marks (Tab).
-# Prints the --json result; set RMENU_BIN to use another build.
-cd "$(dirname "$0")" || exit 1
-exec "${RMENU_BIN:-../../target/release/rmenu}" --config config.json --json "$@"
+here=$(cd "$(dirname "$0")" && pwd) || exit 1
+config=$(mktemp -t rmenu-repos.XXXXXX) || exit 1
+trap 'rm -f -- "$config"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+jq --arg here "$here" '
+    .sources[].command[0] |= ($here + "/" + ltrimstr("./")) |
+    .preview[0] |= ($here + "/" + ltrimstr("./"))
+' "$here/config.json" >"$config" || exit 1
+"${RMENU_BIN:-$here/../../target/release/rmenu}" --config "$config" --json "$@"

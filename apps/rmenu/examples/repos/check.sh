@@ -93,5 +93,6 @@ code=$?
 check "preview fails with a reason outside a repository" "$([ "$code" -ne 0 ] && [ -n "$err" ] && echo yes)" yes
 
 python3 "$here/../check-ghqr.py" || failed=1
+python3 "$here/check-run.py" || failed=1
 
 exit $failed
