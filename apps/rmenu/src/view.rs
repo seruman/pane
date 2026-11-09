@@ -105,7 +105,7 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
     let chip = match prompt.as_str() {
         "" => None,
         // The default prompt is a quiet marker, any other is a chip, as in mmenu.
-        ">" => Some(text(">").font(TITLE).color(c.secondary)),
+        crate::cli::DEFAULT_PROMPT => Some(text(crate::cli::DEFAULT_PROMPT).font(TITLE).color(c.secondary)),
         _ => Some(row().h(20.0).px(7.0).radius(6.0).center_y().fill(c.secondary.alpha(0.16)).max_w(360.0).min_w(0.0)
             .child(text(prompt).font(CHIP).color(c.foreground).truncate())),
     };

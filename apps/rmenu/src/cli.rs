@@ -4,6 +4,8 @@ use clap::{Parser, ValueEnum};
 use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::{Options, OutputFormat};
 
+pub const DEFAULT_PROMPT: &str = ">";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum Appearance {
     #[default]
@@ -109,7 +111,7 @@ impl Cli {
             .map_err(|source| LaunchError::Configuration { path: self.config, source })?;
         if configuration.root_source().is_none() && stdin_is_tty { return Err(LaunchError::MissingInput); }
         let multi = self.multi || configuration.multi();
-        let prompt = self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| ">".into());
+        let prompt = self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| DEFAULT_PROMPT.into());
         Ok(Launch {
             options: Options {
                 configuration,
