@@ -223,12 +223,7 @@ enum Status {
     /// Something failed or was refused and the user has to see it: kept until the next
     /// action replaces it.
     Error(String),
-}
-
-impl Status {
-    fn text(&self) -> &str {
-        match self { Status::Ack(s) | Status::Running(s) | Status::Error(s) => s }
-    }
+    StdinFailed,
 }
 
 struct SearchRun {
@@ -390,10 +385,15 @@ impl Model {
     pub fn loading(&self) -> bool { self.loading }
 
     /// A status or error line (`Copied 2`, `Command exited 1: ...`).
-    pub fn message(&self) -> Option<&str> { self.message.as_ref().map(Status::text) }
+    pub fn message(&self) -> Option<&str> {
+        match self.message.as_ref()? {
+            Status::Ack(text) | Status::Running(text) | Status::Error(text) => Some(text),
+            Status::StdinFailed => self.stdin_error(),
+        }
+    }
 
     /// The status line reports a failure, for drawing it as one.
-    pub fn message_is_error(&self) -> bool { matches!(self.message, Some(Status::Error(_))) }
+    pub fn message_is_error(&self) -> bool { matches!(self.message, Some(Status::Error(_) | Status::StdinFailed)) }
 
     /// Why piped stdin failed, if it did: what an exit 2 reports.
     pub fn stdin_error(&self) -> Option<&str> { self.stdin_error.as_deref() }
@@ -482,14 +482,14 @@ impl Model {
                 self.stdin_changed();
             }
             Event::StdinFailed(error) => {
-                self.stdin_error = Some(error.clone());
+                self.stdin_error = Some(error);
                 let (loading, failed, message) = match self.levels.first_mut() {
                     Some(root) => (&mut root.loading, &mut root.input_failed, &mut root.message),
                     None => (&mut self.loading, &mut self.input_failed, &mut self.message),
                 };
                 *loading = false;
                 *failed = true;
-                *message = Some(Status::Error(error));
+                *message = Some(Status::StdinFailed);
             }
             Event::SourceDone { token, result } => self.source_done(token, result),
             Event::SearchDone { token, results } => self.search_done(token, results),
