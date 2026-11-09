@@ -1056,14 +1056,8 @@ printf '%s\n' "$$" > "$1/leader"
                 } else {
                     "echo $$ > \"$1\"; while [ ! -e \"$2\" ]; do /bin/sleep 0.01; done; exec /bin/cat"
                 };
-                let argv = strings(&[
-                    "/bin/sh",
-                    "-c",
-                    script,
-                    "runner",
-                    marker.to_str().unwrap(),
-                    release.to_str().unwrap(),
-                ]);
+                let argv =
+                    strings(&["/bin/sh", "-c", script, "runner", marker.to_str().unwrap(), release.to_str().unwrap()]);
                 let cancel = Cancel::default();
                 let task_cancel = cancel.clone();
                 let handle = std::thread::spawn(move || {
