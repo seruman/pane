@@ -7,7 +7,7 @@
 
 use std::time::{Duration, Instant};
 
-use rmenu_core::command::{Cancel, run};
+use rmenu_core::command::{Cancel, Limits, run};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -17,7 +17,7 @@ fn main() {
     let mut failed = 0;
     let mut ms: Vec<f64> = (0..runs).map(|_| {
         let started = Instant::now();
-        match run(&argv, None, &[], Duration::from_secs(5), 1 << 20, &Cancel::default()) {
+        match run(&argv, None, &[], Limits { timeout: Duration::from_secs(5), output_bytes: 1 << 20 }, &Cancel::default()) {
             Ok(result) if result.status.success() => {}
             _ => failed += 1,
         }

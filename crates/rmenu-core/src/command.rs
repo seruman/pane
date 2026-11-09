@@ -238,11 +238,17 @@ fn set_nonblocking(fd: RawFd) -> Result<(), CommandError> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    pub timeout: Duration,
+    pub output_bytes: usize,
+}
+
 /// Runs `argv` without a shell, `env` overlaid on ours, PATH resolved from the overlay.
 /// `input: None` connects stdin to /dev/null: tools such as glow or bat prefer a piped stdin
 /// over their file arguments. The limit is shared by stdout and stderr. Blocks the calling thread.
-pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], timeout: Duration,
-           output_limit: usize, cancel: &Cancel) -> Result<CommandResult, CommandError> {
+pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], limits: Limits,
+           cancel: &Cancel) -> Result<CommandResult, CommandError> {
     if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
     if argv.first().is_none_or(|program| program.is_empty())
         || env.iter().any(|(k, _)| k.is_empty() || k.contains('=')) {
@@ -250,12 +256,12 @@ pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], time
     }
     let args: Vec<CString> = argv.iter().map(|a| CString::new(a.as_str())).collect::<Result<_, _>>()
         .map_err(|_| CommandError::InvalidArguments)?;
-    let deadline = Instant::now().checked_add(timeout);
+    let deadline = Instant::now().checked_add(limits.timeout);
     let (envp, path) = environment(env)?;
     let program = resolve(&argv[0], path.as_deref())?;
     let spawned = spawn(&program, &args, &envp, input.is_some())?;
     let mut group = Group { pid: spawned.pid, reaped: false };
-    pump(&mut group, spawned, input.unwrap_or_default(), deadline, output_limit, cancel)
+    pump(&mut group, spawned, input.unwrap_or_default(), deadline, limits.output_bytes, cancel)
 }
 
 /// Kills and reaps the whole process group unless the leader was reaped after a clean finish.
@@ -409,7 +415,7 @@ mod tests {
     fn run_with(argv: &[&str], input: Option<&[u8]>, env: &[(&str, &str)], timeout: Duration, limit: usize)
                 -> Result<CommandResult, CommandError> {
         let env: Vec<_> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        run(&strings(argv), input, &env, timeout, limit, &Cancel::default())
+        run(&strings(argv), input, &env, Limits { timeout, output_bytes: limit }, &Cancel::default())
     }
 
     fn quick(argv: &[&str]) -> Result<CommandResult, CommandError> {
@@ -683,7 +689,7 @@ mod tests {
         let cancel = Cancel::default();
         let task = {
             let cancel = cancel.clone();
-            std::thread::spawn(move || run(&argv, None, &[], Duration::from_secs(10), 1024, &cancel))
+            std::thread::spawn(move || run(&argv, None, &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1024 }, &cancel))
         };
         let leader = pids(&marker, 1);
         cancel.cancel();
@@ -738,7 +744,7 @@ printf '%s\n' "$$" > "$1/leader"
         let argv = descendant_command(&dir.0, "wait");
         let cancel = Cancel::default();
         let task = { let cancel = cancel.clone();
-                     std::thread::spawn(move || run(&argv, Some(b""), &[], Duration::from_secs(10), 1 << 20, &cancel)) };
+                     std::thread::spawn(move || run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel)) };
         let survivor = std::thread::spawn(|| quick(&["/bin/sh", "-c", "/bin/sleep 0.2; printf alive"]));
         let descendants = pids(&dir.0.join("descendants"), 2);
         let leader = pids(&dir.0.join("leader"), 1);
@@ -754,7 +760,7 @@ printf '%s\n' "$$" > "$1/leader"
     fn timeout_kills_descendants_even_after_leader_exits() {
         let dir = TempDir::new("timeout");
         let argv = descendant_command(&dir.0, "exit 0");
-        let result = run(&argv, Some(b""), &[], Duration::from_millis(300), 1 << 20, &Cancel::default());
+        let result = run(&argv, Some(b""), &[], Limits { timeout: Duration::from_millis(300), output_bytes: 1 << 20 }, &Cancel::default());
         assert!(matches!(result, Err(CommandError::TimedOut)), "inherited pipes stay subject to the timeout");
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
@@ -763,7 +769,7 @@ printf '%s\n' "$$" > "$1/leader"
     fn output_limit_kills_descendants() {
         let dir = TempDir::new("limit");
         let argv = descendant_command(&dir.0, "while [ ! -s \"$1/descendants\" ]; do /bin/sleep 0.01; done\nwhile :; do printf 1234567890; done");
-        let result = run(&argv, Some(b""), &[], Duration::from_secs(10), 128, &Cancel::default());
+        let result = run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 128 }, &Cancel::default());
         assert!(matches!(result, Err(CommandError::OutputLimitExceeded)));
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
@@ -775,7 +781,7 @@ printf '%s\n' "$$" > "$1/leader"
         let cancel = Cancel::default();
         cancel.cancel();
         let argv = strings(&["/usr/bin/touch", marker.to_str().unwrap()]);
-        assert!(matches!(run(&argv, Some(b""), &[], Duration::from_secs(10), 1 << 20, &cancel), Err(CommandError::Cancelled)));
+        assert!(matches!(run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel), Err(CommandError::Cancelled)));
         assert!(!marker.exists());
     }
 
@@ -785,7 +791,7 @@ printf '%s\n' "$$" > "$1/leader"
             let cancel = Cancel::default();
             if i % 2 == 0 { cancel.cancel(); }
             let input = i.to_string();
-            match run(&strings(&["/bin/cat"]), Some(input.as_bytes()), &[], Duration::from_secs(10), 1 << 20, &cancel) {
+            match run(&strings(&["/bin/cat"]), Some(input.as_bytes()), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel) {
                 Ok(result) => assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0))),
                 Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
                 Err(e) => panic!("{e}"),

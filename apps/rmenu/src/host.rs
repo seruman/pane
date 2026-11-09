@@ -235,13 +235,11 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     emit(Event::StdinDone);
 }
 
-const SOURCE_LIMIT: usize = 16 * 1024 * 1024;
-const PREVIEW_LIMIT: usize = 512 * 1024;
-const OPERATION_LIMIT: usize = 1024 * 1024;
+const SOURCE_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(30), output_bytes: 16 * 1024 * 1024 };
+const PREVIEW_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(5), output_bytes: 512 * 1024 };
+const OPERATION_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(30), output_bytes: 1024 * 1024 };
 
 fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
-    let run = |argv: &[String], input: Option<&[u8]>, env: &[(String, String)], timeout: u64, limit: usize|
-        command::run(argv, input, env, Duration::from_secs(timeout), limit, cancel);
     match task {
         Task::Search { token, index, query, sorted } => {
             if let Ok(results) = index.search(&query, sorted, &|| cancel.is_cancelled()) {
@@ -249,7 +247,7 @@ fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
             }
         }
         Task::Source { token, argv, input, env, format } => {
-            let result = match run(&argv, Some(&input), &env, 30, SOURCE_LIMIT) {
+            let result = match command::run(&argv, Some(&input), &env, SOURCE_LIMITS, cancel) {
                 Err(CommandError::Cancelled) => return,
                 Err(error) => Err(error.to_string()),
                 Ok(done) if !done.status.success() => Err(command_failure(&done)),
@@ -263,14 +261,14 @@ fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
                 if cancel.is_cancelled() { return; }
                 std::thread::sleep(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(5)));
             }
-            let result = match run(&argv, None, &env, 5, PREVIEW_LIMIT) {
+            let result = match command::run(&argv, None, &env, PREVIEW_LIMITS, cancel) {
                 Err(CommandError::Cancelled) => return,
                 result => result.map_err(|e| e.to_string()),
             };
             emit(Event::PreviewDone { token, result });
         }
         Task::Operation { token, argv, input, env } => {
-            let result = match run(&argv, Some(&input), &env, 30, OPERATION_LIMIT) {
+            let result = match command::run(&argv, Some(&input), &env, OPERATION_LIMITS, cancel) {
                 Err(CommandError::Cancelled) => return,
                 result => result.map_err(|e| e.to_string()),
             };
