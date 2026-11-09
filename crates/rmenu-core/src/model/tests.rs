@@ -294,38 +294,38 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         let (revision, items, marks) = (h.model.result_revision(), h.all_items(), h.marked());
         h.switch("next");
         h.query("a");
-        assert_eq!((h.model.result_revision(), h.all_items(), h.marked()), (revision, items.clone(), marks.clone()));
+        assert_eq!((h.model.result_revision(), h.all_items(), h.marked()), (revision, items.clone(), marks.clone()), "failure={failure:?}");
         match failure {
             None => h.load(""),
             Some(message) => h.fail_source(message),
         }
-        assert_eq!(h.model.result_revision(), revision + 1);
-        assert_eq!(h.model.result_count(), 0);
-        assert!(h.all_items().is_empty());
-        assert!(h.model.chosen().is_empty());
-        assert_eq!(h.model.highlighted_row(), None);
-        assert_eq!(h.model.shown.selection.highlighted_id, None);
-        assert!(h.marked().is_empty());
-        assert!(!h.model.loading());
-        assert!(!h.model.is_searching());
-        assert_eq!(h.model.input_failed(), failure.is_some());
-        assert_eq!(h.model.message(), failure);
-        assert_eq!(h.model.can_act(), failure.is_none());
+        assert_eq!(h.model.result_revision(), revision + 1, "failure={failure:?}");
+        assert_eq!(h.model.result_count(), 0, "failure={failure:?}");
+        assert!(h.all_items().is_empty(), "failure={failure:?}");
+        assert!(h.model.chosen().is_empty(), "failure={failure:?}");
+        assert_eq!(h.model.highlighted_row(), None, "failure={failure:?}");
+        assert_eq!(h.model.shown.selection.highlighted_id, None, "failure={failure:?}");
+        assert!(h.marked().is_empty(), "failure={failure:?}");
+        assert!(!h.model.loading(), "failure={failure:?}");
+        assert!(!h.model.is_searching(), "failure={failure:?}");
+        assert_eq!(h.model.input_failed(), failure.is_some(), "failure={failure:?}");
+        assert_eq!(h.model.message(), failure, "failure={failure:?}");
+        assert_eq!(h.model.can_act(), failure.is_none(), "failure={failure:?}");
 
         h.query("al");
         h.settle();
-        assert!(h.model.chosen().is_empty());
-        assert_eq!(h.model.can_act(), failure.is_none());
+        assert!(h.model.chosen().is_empty(), "failure={failure:?}");
+        assert_eq!(h.model.can_act(), failure.is_none(), "failure={failure:?}");
 
         // Failure is local to this source generation, not a permanent disabled state.
         h.switch("good");
         h.load(&jsonl(&[("a", "alpha")]));
         h.query("");
         h.settle();
-        assert!(h.settled());
-        assert_eq!(h.values(), ["/v/a"]);
-        assert!(h.marked().is_empty());
-        assert_eq!(h.model.message(), None);
+        assert!(h.settled(), "failure={failure:?}");
+        assert_eq!(h.values(), ["/v/a"], "failure={failure:?}");
+        assert!(h.marked().is_empty(), "failure={failure:?}");
+        assert_eq!(h.model.message(), None, "failure={failure:?}");
     }
 }
 
@@ -339,7 +339,7 @@ fn superseded_source_cannot_publish() {
         let late = h.source_event("bravo\n");
         let late = if during_matching {
             h.send(late);
-            assert!(h.model.is_searching());
+            assert!(h.model.is_searching(), "during_matching={during_matching}");
             let search = h.run_search();
             h.switch("c");
             search
@@ -348,16 +348,16 @@ fn superseded_source_cannot_publish() {
             late
         };
         h.send(late);
-        assert_eq!(h.model.result_revision(), revision, "a superseded source published");
-        assert_eq!(h.values(), ["alpha"]);
-        assert!(h.model.loading());
-        assert!(!h.model.can_act());
+        assert_eq!(h.model.result_revision(), revision, "a superseded source published, during_matching={during_matching}");
+        assert_eq!(h.values(), ["alpha"], "during_matching={during_matching}");
+        assert!(h.model.loading(), "during_matching={during_matching}");
+        assert!(!h.model.can_act(), "during_matching={during_matching}");
         h.load("charlie\n");
-        assert_eq!(h.model.result_revision(), revision + 1);
-        assert_eq!(h.model.source_id(), Some("c"));
-        assert_eq!(h.values(), ["charlie"]);
-        assert!(h.settled());
-        assert!(!h.model.loading());
+        assert_eq!(h.model.result_revision(), revision + 1, "during_matching={during_matching}");
+        assert_eq!(h.model.source_id(), Some("c"), "during_matching={during_matching}");
+        assert_eq!(h.values(), ["charlie"], "during_matching={during_matching}");
+        assert!(h.settled(), "during_matching={during_matching}");
+        assert!(!h.model.loading(), "during_matching={during_matching}");
     }
 }
 
@@ -488,16 +488,16 @@ fn values_containing_the_output_delimiter_are_never_written() {
         let rows = format!("{}\n{}\n", json!({"id": "1", "title": "bad", "value": unsafe_value}), json!({"id": "2", "title": "good", "value": "ok"}));
         h.load(&rows);
         h.nav(Nav::Accept);
-        assert!(h.is_open(), "an ambiguous record must not be emitted");
-        assert_eq!(h.beeps, 1);
-        let message = h.model.message().unwrap().to_owned();
-        assert!(message.contains("--json"));
-        assert_eq!(message.contains("--print0"), !print0);
+        assert!(h.is_open(), "an ambiguous record must not be emitted, print0={print0}");
+        assert_eq!(h.beeps, 1, "print0={print0}");
+        let message = h.model.message().unwrap_or_else(|| panic!("missing refusal, print0={print0}")).to_owned();
+        assert!(message.contains("--json"), "print0={print0}");
+        assert_eq!(message.contains("--print0"), !print0, "print0={print0}");
         h.nav(Nav::Down);
-        assert_eq!(h.model.message(), Some(message.as_str()), "the refusal survives a move");
-        assert!(h.model.message_is_error());
+        assert_eq!(h.model.message(), Some(message.as_str()), "the refusal survives a move, print0={print0}");
+        assert!(h.model.message_is_error(), "print0={print0}");
         h.nav(Nav::Accept);
-        assert_eq!(h.output(), (0, if print0 { "ok\0" } else { "ok\n" }.into()));
+        assert_eq!(h.output(), (0, if print0 { "ok\0" } else { "ok\n" }.into()), "print0={print0}");
     }
 }
 
@@ -662,7 +662,7 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
         let late = h.source_event(&jsonl(&[("l", "late-1")]));
         let late = if during_matching {
             h.send(late);
-            assert!(h.model.is_searching());
+            assert!(h.model.is_searching(), "during_matching={during_matching}");
             let search = h.run_search();
             h.nav(Nav::Back);
             search
@@ -673,10 +673,10 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
         let revision = h.model.result_revision();
         h.send(late);
         h.settle();
-        assert_eq!(h.model.result_revision(), revision, "a late child result was published");
-        assert_eq!((h.all_items(), h.marked()), (items, marks));
-        assert!(h.model.can_act());
-        assert_eq!(h.model.depth(), 0);
+        assert_eq!(h.model.result_revision(), revision, "a late child result was published, during_matching={during_matching}");
+        assert_eq!((h.all_items(), h.marked()), (items, marks), "during_matching={during_matching}");
+        assert!(h.model.can_act(), "during_matching={during_matching}");
+        assert_eq!(h.model.depth(), 0, "during_matching={during_matching}");
     }
 }
 
@@ -738,16 +738,16 @@ fn accept_at_depth_two_returns_the_path() {
         let mut h = two_levels(marks, true);
         h.perform(2);
         let context = h.context();
-        assert_eq!((context.action.as_str(), context.source.as_deref()), ("split-right", Some("grand")));
+        assert_eq!((context.action.as_str(), context.source.as_deref()), ("split-right", Some("grand")), "marks={marks:?}");
         let ids = |items: &[MenuItem]| items.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
-        assert_eq!(context.path.iter().map(|p| p.source.clone().unwrap()).collect::<Vec<_>>(), ["repos", "child", "grand"]);
-        assert_eq!(context.path.iter().map(|p| p.query.as_str()).collect::<Vec<_>>(), ["", "u", ""]);
-        assert_eq!(context.path.iter().map(|p| ids(&p.items)).collect::<Vec<_>>(), [vec!["b", "d"], vec!["z"], vec!["2"]]);
+        assert_eq!(context.path.iter().map(|p| p.source.as_deref()).collect::<Vec<_>>(), [Some("repos"), Some("child"), Some("grand")], "marks={marks:?}");
+        assert_eq!(context.path.iter().map(|p| p.query.as_str()).collect::<Vec<_>>(), ["", "u", ""], "marks={marks:?}");
+        assert_eq!(context.path.iter().map(|p| ids(&p.items)).collect::<Vec<_>>(), [vec!["b", "d"], vec!["z"], vec!["2"]], "marks={marks:?}");
         let expected = match marks {
             MarkScope::Level => vec!["2"],
             MarkScope::Global => vec!["b", "d", "z"],
         };
-        assert_eq!(ids(&context.items), expected);
+        assert_eq!(ids(&context.items), expected, "marks={marks:?}");
     }
 }
 
@@ -1085,12 +1085,12 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
         h.toggle(0);
         h.nav(Nav::Accept);
         if let Some(expected) = expected {
-            assert_eq!(h.output(), (0, expected.into()));
+            assert_eq!(h.output(), (0, expected.into()), "json={json}, print0={print0}");
         } else {
             let context = h.context();
-            assert_eq!(context.action, "accept");
-            assert_eq!(context.source, None);
-            assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"]);
+            assert_eq!(context.action, "accept", "json={json}, print0={print0}");
+            assert_eq!(context.source, None, "json={json}, print0={print0}");
+            assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"], "json={json}, print0={print0}");
         }
     }
 }
@@ -1188,7 +1188,7 @@ fn control_and_option_bindings_report_their_id() {
         let mut h = keys(true);
         let Some(Target::Perform(index)) = h.model.target(&chord(key)) else { panic!("{key} is bound") };
         h.perform(index);
-        assert_eq!(h.context().action, id);
+        assert_eq!(h.context().action, id, "key={key}, id={id}");
     }
 }
 
@@ -1206,7 +1206,7 @@ fn escape_and_control_c_cancel() {
     for nav in [Nav::Back, Nav::Cancel] {
         let mut h = keys(true);
         h.nav(nav);
-        assert_eq!(h.output(), (130, String::new()));
+        assert_eq!(h.output(), (130, String::new()), "nav={nav:?}");
     }
 }
 
