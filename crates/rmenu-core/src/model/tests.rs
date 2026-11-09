@@ -208,7 +208,8 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
     let unchanged = |h: &Harness| {
         assert_eq!(h.model.result_revision(), revision);
         assert_eq!((h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()), (items.clone(), titles.clone(), row, marks.clone()));
-        assert!(h.model.loading() && !h.model.can_act());
+        assert!(h.model.loading());
+        assert!(!h.model.can_act());
     };
 
     h.switch("files");
@@ -228,7 +229,8 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
     assert_eq!(h.titles(), ["alpine"]);
     assert_eq!(h.model.highlighted_row(), Some(0));
     assert!(h.marked().is_empty());
-    assert!(!h.model.loading() && h.settled());
+    assert!(!h.model.loading());
+    assert!(h.settled());
     assert_eq!(h.model.query(), "al");
 }
 
@@ -284,11 +286,13 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         }
         assert_eq!(h.model.result_revision(), revision + 1);
         assert_eq!(h.model.result_count(), 0);
-        assert!(h.all_items().is_empty() && h.model.chosen().is_empty());
+        assert!(h.all_items().is_empty());
+        assert!(h.model.chosen().is_empty());
         assert_eq!(h.model.highlighted_row(), None);
         assert_eq!(h.model.shown.selection.highlighted_id, None);
         assert!(h.marked().is_empty());
-        assert!(!h.model.loading() && !h.model.is_searching());
+        assert!(!h.model.loading());
+        assert!(!h.model.is_searching());
         assert_eq!(h.model.input_failed(), failure.is_some());
         assert_eq!(h.model.message(), failure);
         assert_eq!(h.model.can_act(), failure.is_none());
@@ -331,12 +335,14 @@ fn superseded_source_cannot_publish() {
         h.send(late);
         assert_eq!(h.model.result_revision(), revision, "a superseded source published");
         assert_eq!(h.values(), ["alpha"]);
-        assert!(h.model.loading() && !h.model.can_act());
+        assert!(h.model.loading());
+        assert!(!h.model.can_act());
         h.load("charlie\n");
         assert_eq!(h.model.result_revision(), revision + 1);
         assert_eq!(h.model.source_id(), Some("c"));
         assert_eq!(h.values(), ["charlie"]);
-        assert!(h.settled() && !h.model.loading());
+        assert!(h.settled());
+        assert!(!h.model.loading());
     }
 }
 
@@ -359,7 +365,8 @@ fn query_edit_during_replacement_matching_publishes_only_latest_query() {
     assert_eq!(h.model.result_revision(), revision + 1);
     assert_eq!(h.model.query(), "ome");
     assert_eq!(h.values(), ["omega"]);
-    assert!(!h.model.loading() && h.settled());
+    assert!(!h.model.loading());
+    assert!(h.settled());
 }
 
 #[test]
@@ -411,7 +418,8 @@ fn reload_prunes_checks_even_when_query_changes_during_loading() {
     assert_eq!(h.marked(), HashSet::from(["a".into(), "b".into()]));
     h.perform(0);
     h.query("alp");
-    assert!(!h.model.can_act() && h.model.loading());
+    assert!(!h.model.can_act());
+    assert!(h.model.loading());
     assert_eq!(h.model.result_revision(), revision);
     assert_eq!(h.all_items(), items);
     assert_eq!(h.marked().len(), 2);
@@ -421,7 +429,8 @@ fn reload_prunes_checks_even_when_query_changes_during_loading() {
     assert_eq!(h.marked(), HashSet::from(["a".into()]));
     assert_eq!(h.model.chosen()[0].title, "alpine");
     assert_eq!(h.model.highlighted_row(), Some(0));
-    assert!(!h.model.loading() && h.settled());
+    assert!(!h.model.loading());
+    assert!(h.settled());
 }
 
 #[test]
@@ -447,7 +456,8 @@ fn plain_reload_cannot_transfer_checks_to_different_values() {
 fn cancelling_after_a_failed_command_source_is_an_ordinary_cancel() {
     let mut h = start(json!({"sources": [src("bad", json!({}))]}));
     h.fail_source("Command exited 7");
-    assert!(h.model.input_failed() && !h.model.loading());
+    assert!(h.model.input_failed());
+    assert!(!h.model.loading());
     h.nav(Nav::Back);
     assert_eq!(h.output(), (130, String::new()));
 }
@@ -650,7 +660,8 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
         h.settle();
         assert_eq!(h.model.result_revision(), revision, "a late child result was published");
         assert_eq!((h.all_items(), h.marked()), (items, marks));
-        assert!(h.model.can_act() && h.model.depth() == 0);
+        assert!(h.model.can_act());
+        assert_eq!(h.model.depth(), 0);
     }
 }
 
@@ -876,7 +887,8 @@ fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
     h.finish_operation(0, "");
     assert!(!h.model.running_operation());
     assert_eq!((h.source_runs("repos"), h.source_runs("child")), (1, 1));
-    assert!(h.model.depth() == 0 && h.model.can_act());
+    assert_eq!(h.model.depth(), 0);
+    assert!(h.model.can_act());
 }
 
 // OperationTests
@@ -1337,5 +1349,7 @@ fn every_action_with_nothing_chosen_beeps() {
     h.perform(0);
     h.perform(1);
     assert_eq!(h.beeps, 3);
-    assert!(h.is_open() && h.model.depth() == 0 && h.copied.is_empty());
+    assert!(h.is_open());
+    assert_eq!(h.model.depth(), 0);
+    assert!(h.copied.is_empty());
 }
