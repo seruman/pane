@@ -117,7 +117,7 @@ impl Menu {
         let at = (self.model.result_revision(), row);
         if self.revealed == Some(at) { return; }
         self.revealed = Some(at);
-        tx.scroll_into_view_in("rows", self.model.result(row).id.clone());
+        tx.scroll_into_view_in(crate::view::ROWS_KEY, self.model.result(row).id.clone());
     }
 
     fn apply(&mut self, effects: Vec<Effect>, tx: &mut Tx) {

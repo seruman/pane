@@ -11,6 +11,8 @@ use rune::{Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, Span, T
 use crate::cli::Appearance;
 use crate::host::Menu;
 
+pub const ROWS_KEY: &str = "rows";
+
 const QUERY_H: f32 = 30.0;
 const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
@@ -150,7 +152,7 @@ fn results(menu: &Menu, c: &Palette) -> El {
             .child(text(message.to_owned()).font(TITLE).color(color).wrap().max_lines(6));
     }
     let c = *c;
-    let rows = col().key("rows").w_full().items_stretch().growth(GrowthSpec::default())
+    let rows = col().key(ROWS_KEY).w_full().items_stretch().growth(GrowthSpec::default())
         .virtual_rows(count, ROW_H,
             |m: &Menu, i| Cow::Owned(m.model.result(i).id.clone()),
             move |m: &Menu, i| result_row(m, i, &c))
