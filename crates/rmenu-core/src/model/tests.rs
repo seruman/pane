@@ -752,14 +752,12 @@ fn push_binding() -> Value {
 
 const REPOS: [(&str, &str); 4] = [("a", "alpha"), ("b", "beta"), ("c", "gamma"), ("d", "delta")];
 
-fn repos(extra: Value) -> Value {
-    let mut extra = extra;
+fn repos(mut extra: Value) -> Value {
     extra.as_object_mut().unwrap().insert("format".into(), "jsonl".into());
     src("repos", extra)
 }
 
-fn hidden(id: &str, extra: Value) -> Value {
-    let mut extra = extra;
+fn hidden(id: &str, mut extra: Value) -> Value {
     let object = extra.as_object_mut().unwrap();
     object.entry("format").or_insert("jsonl".into());
     object.insert("hidden".into(), true.into());
