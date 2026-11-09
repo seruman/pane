@@ -78,15 +78,12 @@ fn empty_queries_append_and_snapshots() {
     let mut rows = index(&["zfoo", "foo", "foo"]);
     let snapshot = rows.clone();
     rows.append(&[MenuItem::new("3", "foo")]);
-    assert_eq!(rows.len(), 4);
-    assert_eq!(snapshot.len(), 3);
     assert_eq!(search(&rows, ""), [0, 1, 2, 3]);
     assert_eq!(search(&rows, "   "), [0, 1, 2, 3]);
     assert_eq!(unsorted(&rows, "foo"), [0, 1, 2, 3]);
     assert_eq!(search(&snapshot, "foo"), [1, 2, 0]);
     assert!(search(&SearchIndex::default(), "anything").is_empty());
     assert!(search(&SearchIndex::default(), "").is_empty());
-    assert!(SearchIndex::default().is_empty());
 }
 
 #[test]
@@ -96,10 +93,8 @@ fn appends_past_a_chunk_leave_snapshots_alone() {
     let mut rows = SearchIndex::new(&items[..CHUNK - 5]);
     let snapshot = rows.clone();
     rows.append(&items[CHUNK - 5..]);
-    assert_eq!(rows.len(), CHUNK + 10);
     assert_eq!(search(&rows, "").len(), CHUNK + 10);
     assert_eq!(unsorted(&rows, &format!("row-{}", CHUNK + 9)), [(CHUNK + 9) as u32]);
-    assert_eq!(snapshot.len(), CHUNK - 5);
     assert_eq!(search(&snapshot, "").len(), CHUNK - 5);
     assert!(unsorted(&snapshot, &format!("row-{}", CHUNK + 9)).is_empty());
 }

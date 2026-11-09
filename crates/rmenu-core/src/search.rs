@@ -83,10 +83,6 @@ impl SearchIndex {
         index
     }
 
-    pub fn len(&self) -> usize { self.len }
-
-    pub fn is_empty(&self) -> bool { self.len == 0 }
-
     pub fn append(&mut self, items: &[MenuItem]) {
         let chunks = Arc::make_mut(&mut self.chunks);
         let mut pending = items;

@@ -17,10 +17,6 @@ pub struct Items {
 }
 
 impl Items {
-    pub fn len(&self) -> usize { self.len }
-
-    pub fn is_empty(&self) -> bool { self.len == 0 }
-
     pub fn extend(&mut self, items: impl IntoIterator<Item = MenuItem>) {
         let chunks = Arc::make_mut(&mut self.chunks);
         for item in items {
@@ -60,8 +56,7 @@ mod tests {
         items.extend((0..CHUNK + 5).map(|i| MenuItem::new(i.to_string(), format!("t{i}"))));
         let snapshot = items.clone();
         items.extend([MenuItem::new("x", "late")]);
-        assert_eq!(items.len(), CHUNK + 6);
-        assert_eq!(snapshot.len(), CHUNK + 5);
+        assert_eq!(items.iter().count(), CHUNK + 6);
         assert_eq!(items[CHUNK + 5].title, "late");
         assert_eq!(items[CHUNK].title, format!("t{CHUNK}"));
         assert_eq!(snapshot.iter().count(), CHUNK + 5);
