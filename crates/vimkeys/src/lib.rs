@@ -429,16 +429,7 @@ impl<A: Clone> Vim<A> {
                         };
                         Some(VimEffect::Moved)
                     }
-                    Lookup::Prefix => {
-                        self.pending = Pending::Operator {
-                            op,
-                            keys,
-                            count,
-                            typed,
-                        };
-                        Some(VimEffect::Moved)
-                    }
-                    _ if line_prefix => {
+                    found if matches!(found, Lookup::Prefix) || line_prefix => {
                         self.pending = Pending::Operator {
                             op,
                             keys,
