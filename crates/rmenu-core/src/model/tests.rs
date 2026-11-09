@@ -155,7 +155,9 @@ impl Harness {
     fn settled(&self) -> bool { self.model.can_act() && !self.model.is_searching() }
     fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect() }
     fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect() }
-    fn marked(&self) -> HashSet<String> { self.model.shown.selection.checked.clone() }
+    fn marked(&self) -> HashSet<String> {
+        self.model.shown.items.iter().filter(|item| self.model.is_marked(item)).map(|item| item.id.clone()).collect()
+    }
     fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title().to_owned()).collect() }
 
     fn is_open(&self) -> bool { self.finished.is_none() }
@@ -329,7 +331,7 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         assert!(h.all_items().is_empty(), "failure={failure:?}");
         assert!(h.model.chosen().is_empty(), "failure={failure:?}");
         assert_eq!(h.model.highlighted_row(), None, "failure={failure:?}");
-        assert_eq!(h.model.shown.selection.highlighted_id, None, "failure={failure:?}");
+        assert_eq!(h.model.highlighted(), None, "failure={failure:?}");
         assert!(h.marked().is_empty(), "failure={failure:?}");
         assert!(!h.model.loading(), "failure={failure:?}");
         assert!(!h.model.is_searching(), "failure={failure:?}");
@@ -622,7 +624,7 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
     h.toggle(2);
     h.highlight(1);
     let (items, titles, row, marks, highlighted) =
-        (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked(), h.model.shown.selection.highlighted_id.clone());
+        (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked(), h.model.highlighted().map(|item| item.id.clone()));
     assert_eq!(h.model.prompt(), "Repos");
     assert_eq!((titles.len(), marks.len()), (4, 2));
 
@@ -642,7 +644,7 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
     assert!(h.model.can_act());
     assert_ne!(h.model.result_revision(), revision, "a host resets scrolling to the parent's");
     assert_eq!((h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()), (items, titles, row, marks));
-    assert_eq!(h.model.shown.selection.highlighted_id, highlighted);
+    assert_eq!(h.model.highlighted().map(|item| item.id.clone()), highlighted);
     assert_eq!(h.model.query(), "a");
     assert_eq!(h.model.prompt(), "Repos");
     assert!(h.tasks.is_empty());

@@ -167,7 +167,6 @@ pub fn command_failure(result: &CommandResult) -> String {
 struct Shown {
     items: Items,
     results: Vec<RowOffset>,
-    highlighted_row: Option<usize>,
     selection: MenuSelection,
     /// The query `results` were matched against; None before the first search lands.
     query: Option<String>,
@@ -340,12 +339,12 @@ impl Model {
     /// Changes whenever the shown results are replaced, so a host can reset scrolling.
     pub fn result_revision(&self) -> u64 { self.result_revision }
 
-    pub fn highlighted_row(&self) -> Option<usize> { self.shown.highlighted_row }
+    pub fn highlighted_row(&self) -> Option<usize> { self.shown.selection.highlighted_row() }
 
-    pub fn is_marked(&self, item: &MenuItem) -> bool { self.shown.selection.checked.contains(&item.id) }
+    pub fn is_marked(&self, item: &MenuItem) -> bool { self.shown.selection.is_marked(&item.id) }
 
     /// How many rows are marked at this level.
-    pub fn marked_count(&self) -> usize { self.shown.selection.checked.len() }
+    pub fn marked_count(&self) -> usize { self.shown.selection.marked_count() }
 
     /// Whether Enter would choose something: a mark, or a highlighted row.
     pub fn has_choice(&self) -> bool { self.marked_count() > 0 || self.highlighted().is_some() }
@@ -410,7 +409,7 @@ impl Model {
 
     /// Marked rows in input order, else the highlighted row: what an action would act on.
     fn chosen(&self) -> Vec<MenuItem> {
-        if self.shown.selection.checked.is_empty() {
+        if self.shown.selection.marked_count() == 0 {
             self.highlighted().into_iter().cloned().collect()
         } else {
             self.shown.selection.marked(&self.shown.items)
@@ -510,7 +509,7 @@ impl Model {
     fn listed(&self) -> usize { self.shown.results.len().min(self.options.list_cap) }
 
     fn highlighted(&self) -> Option<&MenuItem> {
-        let row = self.shown.highlighted_row?;
+        let row = self.shown.selection.highlighted_row()?;
         self.shown.results.get(row).map(|&o| &self.shown.items[o])
     }
 
@@ -528,12 +527,11 @@ impl Model {
         if !self.can_navigate() || row >= self.listed() {
             return;
         }
-        if self.shown.highlighted_row != Some(row) {
+        if self.shown.selection.highlighted_row() != Some(row) {
             self.clear_transient_message();
         }
-        self.shown.highlighted_row = Some(row);
         let id = self.result(row).id.clone();
-        self.shown.selection.highlighted_id = Some(id);
+        self.shown.selection.highlight(row, id);
         self.update_preview();
     }
 
@@ -542,7 +540,7 @@ impl Model {
         if count == 0 {
             return;
         }
-        let row = (self.shown.highlighted_row.unwrap_or(0) as isize + delta).clamp(0, count as isize - 1);
+        let row = (self.shown.selection.highlighted_row().unwrap_or(0) as isize + delta).clamp(0, count as isize - 1);
         self.highlight(row as usize);
     }
 
@@ -802,9 +800,6 @@ impl Model {
         }
         self.shown.query = Some(run.query);
         self.displayed_source_generation = self.source_generation;
-        let highlighted = self.shown.selection.highlighted_id.as_ref();
-        self.shown.highlighted_row =
-            self.shown.results[..listed].iter().position(|&o| Some(&self.shown.items[o].id) == highlighted);
         self.update_preview();
         if self.can_act()
             && let Some(intent) = self.pending_intent.take()
@@ -941,7 +936,7 @@ impl Model {
                     .iter()
                     .map(|l| &l.shown)
                     .chain([&self.shown])
-                    .filter(|s| !s.selection.checked.is_empty())
+                    .filter(|s| s.selection.marked_count() != 0)
                     .flat_map(|s| s.selection.marked(&s.items))
                     .collect();
                 if marked.is_empty() { picked.clone() } else { marked }
