@@ -47,14 +47,14 @@ pub struct Options {
     pub list_cap: usize,
 }
 
-/// A started task's identity. A result whose token is stale is dropped.
+/// Identifies a started task. The model ignores completions whose tokens are stale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Token(u64);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SourceGeneration(Token);
 
-/// Starting a task replaces the running task of its kind.
+/// The host cancels and replaces any running task of the same kind when it starts a task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TaskKind {
     Source,
@@ -73,15 +73,18 @@ pub const OPERATION_LIMITS: Limits = Limits { timeout: Duration::from_secs(30), 
 const PREVIEW_DELAY: Duration = Duration::from_millis(60);
 const COMMAND_ERROR_BYTES: usize = 2048;
 
+/// The host runs each task off the UI thread and sends its completion event unless cancelled.
 #[derive(Clone, Debug)]
 pub enum Task {
-    /// Run under `SOURCE_LIMITS` and decode stdout as `format`, then answer `SourceDone`.
+    /// Run the command under [`SOURCE_LIMITS`] and decode stdout as `format`.
+    /// Send [`Event::SourceDone`] with the rows or an error.
     Source { token: Token, argv: Vec<String>, input: Vec<u8>, env: Vec<(String, String)>, format: InputFormat },
-    /// Search off the UI thread, then answer `SearchDone`.
+    /// Search `index` for `query` and send [`Event::SearchDone`].
     Search { token: Token, index: SearchIndex, query: String, order: Order },
-    /// Wait for `delay`, run under `PREVIEW_LIMITS`, then answer `PreviewDone`.
+    /// Wait for `delay`, then run the command under [`PREVIEW_LIMITS`].
+    /// Send [`Event::PreviewDone`] with the command result.
     Preview { token: Token, argv: Vec<String>, env: Vec<(String, String)>, delay: Duration },
-    /// Run under `OPERATION_LIMITS`, then answer `OperationDone`.
+    /// Run the command under [`OPERATION_LIMITS`] and send [`Event::OperationDone`].
     Operation { token: Token, argv: Vec<String>, input: Vec<u8>, env: Vec<(String, String)> },
 }
 
@@ -115,7 +118,8 @@ impl Outcome {
 
 #[derive(Clone, Debug)]
 pub enum Effect {
-    /// Read piped stdin as `Options::input` in batches. Issued at most once.
+    /// Read piped stdin as [`Options::input`] and send [`Event::StdinItems`] batches.
+    /// End with [`Event::StdinDone`] or [`Event::StdinFailed`]. The model emits this effect at most once.
     ReadStdin,
     Start(Task),
     Cancel(TaskKind),
