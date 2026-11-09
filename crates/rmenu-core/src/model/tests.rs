@@ -1229,8 +1229,8 @@ fn copy_puts_chosen_values_on_the_clipboard_and_stays_open() {
 fn command_failure_trims_and_bounds_stderr() {
     let result = |stderr: Vec<u8>| CommandResult { stdout: Vec::new(), stderr, status: ExitStatus::Code(3) };
     assert_eq!(command_failure(&result(b"  \n".to_vec())), "Command exited 3");
-    let long = command_failure(&result(vec![b'x'; 5000]));
-    assert_eq!(long.len(), "Command exited 3: ".len() + 2048);
+    let stderr = [vec![b'a'; 2048], vec![b'b'; 2952]].concat();
+    assert_eq!(command_failure(&result(stderr)), format!("Command exited 3: {}", "a".repeat(2048)));
 }
 
 // PipedInputTests
