@@ -1,7 +1,7 @@
 //! Lists: an inset group of rows, each with an optional leading element, a title and detail,
 //! and a trailing element. Up and Down move between rows; the selected one is tinted.
 
-use rune::{El, col, el, row, text};
+use rune::{El, col, row, text};
 
 use crate::{Theme, Transform, hairline, with_separator};
 
@@ -150,6 +150,7 @@ impl List {
 /// A thin bar filled to `value`, 0 to 1, in the accent.
 pub fn progress_bar(value: f32, theme: &Theme) -> El {
     let v = value.clamp(0.0, 1.0);
+    let [filled, remaining] = crate::split_space(v);
     row()
         .role("progressbar")
         .range_value(f64::from(v), 0.0, 1.0)
@@ -158,11 +159,6 @@ pub fn progress_bar(value: f32, theme: &Theme) -> El {
         .radius(3.0)
         .fill(theme.field)
         .clip_rounded(3.0)
-        .child(
-            el().h_full()
-                .grow(v.max(1e-4))
-                .radius(3.0)
-                .fill(theme.accent),
-        )
-        .child(el().h_full().grow((1.0 - v).max(1e-4)))
+        .child(filled.h_full().radius(3.0).fill(theme.accent))
+        .child(remaining.h_full())
 }

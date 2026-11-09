@@ -41,6 +41,13 @@ fn with_separator(row: rune::El, separator: Option<rune::El>) -> rune::El {
     }
 }
 
+fn split_space(value: f32) -> [rune::El; 2] {
+    [
+        rune::el().grow(value.max(1e-4)),
+        rune::el().grow((1.0 - value).max(1e-4)),
+    ]
+}
+
 type Transform<T = rune::El> = Box<dyn FnOnce(T) -> T>;
 type IndexedPress = std::rc::Rc<dyn Fn(usize) -> Transform>;
 

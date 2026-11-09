@@ -376,15 +376,14 @@ impl Slider {
             .fill(thumb_color)
             .shadow(1.0, 3.0, Color::BLACK.alpha(0.3))
             .a11y_hidden();
-        // The thumb sits between two spacers sharing the free width as v : 1 - v, so the track
-        // follows whatever width the slider is given.
+        let [before, after] = crate::split_space(v);
         let rail = row()
             .w_full()
             .h(KNOB)
             .center_y()
-            .child(el().grow(v.max(1e-4)))
+            .child(before)
             .child(thumb)
-            .child(el().grow((1.0 - v).max(1e-4)));
+            .child(after);
         let name = self.label.clone().unwrap_or_else(|| "Slider".to_owned());
         let mut slider = el()
             .key("slider")

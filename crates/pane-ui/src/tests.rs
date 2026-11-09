@@ -660,6 +660,53 @@ fn controls_prefer_a_width_shrink_to_fit_and_fill_on_request() {
 }
 
 #[test]
+fn slider_and_progress_track_endpoints_and_midpoint() {
+    fn view(value: &f32, _: &mut rune::Cx<f32>) -> rune::El {
+        let theme = Theme::new(Palette::merino_dark());
+        rune::col()
+            .w_full()
+            .child(
+                crate::Slider::new(*value)
+                    .width(200.0)
+                    .build("volume", &theme),
+            )
+            .child(crate::progress_bar(*value, &theme).key("progress"))
+    }
+    for (value, thumb_x, filled_width) in [
+        (-1.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (0.5, 91.0, 100.0),
+        (1.0, 182.0, 200.0),
+        (2.0, 182.0, 200.0),
+    ] {
+        let mut rt = rune::Runtime::new(value, view, (200.0, 100.0), rune::Env::default());
+        rt.frame(0.0);
+        let thumb = element(&rt, "thumb").rect;
+        let progress = element(&rt, "progress");
+        let path = format!("{}/", progress.path);
+        let accent = Theme::new(Palette::merino_dark()).accent;
+        let fill = rt
+            .elements()
+            .into_iter()
+            .find(|e| !e.exiting && e.path.starts_with(&path) && e.fill == accent)
+            .unwrap();
+        assert_eq!(element(&rt, "track").rect[2], 200.0);
+        assert_eq!(thumb[2], 18.0);
+        assert!(
+            (thumb[0] - thumb_x).abs() < 0.025,
+            "value {value}, thumb {thumb:?}"
+        );
+        assert_eq!(progress.rect[2], 200.0);
+        assert_eq!(fill.rect[3], 6.0);
+        assert!(
+            (fill.rect[2] - filled_width).abs() < 0.025,
+            "value {value}, fill {:?}",
+            fill.rect
+        );
+    }
+}
+
+#[test]
 fn filled_segments_share_the_available_width() {
     fn view(fill: &bool, _: &mut rune::Cx<bool>) -> rune::El {
         let theme = Theme::new(Palette::merino_dark());
