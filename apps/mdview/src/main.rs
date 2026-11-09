@@ -330,10 +330,78 @@ mod tests {
 
     const SRC: &str = "## Tasks\n\nSome **bold phrase** and more.\n\n- [x] Port the shell\n- [ ] Copy\n\n```rust\nlet x = 1;\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n";
 
+    fn runtime(doc: Doc) -> rune::Runtime<Doc> {
+        let mut rt = rune::Runtime::new(doc, view, (600.0, 400.0), rune::Env::default());
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        rt
+    }
+
+    fn press(rt: &mut rune::Runtime<Doc>, keys: &str) {
+        for c in keys.chars() {
+            rt.key(KeyEvent {
+                key: rune::Key::Text(c.to_string()),
+                mods: rune::Mods::default(),
+            });
+            rt.frame(1.0 / 60.0);
+        }
+    }
+
     fn yank(text: &str, linewise: bool) -> String {
-        let page = RenderedText::new(SRC);
-        let at = page.text().find(text).expect("drawn");
-        markdown::source_of(SRC, &page.source_ranges(at..at + text.len()), linewise)
+        let mut rt = runtime(Doc::with_source(None, SRC.into()));
+        let at = rt.state.page.text().find(text).expect("drawn");
+        rt.state.vim.set_cursor(at, rt.state.page.text());
+        if linewise {
+            press(&mut rt, "V");
+            for _ in 1..text.lines().count() {
+                press(&mut rt, "j");
+            }
+        } else {
+            press(&mut rt, "v");
+            for _ in 1..text.chars().count() {
+                press(&mut rt, "l");
+            }
+        }
+        press(&mut rt, "gy");
+        rt.copy_request
+            .expect("gy copies Markdown")
+            .content()
+            .text()
+            .to_owned()
+    }
+
+    #[test]
+    fn space_toggles_only_parser_tasks_and_writes_the_file() {
+        let path = std::env::temp_dir().join(format!("mdview-space-{}.md", std::process::id()));
+        for (source, cursor, expected) in [
+            ("- [ ] plain\n", "plain", "- [x] plain\n"),
+            ("1. [x] ordered\n", "ordered", "1. [ ] ordered\n"),
+            ("> - [ ] quoted\n", "quoted", "> - [x] quoted\n"),
+            (
+                "- outer\n  - [ ] nested\n",
+                "nested",
+                "- outer\n  - [x] nested\n",
+            ),
+            ("ordinary [ ] text\n", "ordinary", "ordinary [ ] text\n"),
+            (
+                "```text\n- [ ] code\n```\n",
+                "code",
+                "```text\n- [ ] code\n```\n",
+            ),
+        ] {
+            std::fs::write(&path, source).unwrap();
+            let mut rt = runtime(Doc::open(Some(path.to_str().unwrap().into())).unwrap());
+            let at = rt.state.page.text().find(cursor).unwrap();
+            rt.state.vim.set_cursor(at, rt.state.page.text());
+            press(&mut rt, " ");
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                expected,
+                "Space on {cursor}"
+            );
+            assert_eq!(rt.state.source, expected, "visible source stays in sync");
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
