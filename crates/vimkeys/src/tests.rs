@@ -308,6 +308,58 @@ fn visual_selections() {
 }
 
 #[test]
+fn search_entry_restores_the_mode_and_discards_only_the_draft() {
+    let key = |v: &mut Vim, key| {
+        v.key(
+            &KeyEvent {
+                key,
+                mods: Mods::default(),
+            },
+            TEXT,
+        )
+    };
+    for (prefix, mode) in [
+        ("", VimMode::Normal),
+        ("v", VimMode::Visual),
+        ("V", VimMode::VisualLine),
+    ] {
+        let mut v = Vim::default();
+        press(&mut v, "/world");
+        key(&mut v, Key::Enter);
+        let committed = v.matches(TEXT);
+        press(&mut v, prefix);
+        let selection = v.selection(TEXT);
+        let cursor = v.cursor(TEXT);
+        press(&mut v, "/hello");
+        assert_eq!(v.mode(), VimMode::Search);
+        assert_eq!(v.status(), "/hello");
+        assert_eq!(key(&mut v, Key::Up), None);
+        assert_eq!(v.status(), "/hello");
+        key(&mut v, Key::Escape);
+        assert_eq!(v.mode(), mode);
+        assert_eq!(v.cursor(TEXT), cursor);
+        assert_eq!(v.selection(TEXT), selection);
+        assert_eq!(v.matches(TEXT), committed);
+
+        press(&mut v, "/x");
+        key(&mut v, Key::Backspace);
+        assert_eq!(v.status(), "/");
+        key(&mut v, Key::Backspace);
+        assert_eq!(v.mode(), mode);
+        assert_eq!(v.selection(TEXT), selection);
+
+        press(&mut v, "/hello");
+        key(&mut v, Key::Enter);
+        assert_eq!(v.mode(), mode);
+        assert_eq!(v.cursor(TEXT).start, TEXT.find("hello").unwrap());
+        assert_eq!(
+            v.matches(TEXT),
+            vec![TEXT.find("hello").unwrap()..TEXT.find("hello").unwrap() + 5]
+        );
+    }
+}
+
+#[test]
 fn search_smart_case_and_star() {
     let mut v = Vim::default();
     press(&mut v, "/s");

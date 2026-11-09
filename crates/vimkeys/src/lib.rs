@@ -37,6 +37,29 @@ pub enum VimMode {
     Search,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VisualMode {
+    Character,
+    Line,
+}
+
+#[derive(Clone, Debug)]
+enum Mode {
+    Normal,
+    Visual(VisualMode),
+    Search {
+        from: Option<VisualMode>,
+        typing: String,
+    },
+}
+
+#[derive(Clone, Debug, Default)]
+struct Search {
+    query: Query,
+    backward: bool,
+    hidden: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HintsFor {
     Typed(String),
@@ -110,7 +133,7 @@ enum Pending<A> {
 #[derive(Clone, Debug)]
 pub struct Vim<A = NoAction, O = A> {
     keymap: Keymap<A, O>,
-    mode: VimMode,
+    mode: Mode,
     cursor: usize,
     anchor: usize,
     /// The column `j` and `k` aim for.
@@ -120,13 +143,7 @@ pub struct Vim<A = NoAction, O = A> {
     pending: Pending<O>,
     last_find: Option<(Find, char)>,
 
-    typing: String,
-    query: Query,
-    backward: bool,
-    /// The mode a search returns to.
-    anchor_search: VimMode,
-    /// Escape hid the last search's matches; the next search shows them again.
-    matches_hidden: bool,
+    search: Search,
     /// [`Vim::skip_blank_lines`].
     skip_blank: bool,
     /// Lines Ctrl-D and Ctrl-U move: half of [`Vim::page_lines`].
@@ -144,18 +161,14 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     pub fn new(keymap: Keymap<A, O>) -> Vim<A, O> {
         Vim {
             keymap,
-            mode: VimMode::Normal,
+            mode: Mode::Normal,
             cursor: 0,
             anchor: 0,
             want_col: 0,
             count: None,
             pending: Pending::None,
             last_find: None,
-            typing: String::new(),
-            query: Query::default(),
-            backward: false,
-            anchor_search: VimMode::Normal,
-            matches_hidden: false,
+            search: Search::default(),
             skip_blank: false,
             half_page: 15,
             message: None,
@@ -182,11 +195,23 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     }
 
     pub fn mode(&self) -> VimMode {
-        self.mode
+        match self.mode {
+            Mode::Normal => VimMode::Normal,
+            Mode::Visual(VisualMode::Character) => VimMode::Visual,
+            Mode::Visual(VisualMode::Line) => VimMode::VisualLine,
+            Mode::Search { .. } => VimMode::Search,
+        }
+    }
+
+    fn visual_mode(&self) -> Option<VisualMode> {
+        match self.mode {
+            Mode::Visual(visual) => Some(visual),
+            _ => None,
+        }
     }
 
     fn visual(&self) -> bool {
-        matches!(self.mode, VimMode::Visual | VimMode::VisualLine)
+        self.visual_mode().is_some()
     }
 
     fn table(&self) -> Table {
@@ -199,11 +224,13 @@ impl<A: Clone, O: Clone> Vim<A, O> {
 
     /// The mode for a status line: `NORMAL`, `VISUAL`, `V-LINE`, or the search being typed.
     pub fn status(&self) -> String {
-        match self.mode {
-            VimMode::Normal => "NORMAL".to_owned(),
-            VimMode::Visual => "VISUAL".to_owned(),
-            VimMode::VisualLine => "V-LINE".to_owned(),
-            VimMode::Search => format!("{}{}", if self.backward { '?' } else { '/' }, self.typing),
+        match &self.mode {
+            Mode::Normal => "NORMAL".to_owned(),
+            Mode::Visual(VisualMode::Character) => "VISUAL".to_owned(),
+            Mode::Visual(VisualMode::Line) => "V-LINE".to_owned(),
+            Mode::Search { typing, .. } => {
+                format!("{}{}", if self.search.backward { '?' } else { '/' }, typing)
+            }
         }
     }
 
@@ -251,9 +278,10 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     pub fn hints(&self) -> Option<(HintsFor, HintGroups)> {
         let header = HintsFor::Typed(self.pending());
         match &self.pending {
-            Pending::None if self.visual() && self.count.is_none() => {
-                Some((HintsFor::Mode(self.mode), self.keymap.hints(Table::Visual)))
-            }
+            Pending::None if self.visual() && self.count.is_none() => Some((
+                HintsFor::Mode(self.mode()),
+                self.keymap.hints(Table::Visual),
+            )),
             // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
                 Some((header, self.keymap.next(self.table(), &[])))
@@ -315,7 +343,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         let i = b.index(at.min(text.len())).min(b.n() - 1);
         self.cursor = b.byte(i);
         self.want_col = i - b.line_start(i);
-        self.mode = VimMode::Normal;
+        self.mode = Mode::Normal;
         self.reset_pending();
     }
 
@@ -325,21 +353,23 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         let (c, a) = (b.index(self.cursor), b.index(self.anchor));
         let (lo, hi) = (c.min(a), c.max(a));
         match self.mode {
-            VimMode::Visual => Some(b.byte(lo)..b.byte(hi + 1)),
-            VimMode::VisualLine => Some(b.byte(b.line_start(lo))..b.byte(b.line_end(hi))),
+            Mode::Visual(VisualMode::Character) => Some(b.byte(lo)..b.byte(hi + 1)),
+            Mode::Visual(VisualMode::Line) => {
+                Some(b.byte(b.line_start(lo))..b.byte(b.line_end(hi)))
+            }
             _ => None,
         }
     }
 
     /// Where the last search matches, for painting.
     pub fn matches(&self, text: &str) -> Vec<Range<usize>> {
-        if self.mode == VimMode::Search {
-            return find_all(text, &Query::typed(&self.typing));
+        if let Mode::Search { typing, .. } = &self.mode {
+            return find_all(text, &Query::typed(typing));
         }
-        if self.matches_hidden {
+        if self.search.hidden {
             return Vec::new();
         }
-        find_all(text, &self.query)
+        find_all(text, &self.search.query)
     }
 
     /// Handles `ev` over `text`. `None` when the key means nothing here, so the app can use it.
@@ -350,18 +380,19 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
         self.cursor = b.byte(b.index(self.cursor));
         self.message = None;
-        if self.mode == VimMode::Search {
-            return self.search_key(ev, text, &b);
+        match std::mem::replace(&mut self.mode, Mode::Normal) {
+            Mode::Search { from, typing } => return self.search_key(ev, text, &b, from, typing),
+            mode => self.mode = mode,
         }
         if ev.key == Key::Escape {
             let busy = self.is_pending() || self.visual();
             // With nothing else to cancel, Escape hides the search's matches, as `:noh` does.
-            let shown = !busy && !self.matches_hidden && !self.query.text.is_empty();
+            let shown = !busy && !self.search.hidden && !self.search.query.text.is_empty();
             if shown {
-                self.matches_hidden = true;
+                self.search.hidden = true;
             }
             self.reset_pending();
-            self.mode = VimMode::Normal;
+            self.mode = Mode::Normal;
             return (busy || shown).then_some(VimEffect::Consumed);
         }
         let stroke = Stroke::from_event(ev)?;
@@ -498,7 +529,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             Command::Motion(m) => self.finish_motion(m, keys, None, text, b),
             Command::Operator(op) if visual => {
                 let range = self.selection(text)?;
-                let lines = self.mode == VimMode::VisualLine;
+                let lines = self.mode() == VimMode::VisualLine;
                 self.count = None;
                 Some(self.apply(op, range, lines, text, b, false))
             }
@@ -525,17 +556,17 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             }
             Command::Visual | Command::VisualLine => {
                 let mode = if matches!(command, Command::Visual) {
-                    VimMode::Visual
+                    VisualMode::Character
                 } else {
-                    VimMode::VisualLine
+                    VisualMode::Line
                 };
-                if self.mode == mode {
-                    self.mode = VimMode::Normal;
+                if self.visual_mode() == Some(mode) {
+                    self.mode = Mode::Normal;
                 } else {
                     if !visual {
                         self.anchor = self.cursor;
                     }
-                    self.mode = mode;
+                    self.mode = Mode::Visual(mode);
                 }
                 self.reset_pending();
                 Some(VimEffect::Consumed)
@@ -547,10 +578,11 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             }
             Command::Search { backward } => {
                 self.reset_pending();
-                self.backward = backward;
-                self.typing.clear();
-                self.anchor_search = self.mode;
-                self.mode = VimMode::Search;
+                self.search.backward = backward;
+                self.mode = Mode::Search {
+                    from: self.visual_mode(),
+                    typing: String::new(),
+                };
                 Some(VimEffect::Consumed)
             }
             Command::App(action) => {
@@ -698,7 +730,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 }
             },
             Motion::SearchNext | Motion::SearchPrevious => {
-                let backward = self.backward != (m == Motion::SearchPrevious);
+                let backward = self.search.backward != (m == Motion::SearchPrevious);
                 match self.next_match(text, backward) {
                     Some(t) => (b.index(t), Kind::Exclusive),
                     None => {
@@ -712,12 +744,12 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                     self.reset_pending();
                     return Some(VimEffect::Consumed);
                 };
-                self.query = Query {
+                self.search.query = Query {
                     text: b.chars[word].iter().collect(),
                     whole_word: true,
                 };
-                self.backward = m == Motion::SearchWordBack;
-                match self.next_match(text, self.backward) {
+                self.search.backward = m == Motion::SearchWordBack;
+                match self.next_match(text, self.search.backward) {
                     Some(t) => (b.index(t), Kind::Exclusive),
                     None => {
                         self.reset_pending();
@@ -815,7 +847,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 false,
             )),
             None => {
-                self.mode = VimMode::Visual;
+                self.mode = Mode::Visual(VisualMode::Character);
                 self.anchor = b.byte(range.start);
                 self.cursor = b.byte(range.end.saturating_sub(1).max(range.start));
                 Some(VimEffect::Consumed)
@@ -850,7 +882,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         keep_column: bool,
     ) -> VimEffect<A, O> {
         self.reset_pending();
-        self.mode = VimMode::Normal;
+        self.mode = Mode::Normal;
         self.cursor = b.byte(b.index(range.start));
         if !keep_column {
             self.want_col = b.index(range.start) - b.line_start(b.index(range.start));
@@ -889,39 +921,53 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
     }
 
-    fn search_key(&mut self, ev: &KeyEvent, text: &str, b: &Buf) -> Option<VimEffect<A, O>> {
-        match &ev.key {
+    fn search_key(
+        &mut self,
+        ev: &KeyEvent,
+        text: &str,
+        b: &Buf,
+        from: Option<VisualMode>,
+        mut typing: String,
+    ) -> Option<VimEffect<A, O>> {
+        let effect = match &ev.key {
             Key::Escape => {
-                self.mode = self.anchor_search;
-                self.typing.clear();
+                self.mode = from.map_or(Mode::Normal, Mode::Visual);
+                return Some(VimEffect::Consumed);
             }
             Key::Backspace => {
-                if self.typing.pop().is_none() {
-                    self.mode = self.anchor_search;
+                if typing.pop().is_none() {
+                    self.mode = from.map_or(Mode::Normal, Mode::Visual);
+                    return Some(VimEffect::Consumed);
                 }
+                Some(VimEffect::Consumed)
             }
             Key::Enter => {
-                self.mode = self.anchor_search;
-                if !self.typing.is_empty() {
-                    self.query = Query::typed(&std::mem::take(&mut self.typing));
+                self.mode = from.map_or(Mode::Normal, Mode::Visual);
+                if !typing.is_empty() {
+                    self.search.query = Query::typed(&typing);
                 }
-                if let Some(t) = self.next_match(text, self.backward) {
+                if let Some(t) = self.next_match(text, self.search.backward) {
                     return self.go(b.index(t), Kind::Exclusive, None, text, b, false);
                 }
+                return Some(VimEffect::Consumed);
             }
-            Key::Text(s) if !ev.mods.cmd => self.typing.push_str(s),
-            _ => return None,
-        }
-        Some(VimEffect::Consumed)
+            Key::Text(s) if !ev.mods.cmd => {
+                typing.push_str(s);
+                Some(VimEffect::Consumed)
+            }
+            _ => None,
+        };
+        self.mode = Mode::Search { from, typing };
+        effect
     }
 
     /// The byte where the search's next (or previous) match starts, wrapping round, with a note
     /// of which match it is; `None`, and a note, when there's none.
     fn next_match(&mut self, text: &str, backward: bool) -> Option<usize> {
-        self.matches_hidden = false;
-        let found = find_all(text, &self.query);
+        self.search.hidden = false;
+        let found = find_all(text, &self.search.query);
         if found.is_empty() {
-            self.message = Some(format!("Pattern not found: {}", self.query.text));
+            self.message = Some(format!("Pattern not found: {}", self.search.query.text));
             return None;
         }
         let at = self.cursor;
