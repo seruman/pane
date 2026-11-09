@@ -857,6 +857,54 @@ mod tests {
     }
 
     #[test]
+    fn every_palette_command_has_its_expected_effect() {
+        for (index, command) in COMMANDS.iter().enumerate() {
+            let mut state = State::default();
+            state.open_palette();
+            state.run_command(index);
+            assert_eq!(state.overlay, Overlay::None);
+            match index {
+                0..=4 => assert_eq!(state.toast.as_deref(), Some(command.entry.title)),
+                5 => assert_eq!(state.theme, ThemeChoice::Terminal),
+                6 => assert_eq!(state.theme, ThemeChoice::Light),
+                7 => assert_eq!(state.theme, ThemeChoice::Dark),
+                _ => panic!("a new command needs an expected effect"),
+            }
+        }
+    }
+
+    #[test]
+    fn file_filter_shows_matching_rows() {
+        fn view_files(s: &State, _: &mut Cx<State>) -> El {
+            files(s, &Theme::new(Palette::merino_dark()))
+        }
+        for (query, expected) in [
+            ("  README  ", vec!["README.md"]),
+            ("SRC/", vec!["src/main.rs", "src/server.rs"]),
+            ("nothing-matches", vec![]),
+            ("", FILES.iter().map(|file| file.name).collect()),
+        ] {
+            let state = State {
+                filter: TextEdit::new(query),
+                ..State::default()
+            };
+            let mut rt = Runtime::new(state, view_files, (400.0, 500.0), Env::default());
+            rt.frame(0.0);
+            let shown: Vec<String> = rt.elements().into_iter().filter_map(|e| e.text).collect();
+            let names: Vec<&str> = shown
+                .iter()
+                .map(String::as_str)
+                .filter(|text| FILES.iter().any(|file| file.name == *text))
+                .collect();
+            assert_eq!(names, expected, "filter {query:?}");
+            assert_eq!(
+                shown.iter().any(|text| text == "No files match"),
+                expected.is_empty()
+            );
+        }
+    }
+
+    #[test]
     fn every_button_answers_a_press() {
         for key in ["logs", "help", "refresh", "split", "more"] {
             let mut rt = Runtime::new(State::default(), view, (900.0, 900.0), Env::default());
