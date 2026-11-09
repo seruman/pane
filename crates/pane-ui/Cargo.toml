@@ -7,7 +7,7 @@ description = "Rex-style components for programs drawing inside a terminal pane 
 
 [dependencies]
 rune.workspace = true
-rune-kit.workspace = true
+rune-kit = { workspace = true, features = ["markdown"] }
 vimkeys.workspace = true
 
 [dev-dependencies]
