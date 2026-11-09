@@ -44,6 +44,123 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
 }
 
 #[test]
+fn enter_during_search_publishes_the_new_choice_to_the_owner() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinItems(vec![MenuItem::new("a", "alpha"), MenuItem::new("b", "beta")]), &mut Tx::default());
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| m.model.result_count() == 2 && !m.model.is_searching());
+    menu.handle(Event::SetQuery("beta".into()), &mut Tx::default());
+    assert!(crate::view::key(&mut menu, &rune::KeyEvent { key: rune::Key::Enter, mods: rune::Mods::default() }, &mut Tx::default()));
+    assert!(menu.outcome.borrow().is_none());
+    poll_until(&mut menu, |m| m.outcome.borrow().is_some());
+    assert_eq!(*menu.outcome.borrow(), Some(Outcome::Chosen(b"beta\n".to_vec())));
+    assert!(menu.tasks.is_empty());
+    menu.quit(&mut Tx::default());
+    assert_eq!(*menu.outcome.borrow(), Some(Outcome::Chosen(b"beta\n".to_vec())));
+}
+
+#[test]
+fn quit_cancels_and_joins_work_and_keeps_input_failure() {
+    for failure in [None, Some("broken input")] {
+        let mut menu = menu_without_stdin();
+        let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let signal = stopped.clone();
+        let running = menu.spawn(move |cancel, _| {
+            while !cancel.is_cancelled() { std::thread::yield_now(); }
+            signal.store(true, std::sync::atomic::Ordering::Release);
+        });
+        menu.tasks.insert(TaskKind::Preview, running);
+        if let Some(error) = failure { menu.handle(Event::StdinFailed(error.into()), &mut Tx::default()); }
+        menu.quit(&mut Tx::default());
+        assert!(stopped.load(std::sync::atomic::Ordering::Acquire));
+        assert!(menu.tasks.is_empty());
+        assert!(menu.stdin.is_none());
+        assert!(menu.retired.is_empty());
+        assert_eq!(*menu.outcome.borrow(), Some(failure.map_or(Outcome::Cancelled, |error| Outcome::Failed(error.into()))));
+    }
+}
+
+#[test]
+fn escape_and_control_c_finish_through_the_key_adapter() {
+    for (key, mods) in [
+        (rune::Key::Escape, rune::Mods::default()),
+        (rune::Key::Command('c'), rune::Mods { ctrl: true, cmd: true, ..rune::Mods::default() }),
+    ] {
+        let mut menu = menu_without_stdin();
+        assert!(crate::view::key(&mut menu, &rune::KeyEvent { key, mods }, &mut Tx::default()));
+        assert_eq!(*menu.outcome.borrow(), Some(Outcome::Cancelled));
+    }
+}
+
+#[test]
+fn navigation_keys_drive_the_model_and_modified_arrows_pass_through() {
+    use rune::{Key, KeyEvent, Mods};
+    let mut launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
+    launch.options.rows = 3;
+    let mut menu = menu_with_launch(launch);
+    menu.handle(Event::StdinItems((0..10).map(|i| MenuItem::new(i.to_string(), i.to_string())).collect()), &mut Tx::default());
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| m.model.result_count() == 10 && !m.model.is_searching());
+    let plain = Mods::default();
+    let shift = Mods { shift: true, ..plain };
+    let ctrl = Mods { ctrl: true, cmd: true, ..plain };
+    for (key, mods, expected) in [
+        (Key::Up, plain, Some(3)), (Key::Down, plain, Some(5)),
+        (Key::PageUp, plain, Some(1)), (Key::PageDown, plain, Some(7)),
+        (Key::Tab, plain, Some(5)), (Key::Tab, shift, Some(3)),
+        (Key::Command('n'), ctrl, Some(5)), (Key::Command('p'), ctrl, Some(3)),
+        (Key::Down, shift, None), (Key::Up, ctrl, None),
+        (Key::Backspace, plain, Some(4)),
+    ] {
+        menu.handle(Event::Highlight(4), &mut Tx::default());
+        let event = KeyEvent { key, mods };
+        assert_eq!(crate::view::key(&mut menu, &event, &mut Tx::default()), expected.is_some(), "{event:?}");
+        assert_eq!(menu.model.highlighted_row(), Some(expected.unwrap_or(4)), "{event:?}");
+    }
+    menu.stop();
+}
+
+#[test]
+fn highlight_reveal_scrolls_the_virtual_list_without_a_glide() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinItems((0..80).map(|i| MenuItem::new(i.to_string(), format!("row-{i}"))).collect()), &mut Tx::default());
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| m.model.result_count() == 80 && !m.model.is_searching());
+    let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+    rt.frame(0.0);
+    rt.update(|menu, tx| menu.handle(Event::Highlight(20), tx));
+    rt.frame(1.0 / 60.0);
+    let row = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("row-20")).unwrap();
+    assert!(row.scrolled[1] > 0.0);
+    assert_eq!(row.visible, row.rect);
+    rt.frame(0.3);
+    let later = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("row-20")).unwrap();
+    assert_eq!(row.rect, later.rect);
+}
+
+#[test]
+fn row_click_and_text_input_use_the_real_view_handlers() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinItems(vec![MenuItem::new("a", "alpha"), MenuItem::new("b", "beta")]), &mut Tx::default());
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| m.model.result_count() == 2 && !m.model.is_searching());
+    let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+    rt.frame(0.0);
+    let beta = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("beta")).unwrap();
+    let (x, y) = (beta.rect[0] + 4.0, beta.rect[1] + 4.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.model.highlighted_row(), Some(1));
+    assert!(rt.state.field.focused);
+    rt.key(rune::KeyEvent { key: rune::Key::Text("beta".into()), mods: rune::Mods::default() });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.field.text, "beta");
+    assert_eq!(rt.state.model.query(), "beta");
+    rt.state.stop();
+}
+
+#[test]
 #[ignore = "timing probe, run with --ignored --nocapture"]
 fn poll_budget_measurement() {
     let mut samples = Vec::new();
