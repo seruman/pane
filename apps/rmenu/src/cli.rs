@@ -44,8 +44,7 @@ pub struct Cli {
     /// Initial query.
     #[arg(long, allow_hyphen_values = true, default_value = "")]
     pub query: String,
-    /// mmenu's panel width. The terminal decides rmenu's size, so it's accepted and ignored,
-    /// letting mmenu's callers run rmenu unchanged.
+    /// Accepted and ignored for mmenu compatibility. The terminal controls the width.
     #[arg(long, hide = true)]
     pub width: Option<String>,
     /// Rows to move with `PageUp` and `PageDown`.
@@ -137,7 +136,6 @@ impl Cli {
     }
 }
 
-/// mmenu configs load unchanged, but their cmd chords are dead keys here.
 pub fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
     configuration
         .command_chords()

@@ -20,7 +20,7 @@ fn main() {
     for warning in cli::warnings(&launch.options.configuration) {
         eprintln!("rmenu: {warning}");
     }
-    // SAFETY: installs the ignored disposition before any thread starts.
+    // SAFETY: SIGPIPE is a valid signal and SIG_IGN is a valid disposition.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_IGN);
     }

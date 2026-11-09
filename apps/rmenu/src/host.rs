@@ -28,7 +28,6 @@ enum Message {
 }
 
 pub struct Menu {
-    // The process reclaims the rows at exit. Dropping each row would delay shutdown.
     pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
@@ -108,7 +107,7 @@ impl Menu {
     }
 
     pub fn handle(&mut self, event: Event, tx: &mut Tx) {
-        // Reduced motion still fades colors. Selection changes must use their final colors now.
+        // Rune's reduced motion still fades colors.
         tx.settle();
         let effects = self.model.handle(event);
         self.apply(effects, tx);
@@ -201,9 +200,6 @@ impl Menu {
 }
 
 // The 16 ms publication target comes from mmenu 7c8f662, Sources/MMenu/MenuModel.swift.
-// Target roughly one stdin publication per 60 Hz frame. Spend at most half that interval
-// draining queued messages before yielding to input and drawing. A reducer call can overrun it.
-// The ignored poll_budget_measurement test measures draining and verifies the follow-up wake.
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const POLL_BUDGET: Duration = STDIN_BATCH_INTERVAL.checked_div(2).expect("nonzero divisor");
 const STDIN_CHUNK: usize = 64 * 1024;
