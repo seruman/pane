@@ -91,15 +91,6 @@ impl Palette {
         }
     }
 
-    /// The bundled themes.
-    pub fn builtins() -> Vec<Palette> {
-        vec![
-            Palette::merino_dark(),
-            Palette::merino_light(),
-            Palette::charcoal_atelier(),
-        ]
-    }
-
     /// The terminal's theme, once it has reported its text and background colours.
     pub fn from_terminal() -> Option<Palette> {
         Palette::from_terminal_colors(rune::terminal_colors()?)
@@ -154,11 +145,6 @@ impl Palette {
         }
     }
 
-    pub fn with_cursor(mut self, cursor: Color) -> Palette {
-        self.cursor = cursor;
-        self
-    }
-
     /// The palette as a terminal would report it, for [`Kit::from_terminal_colors`].
     pub fn terminal_colors(&self) -> TerminalColors {
         let mut colors = TerminalColors::default();
@@ -190,7 +176,6 @@ pub struct Radius {
 #[non_exhaustive]
 pub struct Type {
     pub body: TextStyle,
-    pub body_medium: TextStyle,
     pub strong: TextStyle,
     /// A settings row's or menu row's title.
     pub row: TextStyle,
@@ -341,7 +326,6 @@ impl Theme {
             radius,
             ty: Type {
                 body: TextStyle::new(13.0, 400.0),
-                body_medium: TextStyle::new(13.0, 500.0),
                 strong: TextStyle::new(13.0, 600.0),
                 row: TextStyle::new(13.5, 400.0),
                 caption: TextStyle::new(12.0, 400.0),

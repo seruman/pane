@@ -42,7 +42,11 @@ fn text_on_a_fill_contrasts_with_it() {
 
 #[test]
 fn the_kit_is_rune_kits_terminal_kit() {
-    for palette in Palette::builtins() {
+    for palette in [
+        Palette::merino_dark(),
+        Palette::merino_light(),
+        Palette::charcoal_atelier(),
+    ] {
         let theme = Theme::new(palette.clone());
         let terminal = Kit::from_terminal_colors(palette.terminal_colors()).unwrap();
         assert_eq!(theme.kit.c.page, terminal.c.page, "{}", palette.name);
