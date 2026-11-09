@@ -95,11 +95,7 @@ impl Harness {
     /// Decodes `text` as the live source's format, delivers it, but does not search.
     fn source_event(&mut self, text: &str) -> Event {
         let Task::Source { token, format, .. } = self.take(TaskKind::Source) else { unreachable!() };
-        let mut decoder = RecordDecoder::new(format);
-        let result = decoder
-            .append(text.as_bytes())
-            .and_then(|mut items| { items.extend(decoder.finish()?); Ok(items) })
-            .map_err(|e| e.to_string());
+        let result = RecordDecoder::decode_all(format, text.as_bytes()).map_err(|e| e.to_string());
         Event::SourceDone { token, result }
     }
 
