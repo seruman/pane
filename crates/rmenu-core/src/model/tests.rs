@@ -1592,7 +1592,7 @@ fn an_operation_failure_survives_typing_and_moving() {
     assert_eq!(h.model.message(), Some("Command exited 3: permission denied"));
     h.settle();
     h.perform(0);
-    assert!(h.model.message().unwrap().starts_with("Running"), "the next action replaces it");
+    assert_eq!(h.model.message(), Some("Running ctrl+d…"), "the next action replaces it");
     h.finish_operation(0, "");
     h.query("o");
     assert_eq!(h.model.message(), None, "a later success is an acknowledgement again");
@@ -1604,7 +1604,7 @@ fn acknowledgements_retire_on_the_next_key() {
     h.load("one\ntwo\n");
     h.perform(0);
     h.finish_operation(0, "");
-    assert!(h.model.message().unwrap().ends_with("completed"));
+    assert_eq!(h.model.message(), Some("ctrl+d completed"));
     h.nav(Nav::Down);
     assert_eq!(h.model.message(), None);
 }
@@ -1645,12 +1645,35 @@ fn going_back_does_not_show_a_finished_operations_running_line() {
         "bindings": [{"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"]}, push_binding()]}));
     h.load(r#"{"id":"a","title":"alpha"}"#);
     h.perform(0);
-    assert!(h.model.message().unwrap().starts_with("Running"));
+    assert_eq!(h.model.message(), Some("Running star…"));
     h.perform(1);
     h.load(r#"{"id":"x","title":"xray"}"#);
     h.finish_operation(0, "");
     h.nav(Nav::Back);
-    assert!(!h.model.message().is_some_and(|m| m.starts_with("Running")), "{:?}", h.model.message());
+    assert_eq!(h.model.message(), None);
+    assert!(!h.model.message_is_error());
+}
+
+#[test]
+fn pop_restores_the_parent_acknowledgement_or_error() {
+    for (status, expected, is_error) in [(0, "star completed", false), (3, "Command exited 3: denied", true)] {
+        let mut h = start(json!({
+            "sources": [repos(json!({})), hidden("child", json!({}))],
+            "bindings": [{"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"]}, push_binding()]
+        }));
+        h.load(&jsonl(&REPOS));
+        h.perform(0);
+        h.finish_operation(status, "denied");
+        assert_eq!(h.model.message(), Some(expected), "status={status}");
+        h.perform(1);
+        h.load(&jsonl(&[("x", "xray")]));
+        assert_eq!(h.model.message(), None, "status={status}");
+        h.nav(Nav::Back);
+        assert_eq!(h.model.message(), Some(expected), "status={status}");
+        assert_eq!(h.model.message_is_error(), is_error, "status={status}");
+        h.nav(Nav::Down);
+        assert_eq!(h.model.message(), is_error.then_some(expected), "status={status}");
+    }
 }
 
 #[test]
