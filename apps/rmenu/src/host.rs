@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 use rmenu_core::command::{self, Cancel, CommandError, CommandResult};
 use rmenu_core::config::InputFormat;
 use rmenu_core::item::MenuItem;
-use rmenu_core::model::{Effect, Event, Model, Outcome, Task, TaskKind, command_failure, SOURCE_LIMITS, PREVIEW_LIMITS, OPERATION_LIMITS};
+use rmenu_core::model::{
+    Effect, Event, Model, OPERATION_LIMITS, Outcome, PREVIEW_LIMITS, SOURCE_LIMITS, Task, TaskKind, command_failure,
+};
 use rmenu_core::record::RecordDecoder;
 use rune::{TextEdit, Tx, Waker};
 
@@ -54,8 +56,19 @@ impl Menu {
         sender.send(Message::Start(effects)).expect("receiver was just created");
         let mut field = TextEdit::new(model.query());
         field.focused = true;
-        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, outcome, events, sender, waker: None,
-               tasks: HashMap::new(), stdin: None, retired: Vec::new(), revealed: None }
+        Menu {
+            model: std::mem::ManuallyDrop::new(model),
+            field,
+            appearance: launch.appearance,
+            outcome,
+            events,
+            sender,
+            waker: None,
+            tasks: HashMap::new(),
+            stdin: None,
+            retired: Vec::new(),
+            revealed: None,
+        }
     }
 
     pub fn setup(&mut self, waker: Waker) {
@@ -78,20 +91,28 @@ impl Menu {
                 }
                 match self.events.try_recv() {
                     Ok(Message::Event(Event::StdinItems(items))) => {
-                        if batch.is_empty() { batch = items; } else { batch.extend(items); }
+                        if batch.is_empty() {
+                            batch = items;
+                        } else {
+                            batch.extend(items);
+                        }
                         changed = true;
                     }
                     other => break other.ok(),
                 }
             };
-            if !batch.is_empty() { self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx); }
+            if !batch.is_empty() {
+                self.handle(Event::StdinItems(std::mem::take(&mut batch)), tx);
+            }
             match next {
                 Some(Message::Start(effects)) => self.apply(effects, tx),
                 Some(Message::Event(event)) => self.handle(event, tx),
                 None => break,
             }
             changed = true;
-            if self.outcome.borrow().is_some() { break; }
+            if self.outcome.borrow().is_some() {
+                break;
+            }
         }
         changed
     }
@@ -112,7 +133,9 @@ impl Menu {
     fn reveal(&mut self, tx: &mut Tx) {
         let Some(row) = self.model.highlighted_row() else { return };
         let at = (self.model.result_revision(), row);
-        if self.revealed == Some(at) { return; }
+        if self.revealed == Some(at) {
+            return;
+        }
         self.revealed = Some(at);
         tx.scroll_into_view_in(crate::view::ROWS_KEY, self.model.result(row).id.clone());
     }
@@ -136,7 +159,9 @@ impl Menu {
                 Effect::Finish(result) => {
                     self.stop();
                     let mut outcome = self.outcome.borrow_mut();
-                    if outcome.is_none() { *outcome = Some(result); }
+                    if outcome.is_none() {
+                        *outcome = Some(result);
+                    }
                     tx.quit();
                 }
             }
@@ -150,9 +175,13 @@ impl Menu {
         let flag = cancel.clone();
         let thread = std::thread::spawn(move || {
             let emit = |event: Event| {
-                if flag.is_cancelled() { return; }
+                if flag.is_cancelled() {
+                    return;
+                }
                 // The receiver only goes away as the process exits.
-                if sender.send(Message::Event(event)).is_ok() { waker(); }
+                if sender.send(Message::Event(event)).is_ok() {
+                    waker();
+                }
             };
             work(&flag, &emit);
         });
@@ -169,9 +198,14 @@ impl Menu {
 
     /// Cancels everything and waits for it, so no child process outlives the menu.
     pub fn stop(&mut self) {
-        let all: Vec<Running> = self.tasks.drain().map(|(_, r)| r).chain(self.stdin.take()).chain(self.retired.drain(..)).collect();
-        for running in &all { running.cancel.cancel(); }
-        for running in all { let _ = running.thread.join(); }
+        let all: Vec<Running> =
+            self.tasks.drain().map(|(_, r)| r).chain(self.stdin.take()).chain(self.retired.drain(..)).collect();
+        for running in &all {
+            running.cancel.cancel();
+        }
+        for running in all {
+            let _ = running.thread.join();
+        }
     }
 
     /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at
@@ -198,20 +232,32 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     let mut batch: Vec<MenuItem> = Vec::new();
     let mut last: Option<Instant> = None;
     let flush = |batch: &mut Vec<MenuItem>, last: &mut Option<Instant>, force: bool| {
-        if batch.is_empty() { return; }
+        if batch.is_empty() {
+            return;
+        }
         if force || last.is_none_or(|at| at.elapsed() >= STDIN_BATCH_INTERVAL) {
             emit(Event::StdinItems(std::mem::take(batch)));
             *last = Some(Instant::now());
         }
     };
     loop {
-        if cancel.is_cancelled() { return; }
+        if cancel.is_cancelled() {
+            return;
+        }
         let mut request = libc::pollfd { fd: libc::STDIN_FILENO, events: libc::POLLIN, revents: 0 };
         // SAFETY: one live pollfd, its count passed.
-        let ready = unsafe { libc::poll(&raw mut request, 1, STDIN_BATCH_INTERVAL.as_millis().try_into().expect("stdin poll interval fits c_int")) };
+        let ready = unsafe {
+            libc::poll(
+                &raw mut request,
+                1,
+                STDIN_BATCH_INTERVAL.as_millis().try_into().expect("stdin poll interval fits c_int"),
+            )
+        };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::Interrupted { continue; }
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
             return emit(Event::StdinFailed(format!("Cannot poll stdin: {error}")));
         }
         if ready == 0 {
@@ -220,10 +266,14 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
         }
         // SAFETY: reads into a live buffer of the length passed.
         let count = unsafe { libc::read(libc::STDIN_FILENO, buffer.as_mut_ptr().cast(), buffer.len()) };
-        if count == 0 { break; }
+        if count == 0 {
+            break;
+        }
         if count < 0 {
             let error = std::io::Error::last_os_error();
-            if matches!(error.kind(), std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) { continue; }
+            if matches!(error.kind(), std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock) {
+                continue;
+            }
             return emit(Event::StdinFailed(format!("Cannot read stdin: {error}")));
         }
         match decoder.append(&buffer[..count.cast_unsigned()]) {
@@ -259,7 +309,9 @@ fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
         Task::Preview { token, argv, env, delay } => {
             let until = Instant::now() + delay;
             while Instant::now() < until {
-                if cancel.is_cancelled() { return; }
+                if cancel.is_cancelled() {
+                    return;
+                }
                 std::thread::sleep(until.saturating_duration_since(Instant::now()).min(Duration::from_millis(5)));
             }
             let result = match command::run(&argv, None, &env, PREVIEW_LIMITS, cancel) {

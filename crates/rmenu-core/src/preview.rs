@@ -7,7 +7,10 @@ pub(crate) fn plain_text(text: &str) -> String {
         // A C1 control is the 7-bit ESC plus the character 0x40 below it.
         let escape = match ch {
             '\u{1b}' => match chars.peek() {
-                Some(&next) if ('@'..='_').contains(&next) => { chars.next(); Some(next) }
+                Some(&next) if ('@'..='_').contains(&next) => {
+                    chars.next();
+                    Some(next)
+                }
                 _ => None,
             },
             '\u{80}'..='\u{9f}' => Some(char::from(ch as u8 - 0x40)),
@@ -20,7 +23,11 @@ pub(crate) fn plain_text(text: &str) -> String {
                         column = 0;
                     }
                     _ => {
-                        if column < line.len() { line[column] = ch; } else { line.push(ch); }
+                        if column < line.len() {
+                            line[column] = ch;
+                        } else {
+                            line.push(ch);
+                        }
                         column += 1;
                     }
                 }
@@ -38,7 +45,10 @@ pub(crate) fn plain_text(text: &str) -> String {
                 while let Some(c) = chars.next() {
                     match c {
                         '\u{7}' | '\u{9c}' => break,
-                        '\u{1b}' => { chars.next_if_eq(&'\\'); break; }
+                        '\u{1b}' => {
+                            chars.next_if_eq(&'\\');
+                            break;
+                        }
                         _ => {}
                     }
                 }
@@ -95,11 +105,8 @@ mod tests {
 
     #[test]
     fn carriage_return_writes_over_the_start_of_its_line() {
-        for (input, expected) in [
-            ("line\r\nnext", "line\nnext"),
-            ("10%\r100%\ndone", "100%\ndone"),
-            ("abc\rX", "Xbc"),
-        ] {
+        for (input, expected) in [("line\r\nnext", "line\nnext"), ("10%\r100%\ndone", "100%\ndone"), ("abc\rX", "Xbc")]
+        {
             assert_eq!(plain_text(input), expected, "{input:?}");
         }
     }

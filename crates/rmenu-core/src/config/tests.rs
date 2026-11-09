@@ -1,7 +1,11 @@
 use super::*;
 
-fn parse(json: &str) -> MenuConfiguration { MenuConfiguration::parse(json.as_bytes(), None).unwrap() }
-fn error(json: &str) -> ConfigurationError { MenuConfiguration::parse(json.as_bytes(), None).unwrap_err() }
+fn parse(json: &str) -> MenuConfiguration {
+    MenuConfiguration::parse(json.as_bytes(), None).unwrap()
+}
+fn error(json: &str) -> ConfigurationError {
+    MenuConfiguration::parse(json.as_bytes(), None).unwrap_err()
+}
 
 #[test]
 fn deserialization_rejects_invalid_configuration() {
@@ -26,17 +30,26 @@ fn minimal_configuration() {
 
 #[test]
 fn unknown_and_irrelevant_fields_are_ignored() {
-    let config = parse(r#"{"future":1,"sources":[{"id":"a","label":"A","command":["echo"],"x":true}],
-        "bindings":[{"key":"ctrl+d","action":"copy","command":["x"],"source":"missing","reload":true}]}"#);
+    let config = parse(
+        r#"{"future":1,"sources":[{"id":"a","label":"A","command":["echo"],"x":true}],
+        "bindings":[{"key":"ctrl+d","action":"copy","command":["x"],"source":"missing","reload":true}]}"#,
+    );
     assert_eq!(config.bindings()[0].action, BindingAction::Copy);
 }
 
 #[test]
 fn binding_ids_name_the_action_independently_of_labels() {
-    let config = parse(r#"{"bindings":[{"key":"ctrl+v","id":"split-right","label":"Split right","action":"accept"},{"key":"cmd+d","label":"Star","action":"accept"},{"key":"Cmd+E","action":"accept"}]}"#);
-    assert_eq!(config.bindings().iter().map(MenuBinding::action_name).collect::<Vec<_>>(), ["split-right", "Star", "Cmd+E"]);
-    assert!(matches!(error(r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#),
-        ConfigurationError::DuplicateBindingId(id) if id == "x"));
+    let config = parse(
+        r#"{"bindings":[{"key":"ctrl+v","id":"split-right","label":"Split right","action":"accept"},{"key":"cmd+d","label":"Star","action":"accept"},{"key":"Cmd+E","action":"accept"}]}"#,
+    );
+    assert_eq!(
+        config.bindings().iter().map(MenuBinding::action_name).collect::<Vec<_>>(),
+        ["split-right", "Star", "Cmd+E"]
+    );
+    assert!(
+        matches!(error(r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#),
+        ConfigurationError::DuplicateBindingId(id) if id == "x")
+    );
     assert!(matches!(error(r#"{"bindings":[{"key":"ctrl+v","id":"","action":"accept"}]}"#),
         ConfigurationError::EmptyBindingId { key } if key == "ctrl+v"));
 }
@@ -72,12 +85,14 @@ fn source_and_binding_keys_share_one_normalized_namespace() {
 
 #[test]
 fn push_levels_decode() {
-    let config = parse(r#"
+    let config = parse(
+        r#"
     {"marks":"global","sources":[
       {"id":"repos","label":"Repositories","prompt":"Repos","command":["/bin/echo"]},
       {"id":"worktrees","label":"Worktrees","hidden":true,"preview":["/bin/echo","wt"],"command":["/bin/echo"],"format":"jsonl"}],
      "bindings":[{"key":"ctrl+w","id":"worktrees","label":"Worktrees","action":"push","source":"worktrees","sources":["repos"]},
-                 {"key":"ctrl+v","id":"split","action":"accept"}]}"#);
+                 {"key":"ctrl+v","id":"split","action":"accept"}]}"#,
+    );
     assert_eq!(config.marks(), MarkScope::Global);
     let (repos, worktrees) = (&config.sources()[0], &config.sources()[1]);
     assert_eq!(repos.prompt.as_deref(), Some("Repos"));
@@ -99,11 +114,16 @@ fn push_levels_decode() {
 
 #[test]
 fn root_source_skips_hidden_sources_unless_explicit() {
-    let config = parse(r#"{"sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}],"bindings":[{"key":"ctrl+w","action":"push","source":"w"}]}"#);
+    let config = parse(
+        r#"{"sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}],"bindings":[{"key":"ctrl+w","action":"push","source":"w"}]}"#,
+    );
     assert!(config.root_source().is_none());
-    let initial = parse(r#"{"initialSource":"w","sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}]}"#);
+    let initial =
+        parse(r#"{"initialSource":"w","sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}]}"#);
     assert_eq!(initial.root_source().map(|s| s.id.as_str()), Some("w"));
-    let visible = parse(r#"{"sources":[{"id":"w","label":"W","hidden":true,"command":["echo"]},{"id":"v","label":"V","command":["echo"]}]}"#);
+    let visible = parse(
+        r#"{"sources":[{"id":"w","label":"W","hidden":true,"command":["echo"]},{"id":"v","label":"V","command":["echo"]}]}"#,
+    );
     assert_eq!(visible.root_source().map(|s| s.id.as_str()), Some("v"));
 }
 
@@ -113,19 +133,34 @@ fn invalid_source_references_report_the_rule_and_entry() {
     let hidden = r#"{"id":"h","label":"H","hidden":true,"command":["echo"]}"#;
     assert!(matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"push"}}]}}"#)),
         ConfigurationError::MissingSource { key } if key == "ctrl+w"));
-    assert!(matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"source","source":"missing"}}]}}"#)),
-        ConfigurationError::UnknownSource { key, source } if key == "ctrl+w" && source == "missing"));
-    assert!(matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":[]}}]}}"#)),
-        ConfigurationError::EmptySources { key } if key == "ctrl+w"));
-    assert!(matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":["missing"]}}]}}"#)),
-        ConfigurationError::UnknownRestriction { key, source } if key == "ctrl+w" && source == "missing"));
-    assert!(matches!(error(&format!(r#"{{"sources":[{source},{hidden}],"bindings":[{{"key":"cmd+2","action":"source","source":"h"}}]}}"#)),
-        ConfigurationError::HiddenSourceTarget { key, source } if key == "cmd+2" && source == "h"));
+    assert!(
+        matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"source","source":"missing"}}]}}"#)),
+        ConfigurationError::UnknownSource { key, source } if key == "ctrl+w" && source == "missing")
+    );
+    assert!(
+        matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":[]}}]}}"#)),
+        ConfigurationError::EmptySources { key } if key == "ctrl+w")
+    );
+    assert!(
+        matches!(error(&format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":["missing"]}}]}}"#)),
+        ConfigurationError::UnknownRestriction { key, source } if key == "ctrl+w" && source == "missing")
+    );
+    assert!(
+        matches!(error(&format!(r#"{{"sources":[{source},{hidden}],"bindings":[{{"key":"cmd+2","action":"source","source":"h"}}]}}"#)),
+        ConfigurationError::HiddenSourceTarget { key, source } if key == "cmd+2" && source == "h")
+    );
     assert!(matches!(error(r#"{"sources":[{"id":"h","label":"H","hidden":true,"key":"cmd+2","command":["echo"]}]}"#),
         ConfigurationError::HiddenSourceKey(id) if id == "h"));
-    assert!(matches!(error(&format!(r#"{{"sources":[{source},{source}]}}"#)), ConfigurationError::DuplicateSourceId(id) if id == "a"));
-    assert!(matches!(error(r#"{"sources":[{"id":"","label":"A","command":["echo"]}]}"#), ConfigurationError::EmptySourceId));
-    assert!(matches!(error(&format!(r#"{{"initialSource":"missing","sources":[{source}]}}"#)), ConfigurationError::UnknownInitialSource(id) if id == "missing"));
+    assert!(
+        matches!(error(&format!(r#"{{"sources":[{source},{source}]}}"#)), ConfigurationError::DuplicateSourceId(id) if id == "a")
+    );
+    assert!(matches!(
+        error(r#"{"sources":[{"id":"","label":"A","command":["echo"]}]}"#),
+        ConfigurationError::EmptySourceId
+    ));
+    assert!(
+        matches!(error(&format!(r#"{{"initialSource":"missing","sources":[{source}]}}"#)), ConfigurationError::UnknownInitialSource(id) if id == "missing")
+    );
 }
 
 #[test]
@@ -146,7 +181,10 @@ fn commands_without_a_runnable_program_fail_at_load() {
         (source(r#""command":["echo","a\u0000b"]"#), "Source a command"),
         (source(r#""command":["echo"],"preview":["x\u0000"]"#), "Source a preview command"),
         (r#"{"preview":["x\u0000"]}"#.to_owned(), "Preview command"),
-        (r#"{"bindings":[{"key":"ctrl+r","action":"run","command":["x\u0000"]}]}"#.to_owned(), "Run binding ctrl+r command"),
+        (
+            r#"{"bindings":[{"key":"ctrl+r","action":"run","command":["x\u0000"]}]}"#.to_owned(),
+            "Run binding ctrl+r command",
+        ),
     ] {
         assert!(matches!(error(&json), ConfigurationError::CommandNul { entry } if entry == expected), "{json}");
     }
@@ -154,41 +192,59 @@ fn commands_without_a_runnable_program_fail_at_load() {
 
 #[test]
 fn command_chords_are_listed_once_each_without_changing_spelling() {
-    let config = parse(r#"{"sources":[{"id":"a","label":"A","key":"cmd+1","command":["echo"]},{"id":"b","label":"B","key":"ctrl+2","command":["echo"]}],
-        "bindings":[{"key":"Shift+Cmd+R","action":"accept"},{"key":"ctrl+e","action":"accept"},{"key":"cmd+e","action":"copy"}]}"#);
+    let config = parse(
+        r#"{"sources":[{"id":"a","label":"A","key":"cmd+1","command":["echo"]},{"id":"b","label":"B","key":"ctrl+2","command":["echo"]}],
+        "bindings":[{"key":"Shift+Cmd+R","action":"accept"},{"key":"ctrl+e","action":"accept"},{"key":"cmd+e","action":"copy"}]}"#,
+    );
     assert_eq!(config.command_chords().collect::<Vec<_>>(), ["cmd+1", "Shift+Cmd+R", "cmd+e"]);
 }
 
 #[test]
 fn multi_and_reload_are_off_unless_true() {
-    for (json, multi) in [("{}", false), (r#"{"multi":null}"#, false), (r#"{"multi":false}"#, false), (r#"{"multi":true}"#, true)] {
+    for (json, multi) in
+        [("{}", false), (r#"{"multi":null}"#, false), (r#"{"multi":false}"#, false), (r#"{"multi":true}"#, true)]
+    {
         assert_eq!(parse(json).multi(), multi, "{json}");
     }
-    for (extra, expected) in [("", false), (r#", "reload":null"#, false), (r#", "reload":false"#, false), (r#", "reload":true"#, true)] {
+    for (extra, expected) in
+        [("", false), (r#", "reload":null"#, false), (r#", "reload":false"#, false), (r#", "reload":true"#, true)]
+    {
         let config = parse(&format!(r#"{{"bindings":[{{"key":"ctrl+d","action":"run","command":["x"]{extra}}}]}}"#));
-        assert_eq!(config.bindings()[0].action, BindingAction::Run { command: vec!["x".into()], reload: expected }, "{extra}");
+        assert_eq!(
+            config.bindings()[0].action,
+            BindingAction::Run { command: vec!["x".into()], reload: expected },
+            "{extra}"
+        );
     }
 }
 
 #[test]
 fn invalid_wire_types_are_json_errors() {
-    for json in [r#"{"multi":"yes"}"#, r#"{"marks":"shared"}"#,
+    for json in [
+        r#"{"multi":"yes"}"#,
+        r#"{"marks":"shared"}"#,
         r#"{"sources":[{"id":"a","label":"A","hidden":"yes","command":["echo"]}]}"#,
-        r#"{"bindings":[{"key":"ctrl+d","action":"run","command":["x"],"reload":"yes"}]}"#] {
+        r#"{"bindings":[{"key":"ctrl+d","action":"run","command":["x"],"reload":"yes"}]}"#,
+    ] {
         assert!(matches!(error(json), ConfigurationError::Json(_)), "{json}");
     }
 }
 
 #[test]
 fn former_warm_theme_name_still_parses() {
-    for theme in ["rex", "native", "warm"] { parse(&format!(r#"{{"theme":"{theme}"}}"#)); }
+    for theme in ["rex", "native", "warm"] {
+        parse(&format!(r#"{{"theme":"{theme}"}}"#));
+    }
     assert_eq!(serde_json::from_str::<Theme>(r#""warm""#).unwrap(), Theme::Rex);
     assert!(matches!(error(r#"{"theme":"sepia"}"#), ConfigurationError::Json(_)));
 }
 
 #[test]
 fn preview_override_is_applied_before_command_validation() {
-    let config = MenuConfiguration::parse(br#"{"preview":[]}"#, Some(vec!["sh".into(), "-c".into(), "echo".into()])).unwrap();
+    let config =
+        MenuConfiguration::parse(br#"{"preview":[]}"#, Some(vec!["sh".into(), "-c".into(), "echo".into()])).unwrap();
     assert_eq!(config.preview(), Some(["sh".into(), "-c".into(), "echo".into()].as_slice()));
-    assert!(matches!(MenuConfiguration::parse(b"{}", Some(vec![String::new()])), Err(ConfigurationError::MissingProgram { entry }) if entry == "Preview command"));
+    assert!(
+        matches!(MenuConfiguration::parse(b"{}", Some(vec![String::new()])), Err(ConfigurationError::MissingProgram { entry }) if entry == "Preview command")
+    );
 }

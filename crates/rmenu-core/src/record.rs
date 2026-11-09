@@ -66,8 +66,14 @@ impl RecordDecoder {
     pub const MAXIMUM_RECORD_BYTES: usize = 1_048_576;
 
     pub fn new(format: InputFormat) -> Self {
-        RecordDecoder { format, pending: Vec::new(), seen_ids: HashSet::new(), records: 0, next_id: 0,
-                        state: State::Open }
+        RecordDecoder {
+            format,
+            pending: Vec::new(),
+            seen_ids: HashSet::new(),
+            records: 0,
+            next_id: 0,
+            state: State::Open,
+        }
     }
 
     pub fn decode_all(format: InputFormat, bytes: &[u8]) -> Result<Vec<MenuItem>, RecordError> {
@@ -111,7 +117,9 @@ impl RecordDecoder {
             State::Failed(error) => return Err(error.clone()),
         }
         self.state = State::Finished;
-        if self.pending.is_empty() { return Ok(Vec::new()); }
+        if self.pending.is_empty() {
+            return Ok(Vec::new());
+        }
         self.consume(false).map(|item| item.into_iter().collect()).map_err(|error| self.fail(error))
     }
 
@@ -125,11 +133,15 @@ impl RecordDecoder {
         self.records += 1;
         let record = self.records;
         let mut bytes = std::mem::take(&mut self.pending);
-        if terminated && self.format.strips_cr() && bytes.last() == Some(&b'\r') { bytes.pop(); }
+        if terminated && self.format.strips_cr() && bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
         let text = String::from_utf8(bytes).map_err(|_| RecordError::InvalidUtf8 { record })?;
         match self.format {
             InputFormat::Jsonl => {
-                if text.chars().all(char::is_whitespace) { return Ok(None); }
+                if text.chars().all(char::is_whitespace) {
+                    return Ok(None);
+                }
                 let item: MenuItem = serde_json::from_str(&text)
                     .map_err(|e| RecordError::MalformedJson { record, reason: e.to_string() })?;
                 if !self.seen_ids.insert(item.id.clone()) {
@@ -154,13 +166,17 @@ mod tests {
     fn decode(bytes: &[u8], format: InputFormat, chunk: usize) -> Result<Vec<MenuItem>, RecordError> {
         let mut decoder = RecordDecoder::new(format);
         let mut items = Vec::new();
-        for piece in bytes.chunks(chunk) { items.extend(decoder.append(piece)?); }
+        for piece in bytes.chunks(chunk) {
+            items.extend(decoder.append(piece)?);
+        }
         items.extend(decoder.finish()?);
         assert!(decoder.finish()?.is_empty());
         Ok(items)
     }
 
-    fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(MenuItem::title).collect() }
+    fn titles(items: &[MenuItem]) -> Vec<&str> {
+        items.iter().map(MenuItem::title).collect()
+    }
 
     #[test]
     fn whole_input_matches_streamed_input() {
@@ -172,7 +188,11 @@ mod tests {
             (Jsonl, b"{\"id\":\"1\",\"title\":\"one\"}\ninvalid".as_slice()),
         ] {
             for chunk in 1..=bytes.len() {
-                assert_eq!(RecordDecoder::decode_all(format, bytes), decode(bytes, format, chunk), "{format:?}, chunk {chunk}");
+                assert_eq!(
+                    RecordDecoder::decode_all(format, bytes),
+                    decode(bytes, format, chunk),
+                    "{format:?}, chunk {chunk}"
+                );
             }
         }
     }
@@ -198,7 +218,9 @@ mod tests {
 
     #[test]
     fn empty_and_trailing_records() {
-        for format in [Lines, Nul, Jsonl] { assert!(decode(b"", format, 1).unwrap().is_empty()); }
+        for format in [Lines, Nul, Jsonl] {
+            assert!(decode(b"", format, 1).unwrap().is_empty());
+        }
         assert_eq!(titles(&decode(b"\n\n", Lines, 1).unwrap()), ["", ""]);
         assert_eq!(titles(&decode(b"\0\0", Nul, 1).unwrap()), ["", ""]);
         assert!(decode(b"\r\n\n \t\n", Jsonl, 1).unwrap().is_empty());
@@ -211,9 +233,11 @@ mod tests {
     #[test]
     fn structured_streaming_and_defaults() {
         let text = concat!(
-            r#"{"id":"a","title":"café 東京","subtitle":"sub","search":"find","detail":"detail"}"#, "\r\n\n",
+            r#"{"id":"a","title":"café 東京","subtitle":"sub","search":"find","detail":"detail"}"#,
+            "\r\n\n",
             r#"{"id":"b","title":"café 東京","value":"different"}"#,
-        ).as_bytes();
+        )
+        .as_bytes();
         let mut a = MenuItem::new("a", "café 東京");
         a.subtitle = Some("sub".into());
         a.search = Some("find".into());
@@ -241,9 +265,18 @@ mod tests {
 
     #[test]
     fn malformed_json_and_required_fields() {
-        for text in ["not json", "{}", "[]", "null", r#"{"id":"x"}"#, r#"{"title":"x"}"#,
-                     r#"{"id":1,"title":"x"}"#, r#"{"id":"x","title":null}"#,
-                     r#"{"id":"x","title":"x","value":2}"#, r#"{"id":"x","title":"x"} trailing"#] {
+        for text in [
+            "not json",
+            "{}",
+            "[]",
+            "null",
+            r#"{"id":"x"}"#,
+            r#"{"title":"x"}"#,
+            r#"{"id":1,"title":"x"}"#,
+            r#"{"id":"x","title":null}"#,
+            r#"{"id":"x","title":"x","value":2}"#,
+            r#"{"id":"x","title":"x"} trailing"#,
+        ] {
             match decode(text.as_bytes(), Jsonl, 1) {
                 Err(RecordError::MalformedJson { record: 1, reason }) => assert!(!reason.is_empty()),
                 other => panic!("{text}: {other:?}"),
@@ -270,9 +303,13 @@ mod tests {
         let limit = RecordDecoder::MAXIMUM_RECORD_BYTES;
         let block = [b'a'; 4096];
         let mut decoder = RecordDecoder::new(Lines);
-        for _ in 0..limit / block.len() { assert!(decoder.append(&block).unwrap().is_empty()); }
+        for _ in 0..limit / block.len() {
+            assert!(decoder.append(&block).unwrap().is_empty());
+        }
         assert_eq!(decoder.append(b"\n").unwrap()[0].title().len(), limit);
-        for _ in 0..limit / block.len() { assert!(decoder.append(&block).unwrap().is_empty()); }
+        for _ in 0..limit / block.len() {
+            assert!(decoder.append(&block).unwrap().is_empty());
+        }
         let too_large = RecordError::RecordTooLarge { record: 2 };
         assert_eq!(decoder.append(b"a"), Err(too_large.clone()));
         assert_eq!(decoder.finish(), Err(too_large));

@@ -26,20 +26,30 @@ fn bench(count: usize, runs: usize, calls: usize) {
     let roots = ["Sources", "Tests", "Examples", "Packages"];
     let items: Vec<MenuItem> = (0..count)
         .map(|i| {
-            let path = format!("workspace/project-{}/{}/{}/{}-{i}.swift", i % 97, roots[i % roots.len()],
-                               modules[i % modules.len()], names[(i / 7) % names.len()]);
+            let path = format!(
+                "workspace/project-{}/{}/{}/{}-{i}.swift",
+                i % 97,
+                roots[i % roots.len()],
+                modules[i % modules.len()],
+                names[(i / 7) % names.len()]
+            );
             MenuItem::new(i.to_string(), path)
         })
         .collect();
     let start = Instant::now();
     let index = SearchIndex::from(items);
     println!("{count} paths, index {:.3} ms, {runs} runs, {calls} calls per run", ms(start.elapsed()));
-    let queries = ["", "swift", "srchidx", "mcore srch", "tests cache", "project-42 settings", "不存在", "zzzz-no-match"];
+    let queries =
+        ["", "swift", "srchidx", "mcore srch", "tests cache", "project-42 settings", "不存在", "zzzz-no-match"];
     for order in [Order::Ranked, Order::Input] {
         for query in queries {
             let expected = index.search(query, order, &|| false).unwrap();
-            if query.is_empty() || query == "swift" { assert_eq!(expected.len(), count); }
-            if query == "不存在" || query == "zzzz-no-match" { assert!(expected.is_empty()); }
+            if query.is_empty() || query == "swift" {
+                assert_eq!(expected.len(), count);
+            }
+            if query == "不存在" || query == "zzzz-no-match" {
+                assert!(expected.is_empty());
+            }
             let mut times = Vec::new();
             for _ in 0..runs {
                 let mut elapsed = Duration::ZERO;
@@ -52,10 +62,19 @@ fn bench(count: usize, runs: usize, calls: usize) {
                 times.push(elapsed.as_secs_f64() * 1e3 / calls as f64);
             }
             times.sort_by(f64::total_cmp);
-            println!("{} {query:?}: min {:.3}, median {:.3}, max {:.3} ms, {} matches, {} verified calls, 0 errors",
-                     if order == Order::Ranked { "ranked  " } else { "unsorted" }, times[0], times[runs / 2], times[runs - 1], expected.len(), runs * calls);
+            println!(
+                "{} {query:?}: min {:.3}, median {:.3}, max {:.3} ms, {} matches, {} verified calls, 0 errors",
+                if order == Order::Ranked { "ranked  " } else { "unsorted" },
+                times[0],
+                times[runs / 2],
+                times[runs - 1],
+                expected.len(),
+                runs * calls
+            );
         }
     }
 }
 
-fn ms(d: Duration) -> f64 { d.as_secs_f64() * 1e3 }
+fn ms(d: Duration) -> f64 {
+    d.as_secs_f64() * 1e3
+}

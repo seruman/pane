@@ -45,11 +45,15 @@ impl std::str::FromStr for Theme {
 pub struct SourceId(String);
 
 impl SourceId {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Display for SourceId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -137,9 +141,13 @@ impl fmt::Display for ConfigurationError {
             Self::DuplicateBindingId(id) => write!(f, "Duplicate binding ID: {id}"),
             Self::MissingSource { key } => write!(f, "Binding {key} needs a source."),
             Self::UnknownSource { key, source } => write!(f, "Binding {key} references unknown source {source}."),
-            Self::HiddenSourceTarget { key, source } => write!(f, "Binding {key} cannot switch to hidden source {source}. Push it instead."),
+            Self::HiddenSourceTarget { key, source } => {
+                write!(f, "Binding {key} cannot switch to hidden source {source}. Push it instead.")
+            }
             Self::EmptySources { key } => write!(f, "Binding {key} has an empty sources list."),
-            Self::UnknownRestriction { key, source } => write!(f, "Binding {key} is restricted to unknown source {source}."),
+            Self::UnknownRestriction { key, source } => {
+                write!(f, "Binding {key} is restricted to unknown source {source}.")
+            }
             Self::InvalidChord(raw) => write!(f, "Invalid key chord: {raw}"),
             Self::InvalidModifiers(raw) => write!(f, "Use the cmd, ctrl, alt, or shift modifiers in {raw}."),
             Self::MissingModifier(raw) => write!(f, "Bindings need a modifier: {raw}"),
@@ -151,7 +159,10 @@ impl fmt::Display for ConfigurationError {
 
 impl std::error::Error for ConfigurationError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self { Self::Json(error) => Some(error), _ => None }
+        match self {
+            Self::Json(error) => Some(error),
+            _ => None,
+        }
     }
 }
 
@@ -208,8 +219,12 @@ enum RawAction {
         reload: bool,
     },
     Reload,
-    Source { source: Option<String> },
-    Push { source: Option<String> },
+    Source {
+        source: Option<String>,
+    },
+    Push {
+        source: Option<String>,
+    },
     TogglePreview,
 }
 
@@ -230,16 +245,30 @@ pub struct KeyChord {
 impl MenuConfiguration {
     pub fn parse(bytes: &[u8], preview_override: Option<Vec<String>>) -> Result<Self, ConfigurationError> {
         let mut raw: RawConfiguration = serde_json::from_slice(bytes).map_err(ConfigurationError::Json)?;
-        if let Some(preview) = preview_override { raw.preview = Some(preview); }
+        if let Some(preview) = preview_override {
+            raw.preview = Some(preview);
+        }
         raw.try_into()
     }
 
-    pub fn prompt(&self) -> Option<&str> { self.prompt.as_deref() }
-    pub fn multi(&self) -> bool { self.multi }
-    pub fn sources(&self) -> &[MenuSource] { &self.sources }
-    pub fn bindings(&self) -> &[MenuBinding] { &self.bindings }
-    pub fn preview(&self) -> Option<&[String]> { self.preview.as_deref() }
-    pub fn marks(&self) -> MarkScope { self.marks }
+    pub fn prompt(&self) -> Option<&str> {
+        self.prompt.as_deref()
+    }
+    pub fn multi(&self) -> bool {
+        self.multi
+    }
+    pub fn sources(&self) -> &[MenuSource] {
+        &self.sources
+    }
+    pub fn bindings(&self) -> &[MenuBinding] {
+        &self.bindings
+    }
+    pub fn preview(&self) -> Option<&[String]> {
+        self.preview.as_deref()
+    }
+    pub fn marks(&self) -> MarkScope {
+        self.marks
+    }
 
     pub fn source(&self, id: &SourceId) -> Option<&MenuSource> {
         self.sources.iter().find(|source| &source.id == id)
@@ -253,7 +282,10 @@ impl MenuConfiguration {
     }
 
     pub fn command_chords(&self) -> impl Iterator<Item = &str> {
-        self.sources.iter().filter(|s| s.key.as_ref().is_some_and(|key| key.command)).filter_map(|s| s.raw_key.as_deref())
+        self.sources
+            .iter()
+            .filter(|s| s.key.as_ref().is_some_and(|key| key.command))
+            .filter_map(|s| s.raw_key.as_deref())
             .chain(self.bindings.iter().filter(|b| b.key.command).map(|b| b.raw_key.as_str()))
     }
 }
@@ -264,44 +296,96 @@ impl TryFrom<RawConfiguration> for MenuConfiguration {
     fn try_from(raw: RawConfiguration) -> Result<Self, Self::Error> {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
-        let sources = raw.sources.into_iter().map(|source| source.parse(&mut ids, &mut keys)).collect::<Result<Vec<_>, _>>()?;
-        let initial_source = raw.initial_source.map(|id| {
-            sources.iter().find(|s| s.id.as_str() == id).map(|s| s.id.clone())
-                .ok_or(ConfigurationError::UnknownInitialSource(id))
-        }).transpose()?;
-        if let Some(preview) = &raw.preview { check_argv(preview, "Preview command".into())?; }
+        let sources =
+            raw.sources.into_iter().map(|source| source.parse(&mut ids, &mut keys)).collect::<Result<Vec<_>, _>>()?;
+        let initial_source = raw
+            .initial_source
+            .map(|id| {
+                sources
+                    .iter()
+                    .find(|s| s.id.as_str() == id)
+                    .map(|s| s.id.clone())
+                    .ok_or(ConfigurationError::UnknownInitialSource(id))
+            })
+            .transpose()?;
+        if let Some(preview) = &raw.preview {
+            check_argv(preview, "Preview command".into())?;
+        }
         let mut binding_ids = HashSet::new();
-        let bindings = raw.bindings.into_iter().map(|binding| binding.parse(&sources, &mut binding_ids, &mut keys))
+        let bindings = raw
+            .bindings
+            .into_iter()
+            .map(|binding| binding.parse(&sources, &mut binding_ids, &mut keys))
             .collect::<Result<_, _>>()?;
-        Ok(Self { prompt: raw.prompt, multi: raw.multi, sources, bindings, preview: raw.preview, initial_source, marks: raw.marks })
+        Ok(Self {
+            prompt: raw.prompt,
+            multi: raw.multi,
+            sources,
+            bindings,
+            preview: raw.preview,
+            initial_source,
+            marks: raw.marks,
+        })
     }
 }
 
 impl RawSource {
     fn parse(self, ids: &mut HashSet<String>, keys: &mut HashSet<KeyChord>) -> Result<MenuSource, ConfigurationError> {
-        if self.id.is_empty() { return Err(ConfigurationError::EmptySourceId); }
-        if !ids.insert(self.id.clone()) { return Err(ConfigurationError::DuplicateSourceId(self.id)); }
+        if self.id.is_empty() {
+            return Err(ConfigurationError::EmptySourceId);
+        }
+        if !ids.insert(self.id.clone()) {
+            return Err(ConfigurationError::DuplicateSourceId(self.id));
+        }
         check_argv(&self.command, format!("Source {} command", self.id))?;
-        if let Some(preview) = &self.preview { check_argv(preview, format!("Source {} preview command", self.id))?; }
-        let key = self.key.as_ref().map(|raw| {
-            if self.hidden { return Err(ConfigurationError::HiddenSourceKey(self.id.clone())); }
-            add_key(raw, keys)
-        }).transpose()?;
-        Ok(MenuSource { id: SourceId(self.id), label: self.label, key, raw_key: self.key, command: self.command,
-            format: self.format, prompt: self.prompt, preview: self.preview, hidden: self.hidden })
+        if let Some(preview) = &self.preview {
+            check_argv(preview, format!("Source {} preview command", self.id))?;
+        }
+        let key = self
+            .key
+            .as_ref()
+            .map(|raw| {
+                if self.hidden {
+                    return Err(ConfigurationError::HiddenSourceKey(self.id.clone()));
+                }
+                add_key(raw, keys)
+            })
+            .transpose()?;
+        Ok(MenuSource {
+            id: SourceId(self.id),
+            label: self.label,
+            key,
+            raw_key: self.key,
+            command: self.command,
+            format: self.format,
+            prompt: self.prompt,
+            preview: self.preview,
+            hidden: self.hidden,
+        })
     }
 }
 
 impl RawBinding {
-    fn parse(self, sources: &[MenuSource], ids: &mut HashSet<String>, keys: &mut HashSet<KeyChord>) -> Result<MenuBinding, ConfigurationError> {
+    fn parse(
+        self,
+        sources: &[MenuSource],
+        ids: &mut HashSet<String>,
+        keys: &mut HashSet<KeyChord>,
+    ) -> Result<MenuBinding, ConfigurationError> {
         let key = add_key(&self.key, keys)?;
         if let Some(id) = &self.id {
-            if id.is_empty() { return Err(ConfigurationError::EmptyBindingId { key: self.key }); }
-            if !ids.insert(id.clone()) { return Err(ConfigurationError::DuplicateBindingId(id.clone())); }
+            if id.is_empty() {
+                return Err(ConfigurationError::EmptyBindingId { key: self.key });
+            }
+            if !ids.insert(id.clone()) {
+                return Err(ConfigurationError::DuplicateBindingId(id.clone()));
+            }
         }
         let target = |id: Option<String>| -> Result<&MenuSource, ConfigurationError> {
             let id = id.ok_or_else(|| ConfigurationError::MissingSource { key: self.key.clone() })?;
-            sources.iter().find(|s| s.id.as_str() == id)
+            sources
+                .iter()
+                .find(|s| s.id.as_str() == id)
                 .ok_or_else(|| ConfigurationError::UnknownSource { key: self.key.clone(), source: id })
         };
         let action = match self.action {
@@ -317,31 +401,52 @@ impl RawBinding {
             RawAction::Source { source } => {
                 let source = target(source)?;
                 if source.hidden {
-                    return Err(ConfigurationError::HiddenSourceTarget { key: self.key, source: source.id.to_string() });
+                    return Err(ConfigurationError::HiddenSourceTarget {
+                        key: self.key,
+                        source: source.id.to_string(),
+                    });
                 }
                 BindingAction::Source { source: source.id.clone() }
             }
             RawAction::Push { source } => BindingAction::Push { source: target(source)?.id.clone() },
         };
-        let restrictions = self.sources.map(|ids| {
-            if ids.is_empty() { return Err(ConfigurationError::EmptySources { key: self.key.clone() }); }
-            ids.into_iter().map(|id| sources.iter().find(|s| s.id.as_str() == id).map(|s| s.id.clone())
-                .ok_or_else(|| ConfigurationError::UnknownRestriction { key: self.key.clone(), source: id })).collect()
-        }).transpose()?;
+        let restrictions =
+            self.sources
+                .map(|ids| {
+                    if ids.is_empty() {
+                        return Err(ConfigurationError::EmptySources { key: self.key.clone() });
+                    }
+                    ids.into_iter()
+                        .map(|id| {
+                            sources.iter().find(|s| s.id.as_str() == id).map(|s| s.id.clone()).ok_or_else(|| {
+                                ConfigurationError::UnknownRestriction { key: self.key.clone(), source: id }
+                            })
+                        })
+                        .collect()
+                })
+                .transpose()?;
         Ok(MenuBinding { key, id: self.id, label: self.label, action, raw_key: self.key, sources: restrictions })
     }
 }
 
 fn check_argv(argv: &[String], entry: String) -> Result<(), ConfigurationError> {
-    if argv.first().is_none_or(String::is_empty) { return Err(ConfigurationError::MissingProgram { entry }); }
-    if argv.iter().any(|a| a.contains('\0')) { return Err(ConfigurationError::CommandNul { entry }); }
+    if argv.first().is_none_or(String::is_empty) {
+        return Err(ConfigurationError::MissingProgram { entry });
+    }
+    if argv.iter().any(|a| a.contains('\0')) {
+        return Err(ConfigurationError::CommandNul { entry });
+    }
     Ok(())
 }
 
 fn add_key(raw: &str, keys: &mut HashSet<KeyChord>) -> Result<KeyChord, ConfigurationError> {
     let chord = KeyChord::parse(raw)?;
-    if chord.is_reserved() { return Err(ConfigurationError::ReservedChord(raw.into())); }
-    if !keys.insert(chord.clone()) { return Err(ConfigurationError::DuplicateChord(raw.into())); }
+    if chord.is_reserved() {
+        return Err(ConfigurationError::ReservedChord(raw.into()));
+    }
+    if !keys.insert(chord.clone()) {
+        return Err(ConfigurationError::DuplicateChord(raw.into()));
+    }
     Ok(chord)
 }
 
@@ -374,8 +479,13 @@ impl KeyChord {
             return Err(ConfigurationError::InvalidModifiers(raw.into()));
         }
         let has = |m: &str| modifiers.contains(&m);
-        let chord = KeyChord { key: (*key).to_owned(), command: has("cmd"), control: has("ctrl"),
-                               option: has("alt"), shift: has("shift") };
+        let chord = KeyChord {
+            key: (*key).to_owned(),
+            command: has("cmd"),
+            control: has("ctrl"),
+            option: has("alt"),
+            shift: has("shift"),
+        };
         if !chord.command && !chord.control && !chord.option && key.chars().count() == 1 {
             return Err(ConfigurationError::MissingModifier(raw.into()));
         }
@@ -403,8 +513,13 @@ impl KeyChord {
             other => other.to_uppercase(),
         };
         let flag = |on: bool, symbol: &'static str| if on { symbol } else { "" };
-        format!("{}{}{}{}{key}", flag(self.control, "⌃"), flag(self.option, "⌥"), flag(self.shift, "⇧"),
-                flag(self.command, "⌘"))
+        format!(
+            "{}{}{}{}{key}",
+            flag(self.control, "⌃"),
+            flag(self.option, "⌥"),
+            flag(self.shift, "⇧"),
+            flag(self.command, "⌘")
+        )
     }
 }
 

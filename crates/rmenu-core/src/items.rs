@@ -13,7 +13,9 @@ pub struct RowOffset(pub(crate) u32);
 
 impl TryFrom<usize> for RowOffset {
     type Error = std::num::TryFromIntError;
-    fn try_from(offset: usize) -> Result<Self, Self::Error> { u32::try_from(offset).map(Self) }
+    fn try_from(offset: usize) -> Result<Self, Self::Error> {
+        u32::try_from(offset).map(Self)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -45,7 +47,9 @@ impl Items {
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &MenuItem> { self.chunks.iter().flat_map(|c| c.items.iter()) }
+    pub fn iter(&self) -> impl Iterator<Item = &MenuItem> {
+        self.chunks.iter().flat_map(|c| c.items.iter())
+    }
 }
 
 impl From<Vec<MenuItem>> for Items {
@@ -58,13 +62,17 @@ impl From<Vec<MenuItem>> for Items {
 
 impl Index<RowOffset> for Items {
     type Output = MenuItem;
-    fn index(&self, offset: RowOffset) -> &MenuItem { &self.chunks[offset.0 as usize / CHUNK].items[offset.0 as usize % CHUNK] }
+    fn index(&self, offset: RowOffset) -> &MenuItem {
+        &self.chunks[offset.0 as usize / CHUNK].items[offset.0 as usize % CHUNK]
+    }
 }
 
 #[cfg(test)]
 impl Index<usize> for Items {
     type Output = MenuItem;
-    fn index(&self, i: usize) -> &MenuItem { &self.chunks[i / CHUNK].items[i % CHUNK] }
+    fn index(&self, i: usize) -> &MenuItem {
+        &self.chunks[i / CHUNK].items[i % CHUNK]
+    }
 }
 
 #[cfg(test)]
@@ -72,7 +80,9 @@ mod tests {
     use super::*;
     use crate::search::Order;
 
-    fn titles(items: &Items) -> Vec<String> { items.iter().map(|i| i.title().to_owned()).collect() }
+    fn titles(items: &Items) -> Vec<String> {
+        items.iter().map(|i| i.title().to_owned()).collect()
+    }
 
     #[test]
     fn appends_past_chunks_index_in_order_and_leave_snapshots_alone() {
@@ -98,7 +108,9 @@ mod tests {
         let mut items = Items::default();
         items.extend((0..CHUNK - 1).map(|i| MenuItem::new(i.to_string(), "old")));
         let snapshot = items.clone();
-        items.extend((CHUNK - 1..CHUNK + 2).map(|i| MenuItem::new(i.to_string(), "new").with_value(format!("value-{i}"))));
+        items.extend(
+            (CHUNK - 1..CHUNK + 2).map(|i| MenuItem::new(i.to_string(), "new").with_value(format!("value-{i}"))),
+        );
         let offsets = items.search("new", Order::Input, &|| false).unwrap();
         assert_eq!(offsets, [CHUNK - 1, CHUNK, CHUNK + 1].map(|offset| RowOffset::try_from(offset).unwrap()));
         for offset in offsets {

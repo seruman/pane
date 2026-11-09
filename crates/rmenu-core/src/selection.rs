@@ -25,13 +25,21 @@ pub enum Marks {
 }
 
 impl MenuSelection {
-    pub fn highlighted_row(&self) -> Option<usize> { self.highlight.as_ref().map(|highlight| highlight.row) }
+    pub fn highlighted_row(&self) -> Option<usize> {
+        self.highlight.as_ref().map(|highlight| highlight.row)
+    }
 
-    pub fn highlight(&mut self, row: usize, id: String) { self.highlight = Some(Highlight { id, row }); }
+    pub fn highlight(&mut self, row: usize, id: String) {
+        self.highlight = Some(Highlight { id, row });
+    }
 
-    pub fn is_marked(&self, id: &str) -> bool { self.checked.contains(id) }
+    pub fn is_marked(&self, id: &str) -> bool {
+        self.checked.contains(id)
+    }
 
-    pub fn marked_count(&self) -> usize { self.checked.len() }
+    pub fn marked_count(&self) -> usize {
+        self.checked.len()
+    }
 
     pub fn toggle(&mut self, id: &str) {
         if !self.checked.remove(id) {
@@ -42,12 +50,15 @@ impl MenuSelection {
     /// A highlight that isn't visible moves to the first visible row.
     pub fn reconcile(&mut self, items: &Items, visible: &[RowOffset], marks: Marks) {
         if marks == Marks::Prune && !self.checked.is_empty() {
-            let retained: HashSet<String> = items.iter().filter(|i| self.checked.contains(&i.id)).map(|i| i.id.clone()).collect();
+            let retained: HashSet<String> =
+                items.iter().filter(|i| self.checked.contains(&i.id)).map(|i| i.id.clone()).collect();
             self.checked = retained;
         }
-        let row = self.highlight.as_ref().and_then(|highlight| {
-            visible.iter().position(|&offset| items[offset].id == highlight.id)
-        }).or_else(|| (!visible.is_empty()).then_some(0));
+        let row = self
+            .highlight
+            .as_ref()
+            .and_then(|highlight| visible.iter().position(|&offset| items[offset].id == highlight.id))
+            .or_else(|| (!visible.is_empty()).then_some(0));
         self.highlight = row.map(|row| Highlight { id: items[visible[row]].id.clone(), row });
     }
 

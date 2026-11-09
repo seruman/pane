@@ -149,7 +149,8 @@ fn cancellation_mid_scan_stops_early() {
 #[test]
 fn large_indexes_keep_input_order_for_ties() {
     let titles: Vec<String> = (0..50_000).map(|i| format!("src/module{}/file.swift", i % 13)).collect();
-    let items: Vec<MenuItem> = titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), t.clone())).collect();
+    let items: Vec<MenuItem> =
+        titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), t.clone())).collect();
     let rows = SearchIndex::from(items);
     let ranked = search(&rows, "module1 swift");
     let module1: Vec<usize> = (0..50_000).filter(|i| i % 13 == 1).collect();
@@ -201,8 +202,10 @@ fn item_highlights_follow_the_text_the_row_matched() {
     let marked = |query, item: &MenuItem| {
         let (title, subtitle) = super::item_highlights(query, item);
         let sub = item.subtitle.as_deref().unwrap_or("");
-        (title.into_iter().map(|r| item.title()[r].to_owned()).collect::<Vec<_>>(),
-         subtitle.into_iter().map(|r| sub[r].to_owned()).collect::<Vec<_>>())
+        (
+            title.into_iter().map(|r| item.title()[r].to_owned()).collect::<Vec<_>>(),
+            subtitle.into_iter().map(|r| sub[r].to_owned()).collect::<Vec<_>>(),
+        )
     };
     let mut item = MenuItem::new("1", "a");
     item.subtitle = Some("b".into());
@@ -212,6 +215,9 @@ fn item_highlights_follow_the_text_the_row_matched() {
     item.subtitle = Some("seruman".into());
     assert_eq!(marked("rune ser", &item), (vec!["rune".into()], vec!["ser".into()]));
     item.search = Some("Override".into());
-    assert_eq!(marked("rune", &item), (vec!["rune".into()], vec![]),
-               "a search override can't map to shown text, so each field is marked on its own");
+    assert_eq!(
+        marked("rune", &item),
+        (vec!["rune".into()], vec![]),
+        "a search override can't map to shown text, so each field is marked on its own"
+    );
 }

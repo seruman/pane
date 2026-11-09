@@ -17,9 +17,13 @@ fn main() {
         Ok(launch) => launch,
         Err(message) => exit(Outcome::Failed(message.to_string())),
     };
-    for warning in cli::warnings(&launch.options.configuration) { eprintln!("rmenu: {warning}"); }
+    for warning in cli::warnings(&launch.options.configuration) {
+        eprintln!("rmenu: {warning}");
+    }
     // SAFETY: installs the ignored disposition before any thread starts.
-    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+    }
     let spec = AppSpec {
         setup: Some(Menu::setup),
         poll: Some(|m: &mut Menu, _, tx: &mut Tx| m.poll(tx)),
@@ -34,7 +38,9 @@ fn main() {
         .args(Vec::new())
         .on_quit(Menu::quit)
         .try_run();
-    if let Err(error) = started { exit(Outcome::Failed(error)); }
+    if let Err(error) = started {
+        exit(Outcome::Failed(error));
+    }
     let outcome = outcome.borrow_mut().take().unwrap_or(Outcome::Cancelled);
     exit(outcome);
 }

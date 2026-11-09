@@ -7,8 +7,8 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::record::RecordDecoder;
 use crate::command::ExitStatus;
+use crate::record::RecordDecoder;
 
 #[test]
 fn list_state_tracks_loading_search_empty_rows_and_failure() {
@@ -48,7 +48,8 @@ fn preview_results_are_stored_as_plain_text() {
     h.highlight(0);
     let (mut event, _) = h.preview_event("");
     let Event::PreviewDone { result, .. } = &mut event else { unreachable!() };
-    *result = Ok(CommandResult { stdout: Vec::new(), stderr: b"\x1b[31mfailed\x1b[m".to_vec(), status: ExitStatus::Code(1) });
+    *result =
+        Ok(CommandResult { stdout: Vec::new(), stderr: b"\x1b[31mfailed\x1b[m".to_vec(), status: ExitStatus::Code(1) });
     h.send(event);
     assert!(h.model.preview().unwrap().contains("failed"));
     assert!(!h.model.preview().unwrap().contains('\u{1b}'));
@@ -128,14 +129,36 @@ impl Harness {
         }
     }
 
-    fn send(&mut self, event: Event) { let effects = self.model.handle(event); self.apply(effects); }
-    fn nav(&mut self, nav: Nav) { self.send(Event::Nav(nav)); }
-    fn query(&mut self, q: &str) { self.send(Event::SetQuery(q.into())); }
-    fn toggle(&mut self, row: usize) { self.send(Event::ToggleRow(row)); }
-    fn highlight(&mut self, row: usize) { self.send(Event::Highlight(row)); }
-    fn perform(&mut self, index: usize) { self.send(Event::Perform(BindingIndex(index))); }
+    fn send(&mut self, event: Event) {
+        let effects = self.model.handle(event);
+        self.apply(effects);
+    }
+    fn nav(&mut self, nav: Nav) {
+        self.send(Event::Nav(nav));
+    }
+    fn query(&mut self, q: &str) {
+        self.send(Event::SetQuery(q.into()));
+    }
+    fn toggle(&mut self, row: usize) {
+        self.send(Event::ToggleRow(row));
+    }
+    fn highlight(&mut self, row: usize) {
+        self.send(Event::Highlight(row));
+    }
+    fn perform(&mut self, index: usize) {
+        self.send(Event::Perform(BindingIndex(index)));
+    }
     fn switch(&mut self, id: &str) {
-        let id = self.model.options().configuration.sources().iter().find(|source| source.id.as_str() == id).unwrap().id.clone();
+        let id = self
+            .model
+            .options()
+            .configuration
+            .sources()
+            .iter()
+            .find(|source| source.id.as_str() == id)
+            .unwrap()
+            .id
+            .clone();
         self.send(Event::SwitchSource(id));
     }
 
@@ -205,22 +228,42 @@ impl Harness {
     }
 
     fn source_runs(&self, id: &str) -> usize {
-        self.started.iter().filter(|task| {
-            let Task::Source { input, .. } = task else { return false };
-            let context: ActionContext = serde_json::from_slice(input).expect("source action context");
-            context.source.as_deref() == Some(id)
-        }).count()
+        self.started
+            .iter()
+            .filter(|task| {
+                let Task::Source { input, .. } = task else { return false };
+                let context: ActionContext = serde_json::from_slice(input).expect("source action context");
+                context.source.as_deref() == Some(id)
+            })
+            .count()
     }
 
-    fn settled(&self) -> bool { self.model.can_act() && !self.model.is_searching() }
-    fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect() }
-    fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect() }
+    fn settled(&self) -> bool {
+        self.model.can_act() && !self.model.is_searching()
+    }
+    fn titles(&self) -> Vec<String> {
+        (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect()
+    }
+    fn values(&self) -> Vec<String> {
+        self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect()
+    }
     fn marked(&self) -> HashSet<String> {
-        self.model.current.shown.items.iter().filter(|item| self.model.is_marked(item)).map(|item| item.id.clone()).collect()
+        self.model
+            .current
+            .shown
+            .items
+            .iter()
+            .filter(|item| self.model.is_marked(item))
+            .map(|item| item.id.clone())
+            .collect()
     }
-    fn all_items(&self) -> Vec<String> { self.model.current.shown.items.iter().map(|i| i.title().to_owned()).collect() }
+    fn all_items(&self) -> Vec<String> {
+        self.model.current.shown.items.iter().map(|i| i.title().to_owned()).collect()
+    }
 
-    fn is_open(&self) -> bool { self.finished.is_none() }
+    fn is_open(&self) -> bool {
+        self.finished.is_none()
+    }
 
     fn output(&self) -> (i32, String) {
         let outcome = self.finished.as_ref().expect("not finished");
@@ -245,7 +288,9 @@ fn src(id: &str, extra: Value) -> Value {
     source
 }
 
-fn capitalized(id: &str) -> String { id[..1].to_uppercase() + &id[1..] }
+fn capitalized(id: &str) -> String {
+    id[..1].to_uppercase() + &id[1..]
+}
 
 fn options(config: Value) -> Options {
     Options {
@@ -261,16 +306,24 @@ fn options(config: Value) -> Options {
     }
 }
 
-fn start(config: Value) -> Harness { Harness::new(options(config)) }
+fn start(config: Value) -> Harness {
+    Harness::new(options(config))
+}
 
 /// JSONL rows whose value is `/v/<id>`.
 fn jsonl(rows: &[(&str, &str)]) -> String {
-    rows.iter().map(|(id, title)| format!("{}\n", json!({"id": id, "title": title, "value": format!("/v/{id}")}))).collect()
+    rows.iter()
+        .map(|(id, title)| format!("{}\n", json!({"id": id, "title": title, "value": format!("/v/{id}")})))
+        .collect()
 }
 
-fn chord(raw: &str) -> KeyChord { KeyChord::parse(raw).unwrap() }
+fn chord(raw: &str) -> KeyChord {
+    KeyChord::parse(raw).unwrap()
+}
 
-fn cancelled(h: &Harness, kind: TaskKind) -> bool { !h.tasks.contains_key(&kind) }
+fn cancelled(h: &Harness, kind: TaskKind) -> bool {
+    !h.tasks.contains_key(&kind)
+}
 
 fn env<'a>(env: &'a [(String, String)], key: &str) -> &'a str {
     &env.iter().find(|(k, _)| k == key).unwrap().1
@@ -300,15 +353,20 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
     let mut o = options(json!({"sources": [src("projects", json!({"format": "jsonl"})), src("files", json!({}))]}));
     o.query = "a".into();
     let mut h = Harness::new(o);
-    h.load(r#"{"id":"a","title":"alpha","subtitle":"Project"}
+    h.load(
+        r#"{"id":"a","title":"alpha","subtitle":"Project"}
 {"id":"b","title":"beta"}
-"#);
+"#,
+    );
     h.toggle(1);
     let (items, titles, row, marks) = (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked());
     let revision = h.model.result_revision();
     let unchanged = |h: &Harness| {
         assert_eq!(h.model.result_revision(), revision);
-        assert_eq!((h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()), (items.clone(), titles.clone(), row, marks.clone()));
+        assert_eq!(
+            (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()),
+            (items.clone(), titles.clone(), row, marks.clone())
+        );
         assert!(h.model.loading());
         assert!(!h.model.can_act());
     };
@@ -374,13 +432,19 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
 #[test]
 fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
     for failure in [None, Some("Command exited 7: failure")] {
-        let mut h = start(json!({"sources": [src("good", json!({"format": "jsonl"})), src("next", json!({"format": "jsonl"}))]}));
+        let mut h = start(
+            json!({"sources": [src("good", json!({"format": "jsonl"})), src("next", json!({"format": "jsonl"}))]}),
+        );
         h.load(&jsonl(&[("a", "alpha")]));
         h.toggle(0);
         let (revision, items, marks) = (h.model.result_revision(), h.all_items(), h.marked());
         h.switch("next");
         h.query("a");
-        assert_eq!((h.model.result_revision(), h.all_items(), h.marked()), (revision, items.clone(), marks.clone()), "failure={failure:?}");
+        assert_eq!(
+            (h.model.result_revision(), h.all_items(), h.marked()),
+            (revision, items.clone(), marks.clone()),
+            "failure={failure:?}"
+        );
         match failure {
             None => h.load(""),
             Some(message) => h.fail_source(message),
@@ -434,7 +498,11 @@ fn superseded_source_cannot_publish() {
             late
         };
         h.send(late);
-        assert_eq!(h.model.result_revision(), revision, "a superseded source published, during_matching={during_matching}");
+        assert_eq!(
+            h.model.result_revision(),
+            revision,
+            "a superseded source published, during_matching={during_matching}"
+        );
         assert_eq!(h.values(), ["alpha"], "during_matching={during_matching}");
         assert!(h.model.loading(), "during_matching={during_matching}");
         assert!(!h.model.can_act(), "during_matching={during_matching}");
@@ -570,7 +638,11 @@ fn values_containing_the_output_delimiter_are_never_written() {
         let mut o = options(json!({"sources": [src("s", json!({"format": "jsonl"}))]}));
         o.output = if print0 { OutputFormat::Nul } else { OutputFormat::Lines };
         let mut h = Harness::new(o);
-        let rows = format!("{}\n{}\n", json!({"id": "1", "title": "bad", "value": unsafe_value}), json!({"id": "2", "title": "good", "value": "ok"}));
+        let rows = format!(
+            "{}\n{}\n",
+            json!({"id": "1", "title": "bad", "value": unsafe_value}),
+            json!({"id": "2", "title": "good", "value": "ok"})
+        );
         h.load(&rows);
         h.nav(Nav::Accept);
         assert!(h.is_open(), "an ambiguous record must not be emitted, print0={print0}");
@@ -681,8 +753,13 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
     h.toggle(0);
     h.toggle(2);
     h.highlight(1);
-    let (items, titles, row, marks, highlighted) =
-        (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked(), h.model.highlighted().map(|item| item.id.clone()));
+    let (items, titles, row, marks, highlighted) = (
+        h.all_items(),
+        h.titles(),
+        h.model.highlighted_row(),
+        h.marked(),
+        h.model.highlighted().map(|item| item.id.clone()),
+    );
     assert_eq!(h.model.prompt(), "Repos");
     assert_eq!((titles.len(), marks.len()), (4, 2));
 
@@ -723,7 +800,10 @@ fn child_command_receives_the_parent_selection_as_data() {
     let context: ActionContext = serde_json::from_slice(&input).unwrap();
     assert_eq!((context.action.as_str(), context.source.as_deref()), ("source", Some("child")));
     assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["/v/b"]);
-    assert_eq!(context.path, [PathEntry { source: Some("repos".into()), query: "be".into(), items: context.items.clone() }]);
+    assert_eq!(
+        context.path,
+        [PathEntry { source: Some("repos".into()), query: "be".into(), items: context.items.clone() }]
+    );
     assert_eq!((env(&vars, "MMENU_VALUE"), env(&vars, "MMENU_ID")), ("/v/b", "b"));
 
     h.nav(Nav::Back);
@@ -739,7 +819,8 @@ fn child_command_receives_the_parent_selection_as_data() {
 #[test]
 fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
     for during_matching in [false, true] {
-        let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
+        let mut h =
+            start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
         h.load(&jsonl(&REPOS));
         h.toggle(1);
         let (items, marks) = (h.all_items(), h.marked());
@@ -758,7 +839,11 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
         let revision = h.model.result_revision();
         h.send(late);
         h.settle();
-        assert_eq!(h.model.result_revision(), revision, "a late child result was published, during_matching={during_matching}");
+        assert_eq!(
+            h.model.result_revision(),
+            revision,
+            "a late child result was published, during_matching={during_matching}"
+        );
         assert_eq!((h.all_items(), h.marked()), (items, marks), "during_matching={during_matching}");
         assert!(h.model.can_act(), "during_matching={during_matching}");
         assert_eq!(h.model.depth(), 0, "during_matching={during_matching}");
@@ -768,7 +853,9 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
 #[test]
 fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     let slow = json!({"key": "ctrl+e", "id": "slow", "action": "push", "source": "slow"});
-    let mut h = start(json!({"sources": [repos(json!({})), hidden("slow", json!({})), hidden("child", json!({}))], "bindings": [slow, push_binding()]}));
+    let mut h = start(
+        json!({"sources": [repos(json!({})), hidden("slow", json!({})), hidden("child", json!({}))], "bindings": [slow, push_binding()]}),
+    );
     h.load(&jsonl(&REPOS));
     h.perform(0);
     let stale = h.source_event(&jsonl(&[("s", "stale")]));
@@ -823,11 +910,23 @@ fn accept_at_depth_two_returns_the_path() {
         let mut h = two_levels(marks, true);
         h.perform(2);
         let context = h.context();
-        assert_eq!((context.action.as_str(), context.source.as_deref()), ("split-right", Some("grand")), "marks={marks:?}");
+        assert_eq!(
+            (context.action.as_str(), context.source.as_deref()),
+            ("split-right", Some("grand")),
+            "marks={marks:?}"
+        );
         let ids = |items: &[MenuItem]| items.iter().map(|i| i.id.clone()).collect::<Vec<_>>();
-        assert_eq!(context.path.iter().map(|p| p.source.as_deref()).collect::<Vec<_>>(), [Some("repos"), Some("child"), Some("grand")], "marks={marks:?}");
+        assert_eq!(
+            context.path.iter().map(|p| p.source.as_deref()).collect::<Vec<_>>(),
+            [Some("repos"), Some("child"), Some("grand")],
+            "marks={marks:?}"
+        );
         assert_eq!(context.path.iter().map(|p| p.query.as_str()).collect::<Vec<_>>(), ["", "u", ""], "marks={marks:?}");
-        assert_eq!(context.path.iter().map(|p| ids(&p.items)).collect::<Vec<_>>(), [vec!["b", "d"], vec!["z"], vec!["2"]], "marks={marks:?}");
+        assert_eq!(
+            context.path.iter().map(|p| ids(&p.items)).collect::<Vec<_>>(),
+            [vec!["b", "d"], vec!["z"], vec!["2"]],
+            "marks={marks:?}"
+        );
         let expected = match marks {
             MarkScope::Level => vec!["2"],
             MarkScope::Global => vec!["b", "d", "z"],
@@ -916,9 +1015,11 @@ fn cancel_at_depth_exits_130() {
 
 #[test]
 fn level_restricted_bindings_fire_only_at_their_levels() {
-    let root_only = json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
+    let root_only =
+        json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
     let child_only = json!({"key": "ctrl+o", "id": "open-child", "action": "accept", "sources": ["child"]});
-    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [root_only, child_only]}));
+    let mut h =
+        start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [root_only, child_only]}));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.target(&chord("ctrl+o")), None);
     h.perform(1);
@@ -975,7 +1076,8 @@ fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
 
 #[test]
 fn prompt_and_source_keys_follow_the_level() {
-    let root_only = json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
+    let root_only =
+        json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
     let everywhere = json!({"key": "ctrl+v", "id": "split", "action": "accept"});
     let mut h = start(json!({
         "sources": [repos(json!({"prompt": "Repos"})), src("files", json!({"key": "ctrl+2"})), hidden("child", json!({"prompt": "Worktrees"}))],
@@ -999,7 +1101,8 @@ fn prompt_and_source_keys_follow_the_level() {
 #[test]
 fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
     let star = json!({"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"], "reload": true});
-    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding(), star]}));
+    let mut h =
+        start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding(), star]}));
     h.load(&jsonl(&REPOS));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
@@ -1015,11 +1118,15 @@ fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
 
 // OperationTests
 
-fn operations(bindings: Value) -> Harness { start(json!({"sources": [src("s", json!({}))], "bindings": bindings})) }
+fn operations(bindings: Value) -> Harness {
+    start(json!({"sources": [src("s", json!({}))], "bindings": bindings}))
+}
 
 #[test]
 fn run_receives_the_chosen_items_and_reloads_on_success() {
-    let mut h = operations(json!([{"key": "ctrl+d", "id": "star", "label": "Star", "action": "run", "command": ["star"], "reload": true}]));
+    let mut h = operations(
+        json!([{"key": "ctrl+d", "id": "star", "label": "Star", "action": "run", "command": ["star"], "reload": true}]),
+    );
     h.load("1\none\ntwo\n");
     h.toggle(2);
     h.toggle(1);
@@ -1090,7 +1197,13 @@ fn command_failure_trims_and_bounds_stderr() {
 
 fn piped(json_output: bool, print0: bool) -> Harness {
     let mut o = options(json!({}));
-    o.output = if json_output { OutputFormat::Json } else if print0 { OutputFormat::Nul } else { OutputFormat::Lines };
+    o.output = if json_output {
+        OutputFormat::Json
+    } else if print0 {
+        OutputFormat::Nul
+    } else {
+        OutputFormat::Lines
+    };
     Harness::new(o)
 }
 
@@ -1165,7 +1278,11 @@ fn data_arriving_during_a_search_is_published_before_eof() {
     h.stdin("row-1\n");
     let running = h.run_search();
     h.stdin("row-final-9\n");
-    assert_eq!(h.started.iter().filter(|t| t.kind() == TaskKind::Search).count(), 1, "data arrival does not restart a running search");
+    assert_eq!(
+        h.started.iter().filter(|t| t.kind() == TaskKind::Search).count(),
+        1,
+        "data arrival does not restart a running search"
+    );
     h.send(running);
     assert_eq!(h.titles(), ["row-1"]);
     assert!(h.model.is_searching(), "the coalesced catch-up search starts");
@@ -1187,11 +1304,9 @@ fn malformed_input_fails_and_dismissal_exits_two() {
 
 #[test]
 fn accept_writes_exactly_the_chosen_values_in_source_order() {
-    for (json, print0, expected) in [
-        (false, false, Some("first value\nthird\n")),
-        (false, true, Some("first value\0third\0")),
-        (true, false, None),
-    ] {
+    for (json, print0, expected) in
+        [(false, false, Some("first value\nthird\n")), (false, true, Some("first value\0third\0")), (true, false, None)]
+    {
         let mut h = piped(json, print0);
         let items = [("a", "first value"), ("b", "second"), ("c", "third")]
             .map(|(id, value)| MenuItem::new(id, id.to_uppercase()).with_value(value));
@@ -1208,7 +1323,11 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
             let context = h.context();
             assert_eq!(context.action, "accept", "json={json}, print0={print0}");
             assert_eq!(context.source, None, "json={json}, print0={print0}");
-            assert_eq!(context.items.iter().map(MenuItem::value).collect::<Vec<_>>(), ["first value", "third"], "json={json}, print0={print0}");
+            assert_eq!(
+                context.items.iter().map(MenuItem::value).collect::<Vec<_>>(),
+                ["first value", "third"],
+                "json={json}, print0={print0}"
+            );
         }
     }
 }
@@ -1356,7 +1475,9 @@ fn the_highlight_stays_within_the_listed_rows() {
     h.stdin("a\nb\nc\nd\ne\n");
     h.stdin_done();
     h.settle();
-    for _ in 0..10 { h.nav(Nav::Down); }
+    for _ in 0..10 {
+        h.nav(Nav::Down);
+    }
     assert_eq!(h.model.highlighted_row(), Some(2));
     h.nav(Nav::PageDown);
     assert_eq!(h.model.highlighted_row(), Some(2));

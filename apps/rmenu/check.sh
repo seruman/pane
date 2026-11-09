@@ -9,6 +9,7 @@ export CARGO_PROFILE_DEV_DEBUG=0
 export CARGO_PROFILE_TEST_DEBUG=0
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$root/target/check}"
 
+cargo fmt --package rmenu-core --package rmenu -- --check
 cargo build --workspace --jobs 2
 cargo test --workspace --jobs 2
 cargo clippy --workspace --all-targets --jobs 2 -- -D warnings

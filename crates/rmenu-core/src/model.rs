@@ -3,14 +3,20 @@
 use std::{mem, time::Duration};
 
 use crate::command::{CommandResult, Limits};
-use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId};
+use crate::config::{
+    BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId,
+};
 use crate::item::{ActionContext, MenuItem, PathEntry};
 use crate::items::Items;
 use crate::search::{Order, RowOffset, SearchIndex};
 use crate::selection::{Marks, MenuSelection};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutputFormat { Lines, Nul, Json }
+pub enum OutputFormat {
+    Lines,
+    Nul,
+    Json,
+}
 
 /// Rune currently keys all virtual rows on each result change. Keep this bound until
 /// its list API can key only visible rows. The existing 5,000-row safety bound is not a
@@ -228,8 +234,10 @@ impl Level {
     fn loading(&self) -> bool {
         match self.input {
             Input::Stdin => self.ingestion == Ingestion::Reading,
-            Input::Command(_) => matches!(self.phase,
-                Phase::AwaitingSource { .. } | Phase::Matching(SearchRun { publication: Publication::Source(_), .. })),
+            Input::Command(_) => matches!(
+                self.phase,
+                Phase::AwaitingSource { .. } | Phase::Matching(SearchRun { publication: Publication::Source(_), .. })
+            ),
         }
     }
 }
@@ -346,14 +354,18 @@ impl Preview {
     fn text(&self) -> &str {
         match &self.content {
             PreviewContent::Empty => "",
-            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => text,
+            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => {
+                text
+            }
         }
     }
 
     fn take_text(&mut self) -> String {
         match mem::replace(&mut self.content, PreviewContent::Empty) {
             PreviewContent::Empty => String::new(),
-            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => text,
+            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => {
+                text
+            }
         }
     }
 
@@ -373,7 +385,9 @@ impl Preview {
         if !matches!(&self.content, PreviewContent::Pending { token: pending, .. } if *pending == token) {
             return;
         }
-        let PreviewContent::Pending { identity, .. } = mem::replace(&mut self.content, PreviewContent::Empty) else { unreachable!() };
+        let PreviewContent::Pending { identity, .. } = mem::replace(&mut self.content, PreviewContent::Empty) else {
+            unreachable!()
+        };
         let text = match result {
             Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).into_owned(),
             Ok(r) => command_failure(&r),
@@ -425,7 +439,9 @@ impl Model {
         effects
     }
 
-    pub fn options(&self) -> &Options { &self.options }
+    pub fn options(&self) -> &Options {
+        &self.options
+    }
 
     pub fn prompt(&self) -> String {
         let source = self.source();
@@ -438,58 +454,98 @@ impl Model {
         format!("{}{more} › {label}", first.title())
     }
 
-    pub fn query(&self) -> &str { &self.current.query }
+    pub fn query(&self) -> &str {
+        &self.current.query
+    }
 
-    pub fn result_count(&self) -> usize { self.current.shown.results.len() }
+    pub fn result_count(&self) -> usize {
+        self.current.shown.results.len()
+    }
 
     pub fn list_state(&self) -> ListState<'_> {
         let count = self.listed_count();
-        if count > 0 { ListState::Rows(count) }
-        else if self.input_failed() { ListState::Failed(self.message().unwrap_or("Input failed")) }
-        else if self.loading() { ListState::Loading }
-        else if self.is_searching() { ListState::Searching }
-        else { ListState::Empty }
+        if count > 0 {
+            ListState::Rows(count)
+        } else if self.input_failed() {
+            ListState::Failed(self.message().unwrap_or("Input failed"))
+        } else if self.loading() {
+            ListState::Loading
+        } else if self.is_searching() {
+            ListState::Searching
+        } else {
+            ListState::Empty
+        }
     }
 
     pub fn listed_row(&self, id: &str) -> Option<usize> {
         (0..self.listed_count()).find(|&row| self.result(row).id == id)
     }
 
-    pub fn result(&self, row: usize) -> &MenuItem { &self.current.shown.items[self.current.shown.results[row]] }
+    pub fn result(&self, row: usize) -> &MenuItem {
+        &self.current.shown.items[self.current.shown.results[row]]
+    }
 
     /// Changes whenever the shown results are replaced, so a host can reset scrolling.
-    pub fn result_revision(&self) -> u64 { self.result_revision }
+    pub fn result_revision(&self) -> u64 {
+        self.result_revision
+    }
 
-    pub fn highlighted_row(&self) -> Option<usize> { self.current.shown.selection.highlighted_row() }
+    pub fn highlighted_row(&self) -> Option<usize> {
+        self.current.shown.selection.highlighted_row()
+    }
 
-    pub fn is_marked(&self, item: &MenuItem) -> bool { self.current.shown.selection.is_marked(&item.id) }
+    pub fn is_marked(&self, item: &MenuItem) -> bool {
+        self.current.shown.selection.is_marked(&item.id)
+    }
 
-    pub fn marked_count(&self) -> usize { self.current.shown.selection.marked_count() }
+    pub fn marked_count(&self) -> usize {
+        self.current.shown.selection.marked_count()
+    }
 
-    pub fn has_choice(&self) -> bool { self.marked_count() > 0 || self.highlighted().is_some() }
+    pub fn has_choice(&self) -> bool {
+        self.marked_count() > 0 || self.highlighted().is_some()
+    }
 
-    pub fn loading(&self) -> bool { self.current.loading() }
+    pub fn loading(&self) -> bool {
+        self.current.loading()
+    }
 
     pub fn message(&self) -> Option<&str> {
         match self.current.message.as_ref()? {
             Status::Ack(text) | Status::Error(text) => Some(text),
-            Status::Operation(token) => self.operation.as_ref().filter(|operation| operation.token == *token).map(|operation| operation.message.as_str()),
+            Status::Operation(token) => self
+                .operation
+                .as_ref()
+                .filter(|operation| operation.token == *token)
+                .map(|operation| operation.message.as_str()),
             Status::StdinFailed => self.stdin_error(),
         }
     }
 
-    pub fn message_is_error(&self) -> bool { matches!(self.current.message, Some(Status::Error(_) | Status::StdinFailed)) }
+    pub fn message_is_error(&self) -> bool {
+        matches!(self.current.message, Some(Status::Error(_) | Status::StdinFailed))
+    }
 
-    pub fn stdin_error(&self) -> Option<&str> { self.stdin_error.as_deref() }
+    pub fn stdin_error(&self) -> Option<&str> {
+        self.stdin_error.as_deref()
+    }
 
-    pub fn preview(&self) -> Option<&str> { self.preview_visible().then_some(self.preview.text()) }
+    pub fn preview(&self) -> Option<&str> {
+        self.preview_visible().then_some(self.preview.text())
+    }
 
     /// Match highlights use the query that produced the shown rows, not a pending edit.
-    pub fn shown_query(&self) -> &str { self.current.shown.query.as_deref().unwrap_or("") }
+    pub fn shown_query(&self) -> &str {
+        self.current.shown.query.as_deref().unwrap_or("")
+    }
 
-    pub fn source_id(&self) -> Option<&SourceId> { self.current.input.source_id() }
+    pub fn source_id(&self) -> Option<&SourceId> {
+        self.current.input.source_id()
+    }
 
-    pub fn depth(&self) -> usize { self.levels.len() }
+    pub fn depth(&self) -> usize {
+        self.levels.len()
+    }
 
     pub fn target(&self, chord: &KeyChord) -> Option<Target> {
         let configuration = &self.options.configuration;
@@ -499,24 +555,35 @@ impl Model {
                 return Some(Target::SwitchSource(source.id.clone()));
             }
         }
-        configuration.bindings().iter()
+        configuration
+            .bindings()
+            .iter()
             .position(|b| b.applies(self.source_id()) && &b.key == chord)
             .map(|index| Target::Perform(BindingIndex(index)))
     }
 
     pub fn can_navigate(&self) -> bool {
         let loading_command = matches!(self.current.input, Input::Command(_)) && self.loading();
-        !self.input_failed() && !loading_command
+        !self.input_failed()
+            && !loading_command
             && self.current.shown.source_generation == Some(self.current.source_generation)
     }
 
-    fn can_act(&self) -> bool { self.can_navigate() && self.current.shown.query.as_deref() == Some(self.query()) }
+    fn can_act(&self) -> bool {
+        self.can_navigate() && self.current.shown.query.as_deref() == Some(self.query())
+    }
 
-    pub fn is_searching(&self) -> bool { matches!(self.current.phase, Phase::Matching(_)) }
+    pub fn is_searching(&self) -> bool {
+        matches!(self.current.phase, Phase::Matching(_))
+    }
 
-    pub fn input_failed(&self) -> bool { self.current.ingestion == Ingestion::Failed }
+    pub fn input_failed(&self) -> bool {
+        self.current.ingestion == Ingestion::Failed
+    }
 
-    pub fn running_operation(&self) -> bool { self.operation.is_some() }
+    pub fn running_operation(&self) -> bool {
+        self.operation.is_some()
+    }
 
     fn chosen(&self) -> Vec<MenuItem> {
         if self.marked_count() == 0 {
@@ -570,9 +637,15 @@ impl Model {
             Nav::Down => self.move_by(1, effects),
             Nav::PageUp => self.move_by(-rows, effects),
             Nav::PageDown => self.move_by(rows, effects),
-            Nav::Accept => { self.apply_intent(Intent::Accept("accept".into()), effects); },
+            Nav::Accept => {
+                self.apply_intent(Intent::Accept("accept".into()), effects);
+            }
             Nav::Back => {
-                if self.levels.is_empty() { self.cancel(effects) } else { self.pop(effects) }
+                if self.levels.is_empty() {
+                    self.cancel(effects)
+                } else {
+                    self.pop(effects)
+                }
             }
             Nav::PopIfEmpty => {
                 if self.query().is_empty() && !self.levels.is_empty() {
@@ -580,7 +653,11 @@ impl Model {
                 }
             }
             Nav::Tab => {
-                if self.options.multi { self.toggle(effects) } else { self.move_by(1, effects) }
+                if self.options.multi {
+                    self.toggle(effects)
+                } else {
+                    self.move_by(1, effects)
+                }
             }
             Nav::Cancel => self.cancel(effects),
         }
@@ -591,15 +668,23 @@ impl Model {
         Token(self.next_token)
     }
 
-    fn source(&self) -> Option<&MenuSource> { self.source_id().and_then(|id| self.options.configuration.source(id)) }
-
-    fn preview_command(&self) -> Option<Vec<String>> {
-        self.source().and_then(|s| s.preview.clone()).or_else(|| self.options.configuration.preview().map(<[String]>::to_vec))
+    fn source(&self) -> Option<&MenuSource> {
+        self.source_id().and_then(|id| self.options.configuration.source(id))
     }
 
-    fn preview_visible(&self) -> bool { self.preview.enabled && self.preview_command().is_some() }
+    fn preview_command(&self) -> Option<Vec<String>> {
+        self.source()
+            .and_then(|s| s.preview.clone())
+            .or_else(|| self.options.configuration.preview().map(<[String]>::to_vec))
+    }
 
-    pub fn listed_count(&self) -> usize { self.result_count().min(self.options.list_cap) }
+    fn preview_visible(&self) -> bool {
+        self.preview.enabled && self.preview_command().is_some()
+    }
+
+    pub fn listed_count(&self) -> usize {
+        self.result_count().min(self.options.list_cap)
+    }
 
     fn highlighted(&self) -> Option<&MenuItem> {
         let row = self.highlighted_row()?;
@@ -660,7 +745,9 @@ impl Model {
             return;
         }
         match &binding.action {
-            BindingAction::Accept => { self.apply_intent(Intent::Accept(binding.action_name().to_owned()), effects); },
+            BindingAction::Accept => {
+                self.apply_intent(Intent::Accept(binding.action_name().to_owned()), effects);
+            }
             BindingAction::Copy => {
                 if !self.can_act() {
                     effects.push(Effect::Beep);
@@ -675,7 +762,9 @@ impl Model {
                 self.current.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
             BindingAction::Source { source } => self.switch_source(source, effects),
-            BindingAction::Push { source } => { self.apply_intent(Intent::Push(source.clone()), effects); },
+            BindingAction::Push { source } => {
+                self.apply_intent(Intent::Push(source.clone()), effects);
+            }
             BindingAction::Reload => self.reload(effects),
             BindingAction::TogglePreview => {
                 if self.preview_command().is_none() {
@@ -753,16 +842,20 @@ impl Model {
     }
 
     fn reload(&mut self, effects: &mut Vec<Effect>) {
-        if let Some(source) = self.source().cloned() { self.load(&source, LoadKind::Reload, effects) } else {
+        if let Some(source) = self.source().cloned() {
+            self.load(&source, LoadKind::Reload, effects)
+        } else {
             self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
             effects.push(Effect::Beep);
         }
     }
 
     fn load(&mut self, source: &MenuSource, kind: LoadKind, effects: &mut Vec<Effect>) {
-        let reset_pending = matches!(self.current.phase,
+        let reset_pending = matches!(
+            self.current.phase,
             Phase::AwaitingSource { selection: SelectionPolicy::Reset }
-            | Phase::Matching(SearchRun { publication: Publication::Source(SelectionPolicy::Reset), .. }));
+                | Phase::Matching(SearchRun { publication: Publication::Source(SelectionPolicy::Reset), .. })
+        );
         let selection = if kind == LoadKind::Replace || source.format != InputFormat::Jsonl || reset_pending {
             SelectionPolicy::Reset
         } else {
@@ -894,11 +987,12 @@ impl Model {
     }
 
     fn update_preview(&mut self, effects: &mut Vec<Effect>) {
-        let identity = self.highlighted().filter(|_| self.preview_visible() && self.can_act()).map(|item| PreviewIdentity {
-            source: self.current.source_generation,
-            item: item.clone(),
-            query: self.query().to_owned(),
-        });
+        let identity =
+            self.highlighted().filter(|_| self.preview_visible() && self.can_act()).map(|item| PreviewIdentity {
+                source: self.current.source_generation,
+                item: item.clone(),
+                query: self.query().to_owned(),
+            });
         if identity.as_ref() == self.preview.identity() {
             if identity.is_none() && self.can_act() {
                 self.preview.invalidate(RetainPreview::Discard);
@@ -918,12 +1012,7 @@ impl Model {
         };
         let token = self.fresh();
         self.preview.start(identity, token);
-        effects.push(Effect::Start(Task::Preview {
-            token,
-            argv,
-            env: context.environment(),
-            delay: PREVIEW_DELAY,
-        }));
+        effects.push(Effect::Start(Task::Preview { token, argv, env: context.environment(), delay: PREVIEW_DELAY }));
     }
 
     fn clear_transient_message(&mut self) {
@@ -955,12 +1044,7 @@ impl Model {
             reload,
             source_generation: self.current.source_generation,
         });
-        effects.push(Effect::Start(Task::Operation {
-            token,
-            argv,
-            input: context.json(),
-            env: context.environment(),
-        }));
+        effects.push(Effect::Start(Task::Operation { token, argv, input: context.json(), env: context.environment() }));
     }
 
     fn operation_done(&mut self, token: Token, result: Result<CommandResult, String>, effects: &mut Vec<Effect>) {
@@ -981,10 +1065,14 @@ impl Model {
         let items = match self.options.configuration.marks() {
             MarkScope::Level => picked.clone(),
             MarkScope::Global => {
-                let marked: Vec<MenuItem> = self.levels.iter()
-                    .map(|l| &l.level.shown).chain([&self.current.shown])
+                let marked: Vec<MenuItem> = self
+                    .levels
+                    .iter()
+                    .map(|l| &l.level.shown)
+                    .chain([&self.current.shown])
                     .filter(|s| s.selection.marked_count() != 0)
-                    .flat_map(|s| s.selection.marked(&s.items)).collect();
+                    .flat_map(|s| s.selection.marked(&s.items))
+                    .collect();
                 if marked.is_empty() { picked.clone() } else { marked }
             }
         };
@@ -1003,7 +1091,8 @@ impl Model {
             let delimiter = if self.options.output == OutputFormat::Nul { '\0' } else { '\n' };
             if items.iter().any(|i| i.value().contains(delimiter)) {
                 let hint = if self.options.output == OutputFormat::Nul { "" } else { " or --print0" };
-                self.current.message = Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
+                self.current.message =
+                    Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
                 effects.push(Effect::Beep);
                 return IntentOutcome::Refused;
             }
@@ -1025,16 +1114,23 @@ impl Model {
 
     fn path(&self, current: Vec<MenuItem>) -> Vec<PathEntry> {
         let mut path = self.ancestors();
-        path.push(PathEntry { source: self.source_id().map(ToString::to_string), query: self.query().to_owned(), items: current });
+        path.push(PathEntry {
+            source: self.source_id().map(ToString::to_string),
+            query: self.query().to_owned(),
+            items: current,
+        });
         path
     }
 
     fn ancestors(&self) -> Vec<PathEntry> {
-        self.levels.iter().map(|l| PathEntry {
-            source: l.level.input.source_id().map(ToString::to_string),
-            query: l.level.query.clone(),
-            items: l.chosen.clone(),
-        }).collect()
+        self.levels
+            .iter()
+            .map(|l| PathEntry {
+                source: l.level.input.source_id().map(ToString::to_string),
+                query: l.level.query.clone(),
+                items: l.chosen.clone(),
+            })
+            .collect()
     }
 }
 

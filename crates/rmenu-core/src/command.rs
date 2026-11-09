@@ -25,7 +25,9 @@ pub enum ExitStatus {
 }
 
 impl ExitStatus {
-    pub fn success(self) -> bool { self == Self::Code(0) }
+    pub fn success(self) -> bool {
+        self == Self::Code(0)
+    }
 
     pub fn shell_code(self) -> i32 {
         match self {
@@ -73,8 +75,12 @@ pub struct Cancel {
 }
 
 impl Cancel {
-    pub fn cancel(&self) { self.cancelled.store(true, Ordering::Relaxed); }
-    pub fn is_cancelled(&self) -> bool { self.cancelled.load(Ordering::Relaxed) }
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Relaxed)
+    }
 }
 
 /// Bounds how long a cancel waits when no stream is active.
@@ -92,7 +98,9 @@ const DEFAULT_SIGNALS: [libc::c_int; 5] = [libc::SIGPIPE, libc::SIGINT, libc::SI
 /// When no candidate is executable but one exists, the error is EACCES, not ENOENT.
 fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError> {
     let cstring = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(|_| CommandError::InvalidArguments);
-    if program.contains('/') { return cstring(Path::new(program)); }
+    if program.contains('/') {
+        return cstring(Path::new(program));
+    }
     let mut denied = false;
     for dir in std::env::split_paths(path.unwrap_or(OsStr::new("/usr/bin:/bin"))) {
         let candidate = dir.join(program);
@@ -113,7 +121,9 @@ fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError>
 fn pipe() -> Result<(File, File), CommandError> {
     let mut fds = [0 as RawFd; 2];
     // SAFETY: `fds` holds two descriptors, as pipe(2) requires.
-    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 { return Err(system("pipe", io::Error::last_os_error())); }
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        return Err(system("pipe", io::Error::last_os_error()));
+    }
     // SAFETY: both descriptors were just created and are owned by nothing else.
     let ends = unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) };
     set_cloexec(ends.0.as_raw_fd())?;
@@ -190,23 +200,58 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
     let mut actions = SpawnActions::new()?;
     let mut attrs = SpawnAttributes::new()?;
     match &stdin {
-        Some((read, _)) => spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, read.as_raw_fd(), 0) }, "spawn dup2")?,
-        None => spawn_call(unsafe { libc::posix_spawn_file_actions_addopen(&raw mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) }, "spawn open")?,
+        Some((read, _)) => spawn_call(
+            unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, read.as_raw_fd(), 0) },
+            "spawn dup2",
+        )?,
+        None => spawn_call(
+            unsafe { libc::posix_spawn_file_actions_addopen(&raw mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) },
+            "spawn open",
+        )?,
     }
-    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, out_w.as_raw_fd(), 1) }, "spawn dup2")?;
-    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, err_w.as_raw_fd(), 2) }, "spawn dup2")?;
+    spawn_call(
+        unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, out_w.as_raw_fd(), 1) },
+        "spawn dup2",
+    )?;
+    spawn_call(
+        unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, err_w.as_raw_fd(), 2) },
+        "spawn dup2",
+    )?;
     spawn_call(unsafe { libc::posix_spawnattr_setpgroup(&raw mut attrs.0, 0) }, "spawn process group")?;
     let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&raw mut empty) };
     spawn_call(unsafe { libc::posix_spawnattr_setsigmask(&raw mut attrs.0, &raw const empty) }, "spawn signal mask")?;
     let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
     unsafe { libc::sigemptyset(&raw mut defaults) };
-    for signal in DEFAULT_SIGNALS { unsafe { libc::sigaddset(&raw mut defaults, signal) }; }
-    spawn_call(unsafe { libc::posix_spawnattr_setsigdefault(&raw mut attrs.0, &raw const defaults) }, "spawn signal defaults")?;
-    let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-    spawn_call(unsafe { libc::posix_spawnattr_setflags(&raw mut attrs.0, flags.try_into().expect("spawn flags fit c_short")) }, "spawn flags")?;
+    for signal in DEFAULT_SIGNALS {
+        unsafe { libc::sigaddset(&raw mut defaults, signal) };
+    }
+    spawn_call(
+        unsafe { libc::posix_spawnattr_setsigdefault(&raw mut attrs.0, &raw const defaults) },
+        "spawn signal defaults",
+    )?;
+    let flags = libc::POSIX_SPAWN_SETPGROUP
+        | libc::POSIX_SPAWN_SETSIGMASK
+        | libc::POSIX_SPAWN_SETSIGDEF
+        | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
+    spawn_call(
+        unsafe { libc::posix_spawnattr_setflags(&raw mut attrs.0, flags.try_into().expect("spawn flags fit c_short")) },
+        "spawn flags",
+    )?;
     let mut pid: libc::pid_t = 0;
-    spawn_call(unsafe { libc::posix_spawn(&raw mut pid, program.as_ptr(), &raw const actions.0, &raw const attrs.0, arg_ptrs.as_ptr(), env_ptrs.as_ptr()) }, "posix_spawn")?;
+    spawn_call(
+        unsafe {
+            libc::posix_spawn(
+                &raw mut pid,
+                program.as_ptr(),
+                &raw const actions.0,
+                &raw const attrs.0,
+                arg_ptrs.as_ptr(),
+                env_ptrs.as_ptr(),
+            )
+        },
+        "posix_spawn",
+    )?;
     Ok(Spawned { pid, stdin: stdin.map(|(_, write)| write), stdout: out_r, stderr: err_r })
 }
 
@@ -215,17 +260,19 @@ compile_error!("rmenu needs POSIX_SPAWN_CLOEXEC_DEFAULT to give commands only st
 
 /// The caller's environment with explicit command values overlaid.
 fn environment(env: &[(String, String)]) -> Result<(Vec<CString>, Option<OsString>), CommandError> {
-    let mut vars: Vec<(OsString, OsString)> = std::env::vars_os()
-        .filter(|(k, _)| !env.iter().any(|(o, _)| OsStr::new(o) == k))
-        .collect();
+    let mut vars: Vec<(OsString, OsString)> =
+        std::env::vars_os().filter(|(k, _)| !env.iter().any(|(o, _)| OsStr::new(o) == k)).collect();
     vars.extend(env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))));
     let path = vars.iter().find(|(k, _)| k == "PATH").map(|(_, v)| v.clone());
-    let envp = vars.into_iter().map(|(k, v)| {
-        let mut entry = k.into_vec();
-        entry.push(b'=');
-        entry.extend(v.into_vec());
-        CString::new(entry).map_err(|_| CommandError::InvalidArguments)
-    }).collect::<Result<_, _>>()?;
+    let envp = vars
+        .into_iter()
+        .map(|(k, v)| {
+            let mut entry = k.into_vec();
+            entry.push(b'=');
+            entry.extend(v.into_vec());
+            CString::new(entry).map_err(|_| CommandError::InvalidArguments)
+        })
+        .collect::<Result<_, _>>()?;
     Ok((envp, path))
 }
 
@@ -246,14 +293,23 @@ pub struct Limits {
 /// Runs `argv` without a shell, `env` overlaid on ours, PATH resolved from the overlay.
 /// `input: None` connects stdin to /dev/null: tools such as glow or bat prefer a piped stdin
 /// over their file arguments. The limit is shared by stdout and stderr. Blocks the calling thread.
-pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], limits: Limits,
-           cancel: &Cancel) -> Result<CommandResult, CommandError> {
-    if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
-    if argv.first().is_none_or(String::is_empty)
-        || env.iter().any(|(k, _)| k.is_empty() || k.contains('=')) {
+pub fn run(
+    argv: &[String],
+    input: Option<&[u8]>,
+    env: &[(String, String)],
+    limits: Limits,
+    cancel: &Cancel,
+) -> Result<CommandResult, CommandError> {
+    if cancel.is_cancelled() {
+        return Err(CommandError::Cancelled);
+    }
+    if argv.first().is_none_or(String::is_empty) || env.iter().any(|(k, _)| k.is_empty() || k.contains('=')) {
         return Err(CommandError::InvalidArguments);
     }
-    let args: Vec<CString> = argv.iter().map(|a| CString::new(a.as_str())).collect::<Result<_, _>>()
+    let args: Vec<CString> = argv
+        .iter()
+        .map(|a| CString::new(a.as_str()))
+        .collect::<Result<_, _>>()
         .map_err(|_| CommandError::InvalidArguments)?;
     let deadline = Instant::now().checked_add(limits.timeout);
     let (envp, path) = environment(env)?;
@@ -276,7 +332,9 @@ impl Group {
     fn wait_for_exit(&self, limit: Duration) -> Result<(), CommandError> {
         // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
         let queue = unsafe { libc::kqueue() };
-        if queue < 0 { return Err(system("kqueue", io::Error::last_os_error())); }
+        if queue < 0 {
+            return Err(system("kqueue", io::Error::last_os_error()));
+        }
         // SAFETY: the descriptor was just created and has no other owner.
         let queue = unsafe { OwnedFd::from_raw_fd(queue) };
         let change = libc::kevent {
@@ -288,9 +346,13 @@ impl Group {
             udata: std::ptr::null_mut(),
         };
         let mut event = change;
-        let timeout = libc::timespec { tv_sec: limit.as_secs().try_into().expect("bounded exit wait fits time_t"), tv_nsec: limit.subsec_nanos().into() };
+        let timeout = libc::timespec {
+            tv_sec: limit.as_secs().try_into().expect("bounded exit wait fits time_t"),
+            tv_nsec: limit.subsec_nanos().into(),
+        };
         // SAFETY: one change and room for one event, both live locals; the timeout is a live local.
-        let ready = unsafe { libc::kevent(queue.as_raw_fd(), &raw const change, 1, &raw mut event, 1, &raw const timeout) };
+        let ready =
+            unsafe { libc::kevent(queue.as_raw_fd(), &raw const change, 1, &raw mut event, 1, &raw const timeout) };
         let error = if ready < 0 {
             Some(io::Error::last_os_error())
         } else if ready > 0 && event.flags & libc::EV_ERROR != 0 {
@@ -300,7 +362,8 @@ impl Group {
         };
         // ESRCH can race with registration when the leader has already exited.
         if let Some(error) = error
-            && !matches!(error.raw_os_error(), Some(libc::EINTR | libc::ESRCH)) {
+            && !matches!(error.raw_os_error(), Some(libc::EINTR | libc::ESRCH))
+        {
             return Err(system("kevent", error));
         }
         Ok(())
@@ -311,10 +374,14 @@ impl Group {
         loop {
             // SAFETY: waits on our own child without blocking.
             let pid = unsafe { libc::waitpid(self.pid, &raw mut status, libc::WNOHANG) };
-            if pid == 0 { return Ok(None); }
+            if pid == 0 {
+                return Ok(None);
+            }
             if pid < 0 {
                 let error = io::Error::last_os_error();
-                if error.kind() == io::ErrorKind::Interrupted { continue; }
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
                 return Err(system("waitpid", error));
             }
             self.reaped = true;
@@ -329,19 +396,29 @@ impl Group {
 
 impl Drop for Group {
     fn drop(&mut self) {
-        if self.reaped { return; }
+        if self.reaped {
+            return;
+        }
         // SIGKILL also handles children that ignore TERM. Descendants that setsid are not ours.
         // SAFETY: signals our own process group, then reaps its leader.
         unsafe {
             libc::kill(-self.pid, libc::SIGKILL);
             let mut status = 0;
-            while libc::waitpid(self.pid, &raw mut status, 0) < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {}
+            while libc::waitpid(self.pid, &raw mut status, 0) < 0
+                && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+            {}
         }
     }
 }
 
-fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Instant>, limit: usize, cancel: &Cancel)
-        -> Result<CommandResult, CommandError> {
+fn pump(
+    group: &mut Group,
+    spawned: Spawned,
+    input: &[u8],
+    deadline: Option<Instant>,
+    limit: usize,
+    cancel: &Cancel,
+) -> Result<CommandResult, CommandError> {
     let mut stdin = spawned.stdin.filter(|_| !input.is_empty());
     let mut outputs = [(Some(spawned.stdout), Vec::new()), (Some(spawned.stderr), Vec::new())];
     for file in [stdin.as_ref(), outputs[0].0.as_ref(), outputs[1].0.as_ref()].into_iter().flatten() {
@@ -350,8 +427,12 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
     let mut written = 0;
     let mut buffer = [0u8; 16_384];
     loop {
-        if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
-        if deadline.is_some_and(|d| Instant::now() >= d) { return Err(CommandError::TimedOut); }
+        if cancel.is_cancelled() {
+            return Err(CommandError::Cancelled);
+        }
+        if deadline.is_some_and(|d| Instant::now() >= d) {
+            return Err(CommandError::TimedOut);
+        }
         if stdin.is_none() && outputs.iter().all(|(file, _)| file.is_none()) {
             if let Some(status) = group.try_wait()? {
                 let [(_, stdout), (_, stderr)] = outputs;
@@ -365,20 +446,34 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             (outputs[0].0.as_ref(), libc::POLLIN),
             (outputs[1].0.as_ref(), libc::POLLIN),
             (stdin.as_ref(), libc::POLLOUT),
-        ].map(|(file, events)| libc::pollfd { fd: file.map_or(-1, AsRawFd::as_raw_fd), events, revents: 0 });
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len().try_into().expect("poll slots fit nfds_t"), POLL_INTERVAL.as_millis().try_into().expect("poll interval fits c_int")) } < 0 {
+        ]
+        .map(|(file, events)| libc::pollfd { fd: file.map_or(-1, AsRawFd::as_raw_fd), events, revents: 0 });
+        if unsafe {
+            libc::poll(
+                fds.as_mut_ptr(),
+                fds.len().try_into().expect("poll slots fit nfds_t"),
+                POLL_INTERVAL.as_millis().try_into().expect("poll interval fits c_int"),
+            )
+        } < 0
+        {
             let error = io::Error::last_os_error();
-            if error.kind() == io::ErrorKind::Interrupted { continue; }
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
             return Err(system("poll", error));
         }
         let mut remaining = limit - outputs.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
         for ((file, bytes), ready) in outputs.iter_mut().zip(&fds) {
-            if ready.revents == 0 { continue; }
+            if ready.revents == 0 {
+                continue;
+            }
             if let Some(pipe) = file {
                 match pipe.read(&mut buffer) {
                     Ok(0) => *file = None,
                     Ok(n) => {
-                        if n > remaining { return Err(CommandError::OutputLimitExceeded); }
+                        if n > remaining {
+                            return Err(CommandError::OutputLimitExceeded);
+                        }
                         remaining -= n;
                         bytes.extend_from_slice(&buffer[..n]);
                     }
@@ -391,7 +486,9 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             match pipe.write(&input[written..]) {
                 Ok(n) => {
                     written += n;
-                    if written == input.len() { stdin = None; }
+                    if written == input.len() {
+                        stdin = None;
+                    }
                 }
                 // Rust's runtime ignores SIGPIPE, so a child that exits early surfaces here.
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => stdin = None,
@@ -407,10 +504,17 @@ mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
 
-    fn strings(argv: &[&str]) -> Vec<String> { argv.iter().map(ToString::to_string).collect() }
+    fn strings(argv: &[&str]) -> Vec<String> {
+        argv.iter().map(ToString::to_string).collect()
+    }
 
-    fn run_with(argv: &[&str], input: Option<&[u8]>, env: &[(&str, &str)], timeout: Duration, limit: usize)
-                -> Result<CommandResult, CommandError> {
+    fn run_with(
+        argv: &[&str],
+        input: Option<&[u8]>,
+        env: &[(&str, &str)],
+        timeout: Duration,
+        limit: usize,
+    ) -> Result<CommandResult, CommandError> {
         let env: Vec<_> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         run(&strings(argv), input, &env, Limits { timeout, output_bytes: limit }, &Cancel::default())
     }
@@ -419,7 +523,9 @@ mod tests {
         run_with(argv, Some(b""), &[], Duration::from_secs(10), 1_048_576)
     }
 
-    fn text(bytes: &[u8]) -> &str { std::str::from_utf8(bytes).unwrap() }
+    fn text(bytes: &[u8]) -> &str {
+        std::str::from_utf8(bytes).unwrap()
+    }
 
     struct TempDir(PathBuf);
 
@@ -434,16 +540,21 @@ mod tests {
     }
 
     impl Drop for TempDir {
-        fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 
     fn run_in_child(test: &str) -> bool {
         const CHILD_TEST: &str = "RMENU_COMMAND_CHILD_TEST";
-        if std::env::var(CHILD_TEST).as_deref() == Ok(test) { return false; }
+        if std::env::var(CHILD_TEST).as_deref() == Ok(test) {
+            return false;
+        }
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &format!("command::tests::{test}"), "--nocapture", "--test-threads=1"])
             .env(CHILD_TEST, test)
-            .output().unwrap();
+            .output()
+            .unwrap();
         assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
         true
     }
@@ -454,11 +565,24 @@ mod tests {
         if std::env::var_os(CHILD).is_none() {
             for value in [None, Some("0"), Some("1"), Some("custom-value")] {
                 let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-                child.args(["--exact", "command::tests::commands_preserve_the_callers_terminal_environment", "--nocapture"])
-                    .env(CHILD, "1").env_remove("RUNE_TERMINAL");
-                if let Some(value) = value { child.env("RUNE_TERMINAL", value); }
+                child
+                    .args([
+                        "--exact",
+                        "command::tests::commands_preserve_the_callers_terminal_environment",
+                        "--nocapture",
+                    ])
+                    .env(CHILD, "1")
+                    .env_remove("RUNE_TERMINAL");
+                if let Some(value) = value {
+                    child.env("RUNE_TERMINAL", value);
+                }
                 let output = child.output().unwrap();
-                assert!(output.status.success(), "RUNE_TERMINAL={value:?}: {}{}", text(&output.stdout), text(&output.stderr));
+                assert!(
+                    output.status.success(),
+                    "RUNE_TERMINAL={value:?}: {}{}",
+                    text(&output.stdout),
+                    text(&output.stderr)
+                );
             }
             return;
         }
@@ -466,13 +590,20 @@ mod tests {
         let expected = std::env::var("RUNE_TERMINAL").ok().map(|value| format!("RUNE_TERMINAL={value}"));
         let actual = text(&result.stdout).lines().find(|line| line.starts_with("RUNE_TERMINAL="));
         assert_eq!(actual, expected.as_deref());
-        let overlaid = run_with(&["/usr/bin/env"], None, &[("RUNE_TERMINAL", "override")], Duration::from_secs(5), 1 << 20).unwrap();
-        assert_eq!(text(&overlaid.stdout).lines().filter(|line| line.starts_with("RUNE_TERMINAL=")).collect::<Vec<_>>(), ["RUNE_TERMINAL=override"]);
+        let overlaid =
+            run_with(&["/usr/bin/env"], None, &[("RUNE_TERMINAL", "override")], Duration::from_secs(5), 1 << 20)
+                .unwrap();
+        assert_eq!(
+            text(&overlaid.stdout).lines().filter(|line| line.starts_with("RUNE_TERMINAL=")).collect::<Vec<_>>(),
+            ["RUNE_TERMINAL=override"]
+        );
     }
 
     #[test]
     fn commands_get_only_stdio() {
-        if run_in_child("commands_get_only_stdio") { return; }
+        if run_in_child("commands_get_only_stdio") {
+            return;
+        }
         let file = std::fs::File::open("/dev/null").unwrap();
         // A descriptor opened without close-on-exec, as a framework inside rmenu would.
         // A high number, so the command's own descriptors (ls opening /dev/fd) can't collide.
@@ -486,7 +617,9 @@ mod tests {
 
     #[test]
     fn a_descriptor_another_thread_opens_during_spawn_never_leaks() {
-        if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks") { return; }
+        if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks") {
+            return;
+        }
         let stop = Arc::new(AtomicBool::new(false));
         let null = std::fs::File::open("/dev/null").unwrap();
         let raw = null.as_raw_fd();
@@ -494,14 +627,21 @@ mod tests {
         // inside rmenu might while a command starts.
         let churn = {
             let stop = stop.clone();
-            std::thread::spawn(move || while !stop.load(Ordering::Relaxed) {
-                unsafe { libc::dup2(raw, 250); libc::close(250); }
+            std::thread::spawn(move || {
+                while !stop.load(Ordering::Relaxed) {
+                    unsafe {
+                        libc::dup2(raw, 250);
+                        libc::close(250);
+                    }
+                }
             })
         };
-        let leaked = (0..300).filter(|_| {
-            let out = quick(&["/bin/ls", "/dev/fd"]).unwrap();
-            text(&out.stdout).lines().any(|l| l == "250")
-        }).count();
+        let leaked = (0..300)
+            .filter(|_| {
+                let out = quick(&["/bin/ls", "/dev/fd"]).unwrap();
+                text(&out.stdout).lines().any(|l| l == "250")
+            })
+            .count();
         stop.store(true, Ordering::Relaxed);
         churn.join().unwrap();
         assert_eq!(leaked, 0, "descriptor 250 reached {leaked} of 300 commands");
@@ -567,8 +707,14 @@ mod tests {
     #[test]
     fn stdin_and_environment_overlay() {
         let input = b"hello\0world\nwith spaces\n";
-        let result = run_with(&["/bin/sh", "-c", "printf '%s\\n' \"$RUNNER_VALUE\"; /bin/cat"], Some(input),
-                              &[("RUNNER_VALUE", "a value with spaces")], Duration::from_secs(10), 1 << 20).unwrap();
+        let result = run_with(
+            &["/bin/sh", "-c", "printf '%s\\n' \"$RUNNER_VALUE\"; /bin/cat"],
+            Some(input),
+            &[("RUNNER_VALUE", "a value with spaces")],
+            Duration::from_secs(10),
+            1 << 20,
+        )
+        .unwrap();
         assert_eq!(result.stdout, [b"a value with spaces\n".as_slice(), input].concat());
         assert!(result.stderr.is_empty());
         assert!(result.status.success());
@@ -587,10 +733,14 @@ mod tests {
         let result = quick(&["/bin/pwd"]).unwrap();
         let actual = Path::new(text(&result.stdout).trim_end()).canonicalize().unwrap();
         assert_eq!(actual, std::env::current_dir().unwrap().canonicalize().unwrap());
-        let env = run_with(&["/usr/bin/env"], Some(b""), &[("RUNNER_OVERLAY", "yes")], Duration::from_secs(10), 1 << 20).unwrap();
+        let env =
+            run_with(&["/usr/bin/env"], Some(b""), &[("RUNNER_OVERLAY", "yes")], Duration::from_secs(10), 1 << 20)
+                .unwrap();
         let lines: Vec<&str> = text(&env.stdout).lines().collect();
         assert!(lines.contains(&"RUNNER_OVERLAY=yes"));
-        if let Ok(home) = std::env::var("HOME") { assert!(lines.contains(&format!("HOME={home}").as_str())); }
+        if let Ok(home) = std::env::var("HOME") {
+            assert!(lines.contains(&format!("HOME={home}").as_str()));
+        }
     }
 
     #[test]
@@ -602,8 +752,14 @@ mod tests {
         let path = bin.to_str().unwrap();
         let marker = dir.0.join("SHOULD_NOT_EXIST");
         let literal = format!("$(touch '{}'); `echo bad` | * > file & $HOME ' \"", marker.display());
-        let result = run_with(&["literal printer", "%s", &literal], Some(b""), &[("PATH", path)],
-                              Duration::from_secs(10), 1 << 20).unwrap();
+        let result = run_with(
+            &["literal printer", "%s", &literal],
+            Some(b""),
+            &[("PATH", path)],
+            Duration::from_secs(10),
+            1 << 20,
+        )
+        .unwrap();
         assert_eq!(text(&result.stdout), literal);
         assert!(!marker.exists());
         let absolute = format!("{path}/literal printer");
@@ -628,7 +784,8 @@ mod tests {
             ("printf out; exec 1>&-; /bin/cat >&2", b"out".as_slice(), input.as_slice()),
             ("printf err >&2; exec 2>&-; /bin/cat", input.as_slice(), b"err".as_slice()),
         ] {
-            let result = run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
+            let result =
+                run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
             assert_eq!(result.stdout, stdout, "{script}");
             assert_eq!(result.stderr, stderr, "{script}");
             assert!(result.status.success(), "{script}");
@@ -670,8 +827,13 @@ mod tests {
         assert!(matches!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments)));
         assert!(matches!(quick(&["bad\0program"]), Err(CommandError::InvalidArguments)));
         for env in [[("BAD\0KEY", "value")], [("KEY", "bad\0value")], [("", "value")], [("BAD=KEY", "value")]] {
-            assert!(matches!(run_with(&["/usr/bin/true"], None, &env, Duration::from_secs(10), 1024),
-                             Err(CommandError::InvalidArguments)), "{env:?}");
+            assert!(
+                matches!(
+                    run_with(&["/usr/bin/true"], None, &env, Duration::from_secs(10), 1024),
+                    Err(CommandError::InvalidArguments)
+                ),
+                "{env:?}"
+            );
         }
         assert!(matches!(quick(&["missing-command-rmenu-test"]),
                          Err(CommandError::System { operation: "posix_spawn", error }) if error.raw_os_error() == Some(libc::ENOENT)));
@@ -681,7 +843,8 @@ mod tests {
     fn a_candidate_on_path_that_is_not_executable_is_denied_not_missing() {
         let dir = TempDir::new("denied");
         std::fs::write(dir.0.join("script"), "#!/bin/sh\n").unwrap();
-        let result = run_with(&["script"], Some(b""), &[("PATH", dir.0.to_str().unwrap())], Duration::from_secs(10), 1 << 20);
+        let result =
+            run_with(&["script"], Some(b""), &[("PATH", dir.0.to_str().unwrap())], Duration::from_secs(10), 1 << 20);
         assert!(matches!(result, Err(CommandError::System { operation: "posix_spawn", error })
                          if error.raw_os_error() == Some(libc::EACCES)));
     }
@@ -696,17 +859,28 @@ mod tests {
         let argv = ["/bin/sh", "-c", "printf 1234; printf 5678 >&2"];
         let exact = run_with(&argv, Some(b""), &[], Duration::from_secs(10), 8).unwrap();
         assert_eq!(exact.stdout.len() + exact.stderr.len(), 8);
-        assert!(matches!(run_with(&argv, Some(b""), &[], Duration::from_secs(10), 7), Err(CommandError::OutputLimitExceeded)));
+        assert!(matches!(
+            run_with(&argv, Some(b""), &[], Duration::from_secs(10), 7),
+            Err(CommandError::OutputLimitExceeded)
+        ));
         assert!(run_with(&["/usr/bin/true"], Some(b""), &[], Duration::from_secs(10), 0).unwrap().stdout.is_empty());
         let unbounded = ["/bin/sh", "-c", "while :; do printf 1234567890; done"];
-        assert!(matches!(run_with(&unbounded, Some(b""), &[], Duration::from_secs(10), 128), Err(CommandError::OutputLimitExceeded)));
+        assert!(matches!(
+            run_with(&unbounded, Some(b""), &[], Duration::from_secs(10), 128),
+            Err(CommandError::OutputLimitExceeded)
+        ));
     }
 
     #[test]
     fn timeout_with_blocked_stdin_and_term_ignoring_child() {
         let start = Instant::now();
-        let result = run_with(&["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"], Some(&vec![1; 1_000_000]), &[],
-                              Duration::from_millis(100), 1 << 20);
+        let result = run_with(
+            &["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"],
+            Some(&vec![1; 1_000_000]),
+            &[],
+            Duration::from_millis(100),
+            1 << 20,
+        );
         assert!(matches!(result, Err(CommandError::TimedOut)));
         assert!(start.elapsed() < Duration::from_secs(2));
     }
@@ -715,11 +889,19 @@ mod tests {
     fn cancellation_after_all_pipes_close() {
         let dir = TempDir::new("closed-pipes");
         let marker = dir.0.join("leader");
-        let argv = strings(&["/bin/sh", "-c", "exec 0<&- 1>&- 2>&-; echo $$ > \"$1\"; exec /bin/sleep 30", "runner", marker.to_str().unwrap()]);
+        let argv = strings(&[
+            "/bin/sh",
+            "-c",
+            "exec 0<&- 1>&- 2>&-; echo $$ > \"$1\"; exec /bin/sleep 30",
+            "runner",
+            marker.to_str().unwrap(),
+        ]);
         let cancel = Cancel::default();
         let task = {
             let cancel = cancel.clone();
-            std::thread::spawn(move || run(&argv, None, &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1024 }, &cancel))
+            std::thread::spawn(move || {
+                run(&argv, None, &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1024 }, &cancel)
+            })
         };
         let leader = pids(&marker, 1);
         cancel.cancel();
@@ -729,28 +911,37 @@ mod tests {
 
     #[test]
     fn timeout_after_all_pipes_close() {
-        let result = run_with(&["/bin/sh", "-c", "exec 0<&- 1>&- 2>&-; exec /bin/sleep 30"], Some(b""), &[],
-                              Duration::from_millis(100), 1 << 20);
+        let result = run_with(
+            &["/bin/sh", "-c", "exec 0<&- 1>&- 2>&-; exec /bin/sleep 30"],
+            Some(b""),
+            &[],
+            Duration::from_millis(100),
+            1 << 20,
+        );
         assert!(matches!(result, Err(CommandError::TimedOut)));
     }
 
     /// The nested shell waits, so it can't exec away the middle generation. Every generation
     /// ignores TERM and inherits the output pipes.
     fn descendant_command(dir: &Path, leader_action: &str) -> Vec<String> {
-        let script = format!(r#"trap '' TERM
+        let script = format!(
+            r#"trap '' TERM
 printf '%s\n' "$$" > "$1/leader"
 /bin/sh -c 'trap "" TERM; /bin/sleep 30 & printf "%s\n%s\n" "$$" "$!" > "$1/descendants"; wait' child "$1" &
 {leader_action}
-"#);
+"#
+        );
         strings(&["/bin/sh", "-c", &script, "runner", dir.to_str().unwrap()])
     }
 
     fn pids(path: &Path, count: usize) -> Vec<libc::pid_t> {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
-            let found: Vec<libc::pid_t> = std::fs::read_to_string(path).unwrap_or_default()
-                .lines().filter_map(|l| l.parse().ok()).collect();
-            if found.len() == count { return found; }
+            let found: Vec<libc::pid_t> =
+                std::fs::read_to_string(path).unwrap_or_default().lines().filter_map(|l| l.parse().ok()).collect();
+            if found.len() == count {
+                return found;
+            }
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("{} did not appear", path.display());
@@ -762,7 +953,9 @@ printf '%s\n' "$$" > "$1/leader"
             let alive: Vec<_> = pids.iter().copied()
                 .filter(|&p| unsafe { libc::kill(p, 0) } == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH))
                 .collect();
-            if alive.is_empty() { return; }
+            if alive.is_empty() {
+                return;
+            }
             assert!(Instant::now() < deadline, "processes survived cleanup: {alive:?}");
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -773,8 +966,12 @@ printf '%s\n' "$$" > "$1/leader"
         let dir = TempDir::new("cancel");
         let argv = descendant_command(&dir.0, "wait");
         let cancel = Cancel::default();
-        let task = { let cancel = cancel.clone();
-                     std::thread::spawn(move || run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel)) };
+        let task = {
+            let cancel = cancel.clone();
+            std::thread::spawn(move || {
+                run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel)
+            })
+        };
         let survivor = std::thread::spawn(|| quick(&["/bin/sh", "-c", "/bin/sleep 0.2; printf alive"]));
         let descendants = pids(&dir.0.join("descendants"), 2);
         let leader = pids(&dir.0.join("leader"), 1);
@@ -790,7 +987,13 @@ printf '%s\n' "$$" > "$1/leader"
     fn timeout_kills_descendants_even_after_leader_exits() {
         let dir = TempDir::new("timeout");
         let argv = descendant_command(&dir.0, "exit 0");
-        let result = run(&argv, Some(b""), &[], Limits { timeout: Duration::from_millis(300), output_bytes: 1 << 20 }, &Cancel::default());
+        let result = run(
+            &argv,
+            Some(b""),
+            &[],
+            Limits { timeout: Duration::from_millis(300), output_bytes: 1 << 20 },
+            &Cancel::default(),
+        );
         assert!(matches!(result, Err(CommandError::TimedOut)), "inherited pipes stay subject to the timeout");
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
@@ -798,8 +1001,17 @@ printf '%s\n' "$$" > "$1/leader"
     #[test]
     fn output_limit_kills_descendants() {
         let dir = TempDir::new("limit");
-        let argv = descendant_command(&dir.0, "while [ ! -s \"$1/descendants\" ]; do /bin/sleep 0.01; done\nwhile :; do printf 1234567890; done");
-        let result = run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 128 }, &Cancel::default());
+        let argv = descendant_command(
+            &dir.0,
+            "while [ ! -s \"$1/descendants\" ]; do /bin/sleep 0.01; done\nwhile :; do printf 1234567890; done",
+        );
+        let result = run(
+            &argv,
+            Some(b""),
+            &[],
+            Limits { timeout: Duration::from_secs(10), output_bytes: 128 },
+            &Cancel::default(),
+        );
         assert!(matches!(result, Err(CommandError::OutputLimitExceeded)));
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
@@ -811,23 +1023,42 @@ printf '%s\n' "$$" > "$1/leader"
         let cancel = Cancel::default();
         cancel.cancel();
         let argv = strings(&["/usr/bin/touch", marker.to_str().unwrap()]);
-        assert!(matches!(run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel), Err(CommandError::Cancelled)));
+        assert!(matches!(
+            run(&argv, Some(b""), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel),
+            Err(CommandError::Cancelled)
+        ));
         assert!(!marker.exists());
     }
 
     #[test]
     fn concurrent_invocations_and_cancellation_races() {
-        let handles: Vec<_> = (0..30).map(|i| std::thread::spawn(move || {
-            let cancel = Cancel::default();
-            if i % 2 == 0 { cancel.cancel(); }
-            let input = i.to_string();
-            match run(&strings(&["/bin/cat"]), Some(input.as_bytes()), &[], Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 }, &cancel) {
-                Ok(result) => assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0))),
-                Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
-                Err(e) => panic!("{e}"),
-            }
-        })).collect();
-        for handle in handles { handle.join().unwrap(); }
+        let handles: Vec<_> = (0..30)
+            .map(|i| {
+                std::thread::spawn(move || {
+                    let cancel = Cancel::default();
+                    if i % 2 == 0 {
+                        cancel.cancel();
+                    }
+                    let input = i.to_string();
+                    match run(
+                        &strings(&["/bin/cat"]),
+                        Some(input.as_bytes()),
+                        &[],
+                        Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 },
+                        &cancel,
+                    ) {
+                        Ok(result) => {
+                            assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0)))
+                        }
+                        Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
+                        Err(e) => panic!("{e}"),
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 
     #[test]

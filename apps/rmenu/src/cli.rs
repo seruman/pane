@@ -82,7 +82,9 @@ impl std::fmt::Display for LaunchError {
         match self {
             Self::Read { path, source } => write!(f, "{path}: {source}"),
             Self::Configuration { path, source } => {
-                if let Some(path) = path { write!(f, "{path}: ")?; }
+                if let Some(path) = path {
+                    write!(f, "{path}: ")?;
+                }
                 source.fmt(f)
             }
             Self::MissingInput => f.write_str("Pipe input into rmenu, or supply --config with command sources."),
@@ -109,15 +111,24 @@ impl Cli {
         let preview = self.preview.map(|preview| vec!["/bin/sh".into(), "-c".into(), preview]);
         let configuration = MenuConfiguration::parse(&bytes, preview)
             .map_err(|source| LaunchError::Configuration { path: self.config, source })?;
-        if configuration.root_source().is_none() && stdin_is_tty { return Err(LaunchError::MissingInput); }
+        if configuration.root_source().is_none() && stdin_is_tty {
+            return Err(LaunchError::MissingInput);
+        }
         let multi = self.multi || configuration.multi();
-        let prompt = self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| DEFAULT_PROMPT.into());
+        let prompt =
+            self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| DEFAULT_PROMPT.into());
         Ok(Launch {
             options: Options {
                 configuration,
                 input: self.input,
                 multi,
-                output: if self.json { OutputFormat::Json } else if self.print0 { OutputFormat::Nul } else { OutputFormat::Lines },
+                output: if self.json {
+                    OutputFormat::Json
+                } else if self.print0 {
+                    OutputFormat::Nul
+                } else {
+                    OutputFormat::Lines
+                },
                 sorted: !self.no_sort,
                 prompt,
                 query: self.query,
@@ -131,7 +142,8 @@ impl Cli {
 
 /// mmenu configs load unchanged, but their cmd chords are dead keys here.
 pub fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
-    configuration.command_chords()
+    configuration
+        .command_chords()
         .map(|raw| format!("{raw} can't fire because a terminal never sends Command. Bind it with ctrl+ instead."))
         .collect()
 }
@@ -147,7 +159,9 @@ mod tests {
     #[test]
     fn free_text_options_accept_any_value() {
         for text in ["-foo", "--not-an-option", "-", "plain words", ""] {
-            let cli = parse(&["--config", "/tmp/c.json", "--json", "--width", "720", "--query", text, "--prompt", text]).unwrap();
+            let cli =
+                parse(&["--config", "/tmp/c.json", "--json", "--width", "720", "--query", text, "--prompt", text])
+                    .unwrap();
             assert_eq!(cli.query, text);
             assert_eq!(cli.prompt.as_deref(), Some(text));
             assert!(cli.json);
@@ -171,8 +185,14 @@ mod tests {
 
     #[test]
     fn out_of_range_and_conflicting_flags_are_usage_errors() {
-        for argv in [&["--rows", "3"][..], &["--rows", "31"],
-                     &["--json", "--print0"], &["--appearance", "sepia"], &["--theme", "warm"], &["--input", "xml"]] {
+        for argv in [
+            &["--rows", "3"][..],
+            &["--rows", "31"],
+            &["--json", "--print0"],
+            &["--appearance", "sepia"],
+            &["--theme", "warm"],
+            &["--input", "xml"],
+        ] {
             let error = parse(argv).unwrap_err();
             assert_eq!(error.exit_code(), 2, "{argv:?}");
         }
@@ -192,7 +212,11 @@ mod tests {
 
     #[test]
     fn output_flags_choose_one_format() {
-        for (args, expected) in [(&[][..], OutputFormat::Lines), (&["--json"][..], OutputFormat::Json), (&["--print0"][..], OutputFormat::Nul)] {
+        for (args, expected) in [
+            (&[][..], OutputFormat::Lines),
+            (&["--json"][..], OutputFormat::Json),
+            (&["--print0"][..], OutputFormat::Nul),
+        ] {
             assert_eq!(parse(args).unwrap().launch(false).unwrap().options.output, expected);
         }
     }
@@ -217,8 +241,13 @@ mod tests {
     #[test]
     fn each_cmd_chord_gets_a_warning_that_names_it() {
         let config: MenuConfiguration = serde_json::from_str(
-            r#"{"bindings":[{"key":"cmd+e","action":"accept"},{"key":"ctrl+d","action":"copy"}]}"#).unwrap();
-        assert_eq!(warnings(&config), ["cmd+e can't fire because a terminal never sends Command. Bind it with ctrl+ instead."]);
+            r#"{"bindings":[{"key":"cmd+e","action":"accept"},{"key":"ctrl+d","action":"copy"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            warnings(&config),
+            ["cmd+e can't fire because a terminal never sends Command. Bind it with ctrl+ instead."]
+        );
     }
 
     #[test]
@@ -239,19 +268,35 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("rmenu-cli-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("c.json");
-        std::fs::write(&path, r#"{"prompt":"Pick","multi":true,"sources":[{"id":"a","label":"A","command":["true"]}]}"#).unwrap();
-        let launch = parse(&["--config", path.to_str().unwrap(), "--preview", "cat \"$MMENU_VALUE\""]).unwrap().launch(true).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"prompt":"Pick","multi":true,"sources":[{"id":"a","label":"A","command":["true"]}]}"#,
+        )
+        .unwrap();
+        let launch = parse(&["--config", path.to_str().unwrap(), "--preview", "cat \"$MMENU_VALUE\""])
+            .unwrap()
+            .launch(true)
+            .unwrap();
         let o = &launch.options;
-        assert_eq!(o.configuration.preview(), Some(&["/bin/sh".to_owned(), "-c".into(), "cat \"$MMENU_VALUE\"".into()][..]));
+        assert_eq!(
+            o.configuration.preview(),
+            Some(&["/bin/sh".to_owned(), "-c".into(), "cat \"$MMENU_VALUE\"".into()][..])
+        );
         assert_eq!((o.prompt.as_str(), o.multi), ("Pick", true));
         let flagged = parse(&["--config", path.to_str().unwrap(), "--prompt", "Mine"]).unwrap().launch(true).unwrap();
         assert_eq!(flagged.options.prompt, "Mine");
         std::fs::write(&path, r#"{"preview":[]}"#).unwrap();
         let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
-        assert!(matches!(error, LaunchError::Configuration { path: Some(ref file), source: ConfigurationError::MissingProgram { ref entry } }
-            if file == path.to_str().unwrap() && entry == "Preview command"));
-        let overridden = parse(&["--config", path.to_str().unwrap(), "--preview", "echo"]).unwrap().launch(false).unwrap();
-        assert_eq!(overridden.options.configuration.preview(), Some(["/bin/sh".into(), "-c".into(), "echo".into()].as_slice()));
+        assert!(
+            matches!(error, LaunchError::Configuration { path: Some(ref file), source: ConfigurationError::MissingProgram { ref entry } }
+            if file == path.to_str().unwrap() && entry == "Preview command")
+        );
+        let overridden =
+            parse(&["--config", path.to_str().unwrap(), "--preview", "echo"]).unwrap().launch(false).unwrap();
+        assert_eq!(
+            overridden.options.configuration.preview(),
+            Some(["/bin/sh".into(), "-c".into(), "echo".into()].as_slice())
+        );
         std::fs::write(&path, r#"{"theme":"sepia"}"#).unwrap();
         let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
         assert!(matches!(error, LaunchError::Configuration { source: ConfigurationError::Json(_), .. }));
