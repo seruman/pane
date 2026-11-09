@@ -13,6 +13,7 @@ rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shel
 rune-kit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-kit" }
 pane-ui = { path = "crates/pane-ui" }
 vimkeys = { path = "crates/vimkeys" }
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [profile.dev.package."*"]
 debug = false

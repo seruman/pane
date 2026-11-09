@@ -10,8 +10,7 @@ rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-kit = { workspace = true, features = ["markdown"] }
 pane-ui.workspace = true
 vimkeys.workspace = true
-# The same parser `rune-kit` draws with, to cut the page into its top-level blocks.
-pulldown-cmark = { version = "0.13", default-features = false }
+pulldown-cmark.workspace = true
 
 [lints]
 workspace = true
