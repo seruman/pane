@@ -3,7 +3,6 @@ name = "rmenu"
 description = "mmenu's command-line contract, drawn by Rune inside a terminal."
 edition.workspace = true
 version.workspace = true
-license.workspace = true
 
 [dependencies]
 libc.workspace = true

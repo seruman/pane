@@ -3,7 +3,6 @@ name = "rmenu-core"
 description = "rmenu's data, matching, commands and menu state: everything but drawing."
 edition.workspace = true
 version.workspace = true
-license.workspace = true
 
 [dependencies]
 libc.workspace = true
