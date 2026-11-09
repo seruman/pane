@@ -129,6 +129,8 @@ impl Harness {
     fn marked(&self) -> HashSet<String> { self.model.shown.selection.checked.clone() }
     fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title.clone()).collect() }
 
+    fn is_open(&self) -> bool { self.finished.is_none() }
+
     fn output(&self) -> (i32, String) {
         let (status, output) = self.finished.clone().expect("not finished");
         (status, String::from_utf8(output).unwrap())
@@ -251,7 +253,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
 
     h.load("bravo\n");
     assert!(h.settled());
-    assert!(h.finished.is_none(), "the refused accept was not replayed");
+    assert!(h.is_open(), "the refused accept was not replayed");
     assert_eq!(h.values(), ["bravo"]);
     assert!(h.marked().is_empty());
 }
@@ -362,7 +364,7 @@ fn keys_during_a_slow_search_are_not_lost() {
     assert_eq!(h.model.highlighted_row(), Some(1));
     // Enter is kept and applied to the typed query's results, not dropped or applied to old rows.
     h.nav(Nav::Accept);
-    assert!(h.finished.is_none());
+    assert!(h.is_open());
     h.settle();
     let context = h.context();
     assert_eq!(context.query, "item 9");
@@ -451,7 +453,7 @@ fn values_containing_the_output_delimiter_are_never_written() {
         let rows = format!("{}\n{}\n", json!({"id": "1", "title": "bad", "value": unsafe_value}), json!({"id": "2", "title": "good", "value": "ok"}));
         h.load(&rows);
         h.nav(Nav::Accept);
-        assert!(h.finished.is_none(), "an ambiguous record must not be emitted");
+        assert!(h.is_open(), "an ambiguous record must not be emitted");
         assert_eq!(h.beeps, 1);
         let message = h.model.message().unwrap().to_owned();
         assert!(message.contains("--json"));
@@ -770,7 +772,7 @@ fn escape_and_empty_backspace_pop_then_escape_cancels_at_the_root() {
     assert_eq!(h.model.query(), "", "the parent's query is restored");
     h.nav(Nav::PopIfEmpty);
     assert_eq!(h.model.depth(), 0);
-    assert!(h.finished.is_none());
+    assert!(h.is_open());
     h.nav(Nav::Back);
     assert_eq!(h.output(), (130, String::new()));
 }
@@ -793,7 +795,7 @@ fn level_restricted_bindings_fire_only_at_their_levels() {
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.target(&chord("ctrl+o")), None);
     h.perform(1);
-    assert!(h.finished.is_none());
+    assert!(h.is_open());
     assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(0)));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
@@ -911,7 +913,7 @@ fn accept_waits_for_a_running_operation() {
     h.perform(0);
     assert_eq!(h.started.iter().filter(|t| t.kind() == TaskKind::Operation).count(), 1, "operations are serialized");
     h.nav(Nav::Accept);
-    assert!(h.finished.is_none(), "accept is refused while an operation runs");
+    assert!(h.is_open(), "accept is refused while an operation runs");
     assert_eq!(h.beeps, 2, "the second run and the accept are both refused");
     h.finish_operation(0, "");
     h.nav(Nav::Accept);
@@ -927,7 +929,7 @@ fn copy_puts_chosen_values_on_the_clipboard_and_stays_open() {
     h.perform(0);
     assert_eq!(h.copied, ["one\nthree"]);
     assert_eq!(h.model.message(), Some("Copied 2"));
-    assert!(h.finished.is_none(), "copy keeps the menu open");
+    assert!(h.is_open(), "copy keeps the menu open");
 }
 
 #[test]
@@ -1253,7 +1255,7 @@ fn a_stdin_failure_is_reported_from_any_level() {
     h.perform(0);
     h.send(Event::StdinFailed("Record 2 contains invalid UTF-8.".into()));
     h.nav(Nav::Cancel);
-    assert_eq!(h.finished.as_ref().unwrap().0, 2);
+    assert_eq!(h.output().0, 2);
     assert_eq!(h.model.stdin_error(), Some("Record 2 contains invalid UTF-8."));
 }
 
@@ -1324,5 +1326,5 @@ fn every_action_with_nothing_chosen_beeps() {
     h.perform(0);
     h.perform(1);
     assert_eq!(h.beeps, 3);
-    assert!(h.finished.is_none() && h.model.depth() == 0 && h.copied.is_empty());
+    assert!(h.is_open() && h.model.depth() == 0 && h.copied.is_empty());
 }
