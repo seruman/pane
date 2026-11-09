@@ -1,8 +1,9 @@
 # ghqm drawn by rmenu in a Rex floating layer: source this file, then `ghqr [query]`.
 # Same levels and keys as mmenu's examples/ghqm.fish. Outside Rex it draws in this terminal.
-source (path dirname -- (status filename))/_mmenu_git.fish
+set -l examples (path resolve -- (path dirname -- (status filename)) | string collect)
+source $examples/_mmenu_git.fish
 
-function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, in a Rex floating layer'
+function ghqr --inherit-variable examples --description 'Pick a ghq repository, worktree or memo in rmenu, in a Rex floating layer'
     _mmenu_require ghqr ghq git git-memo jq; or return
     # The split and tab keys call _git_dir_action, which lives in the user's fish config.
     if _mmenu_in_rex; and not functions -q _git_dir_action
@@ -10,7 +11,7 @@ function ghqr --description 'Pick a ghq repository, worktree or memo in rmenu, i
         return 127
     end
     set -l menu $RMENU_BIN
-    test -n "$menu"; or set menu (path resolve -- (path dirname -- (status filename))/../target/release/rmenu)
+    test -n "$menu"; or set menu $examples/../target/release/rmenu
     test -x "$menu"; or begin
         printf 'ghqr: build rmenu first, or set RMENU_BIN\n' >&2
         return 127
@@ -40,8 +41,7 @@ end
 
 # Writes the config into DIR and runs rmenu, in a Rex floating layer when this shell is in
 # Rex. Leaves the --json result in DIR/out and returns rmenu's status.
-function _ghqr_pick --argument-names dir menu query
-    set -l examples (path resolve -- (path dirname -- (status filename)))
+function _ghqr_pick --inherit-variable examples --argument-names dir menu query
     command jq -n --arg fish (status fish-path) --arg examples $examples --argjson rex (_mmenu_rex_bindings) '
         {
             sources: [
@@ -57,8 +57,7 @@ function _ghqr_pick --argument-names dir menu query
     or return 1
 
     if _mmenu_in_rex
-        # The layer's shell runs the picker and leaves its output, errors and status in $dir.
-        set -l run (status fish-path) --no-config -c 'set -l dir $argv[1]; set -e argv[1]; $argv >$dir/out 2>$dir/err; echo $status >$dir/status' \
+        set -l run (status fish-path) --no-config $examples/_ghqr_run.fish \
             $dir $menu --config $dir/config --json --query=$query
         # Over the window this shell is in, not whichever window is active.
         set -l window (rex session inspect $REX_SESSION --json | command jq -r --arg b $REX_BLOCK \

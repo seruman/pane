@@ -92,4 +92,6 @@ err=$(run_config '.preview[]' MMENU_VALUE="$work" 2>&1 >/dev/null)
 code=$?
 check "preview fails with a reason outside a repository" "$([ "$code" -ne 0 ] && [ -n "$err" ] && echo yes)" yes
 
+python3 "$here/../check-ghqr.py" || failed=1
+
 exit $failed
