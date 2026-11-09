@@ -101,12 +101,24 @@ impl PaletteKey {
 
 /// The palette. `selected` indexes [`palette_matches`]; the app keeps it and the query.
 ///
-/// ```ignore
+/// ```no_run
+/// # use pane_ui::{CommandPalette, PaletteEntry, PaletteKey, Theme, palette_matches};
+/// # struct App { query: rune::TextEdit, selected: usize, chosen: Option<usize>, open: bool }
+/// # const COMMANDS: &[PaletteEntry] = &[PaletteEntry::new("Open"), PaletteEntry::new("Save")];
+/// # fn view(s: &App, theme: &Theme) -> rune::El {
 /// CommandPalette::new(&s.query, |s: &mut App| &mut s.query, COMMANDS)
 ///     .selected(s.selected)
-///     .on_key(|s: &mut App, key| ..)
-///     .on_choose(|s: &mut App, index| ..)
+///     .on_key(|s: &mut App, key| {
+///         let matches = palette_matches(COMMANDS, &s.query.text);
+///         match key {
+///             PaletteKey::Confirm => s.chosen = matches.get(s.selected).map(|(i, _)| *i),
+///             PaletteKey::Dismiss => s.open = false,
+///             step => s.selected = step.step(s.selected, matches.len()),
+///         }
+///     })
+///     .on_choose(|s: &mut App, index| s.chosen = Some(index))
 ///     .build("palette", &theme)
+/// # }
 /// ```
 pub struct CommandPalette<'a> {
     query: &'a TextEdit,

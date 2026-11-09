@@ -210,12 +210,17 @@ pub fn popover(key: &str, theme: &Theme) -> El {
 /// A menu: rows, sections and separators on a [`popover`]. It is as wide as its parent allows,
 /// up to 280 points.
 ///
-/// ```ignore
+/// ```no_run
+/// # use pane_ui::{Menu, MenuItem, Theme, icons};
+/// # struct App;
+/// # impl App { fn open(&mut self) {} }
+/// # fn view(theme: &Theme) -> rune::El {
 /// Menu::new()
 ///     .item(MenuItem::new("Open").icon(&icons::FOLDER_OPEN).shortcut("⌃O").on_press(|s: &mut App| s.open()))
 ///     .section("Sort by")
 ///     .item(MenuItem::new("Name").checked(true))
 ///     .build("menu", &theme)
+/// # }
 /// ```
 pub struct Menu {
     entries: Vec<Entry>,

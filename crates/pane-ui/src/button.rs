@@ -57,9 +57,14 @@ impl ControlSize {
 
 /// Rex's capsule button.
 ///
-/// ```ignore
-/// Button::new("Run").icon(&icons::PLAY).on_press(|s: &mut App| s.run()).build("run", &theme)
+/// ```no_run
+/// # use pane_ui::{Button, Theme, icons};
+/// # struct App;
+/// # impl App { fn run(&mut self) {} }
+/// # fn view(theme: &Theme) -> rune::El {
+/// Button::new("Run").icon(&icons::PLAY).on_press(|s: &mut App| s.run()).build("run", &theme);
 /// Button::icon_only(&icons::REFRESH_CW, "Refresh").plain().build("refresh", &theme)
+/// # }
 /// ```
 pub struct Button {
     label: Option<String>,

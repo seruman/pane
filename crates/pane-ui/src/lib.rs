@@ -13,14 +13,20 @@
 //!   rows wrap, [`Columns`] stack and long text truncates, so the same view works in a wide pane
 //!   and a narrow one.
 //!
-//! ```ignore
+//! ```no_run
+//! # use pane_ui::*;
+//! # struct App { notify: bool }
+//! # impl App { fn run(&mut self) {} }
+//! # fn view(s: &App, cx: &mut rune::Cx<App>) -> rune::El {
 //! let theme = Theme::current(cx.system_dark());
 //! Page::new()
 //!     .child(SettingsGroup::new()
 //!         .row(SettingsRow::new("Notify when done")
-//!             .control(Toggle::new(s.notify, "Notify").on_toggle(|s: &mut App| s.notify = !s.notify).build(&theme))))
+//!             .control(Toggle::new(s.notify, "Notify").on_toggle(|s: &mut App| s.notify = !s.notify).build(&theme)))
+//!         .build(&theme))
 //!     .child(Button::new("Run").icon(&icons::PLAY).on_press(|s: &mut App| s.run()).build("run", &theme))
 //!     .build(&theme)
+//! # }
 //! ```
 //!
 //! Inside a terminal (`RUNE_TERMINAL=1`) [`Theme::current`] follows the terminal's colours and

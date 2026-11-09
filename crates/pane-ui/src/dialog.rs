@@ -5,12 +5,18 @@ use rune::{El, Icon, col, icon, row, text};
 
 use crate::{Theme, Tone};
 
-/// ```ignore
+/// ```no_run
+/// # use pane_ui::{Button, Dialog, Page, Theme, modal_layer};
+/// # struct App { confirm: bool }
+/// # impl App { fn delete(&mut self) {} }
+/// # fn view(theme: &Theme) -> Page {
+/// # let page = Page::new();
 /// let dialog = Dialog::new("Delete my-service?").message("This can't be undone.")
 ///     .action(Button::new("Cancel").gray().on_press(|s: &mut App| s.confirm = false).build("cancel", &theme))
 ///     .action(Button::new("Delete").destructive().on_press(|s: &mut App| s.delete()).build("delete", &theme))
 ///     .build("confirm", &theme);
 /// page.overlay(modal_layer("confirm-layer", dialog, |s: &mut App| s.confirm = false, &theme))
+/// # }
 /// ```
 pub struct Dialog {
     title: String,

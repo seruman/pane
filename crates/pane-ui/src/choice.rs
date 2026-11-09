@@ -10,8 +10,13 @@ use crate::{ControlSize, MenuItem, Theme, Transform, icons, popover};
 /// A capsule track of options with the selected one raised, for a few short choices or tabs.
 /// Left and Right move between options and select them.
 ///
-/// ```ignore
-/// SegmentedControl::new(["Overview", "Settings"]).selected(s.tab).on_select(|s: &mut App, i| s.tab = i).build("tabs", &theme)
+/// ```no_run
+/// # use pane_ui::{SegmentedControl, Theme};
+/// # struct App { tab: usize }
+/// # fn view(s: &App, theme: &Theme) -> rune::El {
+/// SegmentedControl::new(["Overview", "Settings"]).selected(s.tab)
+///     .on_select(|s: &mut App, i| s.tab = i).build("tabs", &theme)
+/// # }
 /// ```
 pub struct SegmentedControl {
     options: Vec<String>,
@@ -121,13 +126,17 @@ impl SegmentedControl {
 /// A field showing the current choice that drops a menu of options, as a theme or sort order.
 /// The app keeps whether it is open.
 ///
-/// ```ignore
+/// ```no_run
+/// # use pane_ui::{Page, Select, Theme};
+/// # struct App { theme: usize, theme_open: bool }
+/// # fn view(s: &App, theme: &Theme) -> rune::El {
 /// let mut layer = Vec::new();
 /// let select = Select::new(["Follow terminal", "Light", "Dark"]).current(s.theme).open(s.theme_open)
 ///     .on_toggle(|s: &mut App| s.theme_open = !s.theme_open)
 ///     .on_choose(|s: &mut App, i| { s.theme = i; s.theme_open = false; })
 ///     .build("theme", &theme, &mut layer);
-/// // … Page::new().child(select).overlays(layer)
+/// Page::new().child(select).overlays(layer).build(&theme)
+/// # }
 /// ```
 pub struct Select {
     options: Vec<String>,

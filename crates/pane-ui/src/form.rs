@@ -11,9 +11,13 @@ use crate::{ControlSize, Theme, Transform, hex_code, icons};
 
 /// A one-line text field, optionally with a leading icon (a search field has the magnifier).
 ///
-/// ```ignore
-/// TextField::new(&s.name, |s: &mut App| &mut s.name).placeholder("Name").build("name", &theme)
+/// ```no_run
+/// # use pane_ui::{TextField, Theme};
+/// # struct App { name: rune::TextEdit, filter: rune::TextEdit }
+/// # fn view(s: &App, theme: &Theme) -> rune::El {
+/// TextField::new(&s.name, |s: &mut App| &mut s.name).placeholder("Name").build("name", &theme);
 /// TextField::search(&s.filter, |s: &mut App| &mut s.filter).placeholder("Filter files").fill().build("filter", &theme)
+/// # }
 /// ```
 pub struct TextField<'a> {
     edit: &'a TextEdit,

@@ -22,8 +22,14 @@ impl Width {
 /// The whole pane: the terminal background, scrolling content with padding, and overlays
 /// (toasts, modals) above it.
 ///
-/// ```ignore
-/// Page::new().child(..).child(..).overlay(toast_region(..)).build(&theme)
+/// ```no_run
+/// # use pane_ui::{Page, Theme, Toast, toast_region};
+/// # fn view(theme: &Theme) -> rune::El {
+/// Page::new()
+///     .child(rune::text("Build output"))
+///     .overlay(toast_region(Toast::new("Build finished").build("done", &theme)))
+///     .build(&theme)
+/// # }
 /// ```
 pub struct Page {
     children: Vec<El>,
