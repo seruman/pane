@@ -10,7 +10,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::item::MenuItem;
 
 use crate::items::CHUNK;
-pub use crate::items::Items as SearchIndex;
+pub use crate::items::{Items as SearchIndex, RowOffset};
 const MATCHER_CONFIG: Config = Config::DEFAULT;
 
 fn pattern(query: &str) -> Pattern {
@@ -75,7 +75,7 @@ impl SearchIndex {
     /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
     /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
     /// Workers poll `cancelled` while matching. Single-chunk searches run on the caller.
-    pub fn search(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<u32>, Cancelled> {
+    pub fn search(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<RowOffset>, Cancelled> {
         Ok(self.ranked(query, sorted, cancelled)?.into_iter().map(|m| m.offset).collect())
     }
 
@@ -83,7 +83,7 @@ impl SearchIndex {
         if cancelled() { return Err(Cancelled); }
         let pattern = pattern(query);
         if pattern.atoms.is_empty() {
-            return Ok((0..self.len as u32).map(|offset| Ranked { score: 0, len: 0, offset }).collect());
+            return Ok((0..self.len).map(|offset| Ranked { score: 0, len: 0, offset: RowOffset::try_from(offset).expect("row offset exceeds u32") }).collect());
         }
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.chunks.len());
         let next = AtomicUsize::new(0);
@@ -120,7 +120,8 @@ impl SearchIndex {
             for (local, text) in chunk.text.iter().enumerate() {
                 if local % 256 == 0 && cancelled() { return Err(Cancelled); }
                 if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
-                    rows.push(Ranked { score, len: text.len() as u32, offset: (base + local) as u32 });
+                    rows.push(Ranked { score, len: u32::try_from(text.len()).expect("search text length exceeds u32"),
+                                       offset: RowOffset::try_from(base + local).expect("row offset exceeds u32") });
                 }
             }
             out.push((index, rows));
@@ -129,7 +130,7 @@ impl SearchIndex {
     }
 
     #[cfg(test)]
-    fn scored_matches(&self, query: &str) -> Vec<(u32, u32)> {
+    fn scored_matches(&self, query: &str) -> Vec<(RowOffset, u32)> {
         self.ranked(query, true, &|| false).unwrap().into_iter().map(|m| (m.offset, m.score)).collect()
     }
 }
@@ -137,7 +138,7 @@ impl SearchIndex {
 struct Ranked {
     score: u32,
     len: u32,
-    offset: u32,
+    offset: RowOffset,
 }
 
 #[cfg(test)]

@@ -32,3 +32,7 @@ The experiment does not measure terminal rendering or command startup. Those rem
 ## Shared row storage check
 
 A later structural change puts item payloads and prepared text in the same shared chunks. Each chunk keeps text in a separate contiguous vector. Five alternating million-row runs compare that change with the direct-cancellation candidate above, using the same command and verification checks. Ranked `swift` medians were 37.572 ms before and 38.526 ms after, with ranges of 36.659 to 41.509 ms and 36.469 to 38.985 ms. Input-order medians were 18.411 ms before and 18.106 ms after, with ranges of 17.090 to 18.987 ms and 17.242 to 20.004 ms. Both comparisons show no measurable difference. Snapshot tests also confirm that appends retain full shared chunks and leave earlier searches and payloads unchanged.
+
+## Typed offset check
+
+Keep `RowOffset` backed by `u32` with checked conversion. A discarded `usize` candidate enlarged ranking records and showed a ranked million-row regression from 34.599 ms to 38.293 ms across five alternating pairs. The retained checked `u32` implementation showed no measurable difference in another five alternating pairs. Ranked `swift` medians were 34.802 ms before and 34.260 ms after, with ranges of 34.388 to 35.090 ms and 34.135 to 35.929 ms. Input-order medians were 17.089 ms before and 16.968 ms after, with ranges of 16.276 to 17.825 ms and 16.227 to 17.289 ms. These runs use the same release commands, work verification, and million-row input as above.

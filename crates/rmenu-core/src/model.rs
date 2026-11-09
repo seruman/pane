@@ -9,7 +9,7 @@ use std::time::Duration;
 use crate::command::{CommandResult, Limits};
 use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId};
 use crate::item::{ActionContext, MenuItem, PathEntry};
-use crate::search::SearchIndex;
+use crate::search::{RowOffset, SearchIndex};
 use crate::selection::MenuSelection;
 
 #[derive(Clone, Debug)]
@@ -137,7 +137,7 @@ pub enum Event {
     StdinDone,
     StdinFailed(String),
     SourceDone { token: Token, result: Result<Vec<MenuItem>, String> },
-    SearchDone { token: Token, results: Vec<u32> },
+    SearchDone { token: Token, results: Vec<RowOffset> },
     PreviewDone { token: Token, result: Result<CommandResult, String> },
     OperationDone { token: Token, result: Result<CommandResult, String> },
 }
@@ -166,7 +166,7 @@ pub fn command_failure(result: &CommandResult) -> String {
 #[derive(Clone, Default)]
 struct Shown {
     items: Items,
-    results: Vec<u32>,
+    results: Vec<RowOffset>,
     highlighted_row: Option<usize>,
     selection: MenuSelection,
     /// The query `results` were matched against; None before the first search lands.
@@ -335,7 +335,7 @@ impl Model {
     /// How many result rows are shown.
     pub fn result_count(&self) -> usize { self.shown.results.len() }
 
-    pub fn result(&self, row: usize) -> &MenuItem { &self.shown.items[self.shown.results[row] as usize] }
+    pub fn result(&self, row: usize) -> &MenuItem { &self.shown.items[self.shown.results[row]] }
 
     /// Changes whenever the shown results are replaced, so a host can reset scrolling.
     pub fn result_revision(&self) -> u64 { self.result_revision }
@@ -511,7 +511,7 @@ impl Model {
 
     fn highlighted(&self) -> Option<&MenuItem> {
         let row = self.shown.highlighted_row?;
-        self.shown.results.get(row).map(|&o| &self.shown.items[o as usize])
+        self.shown.results.get(row).map(|&o| &self.shown.items[o])
     }
 
     fn set_query(&mut self, value: String) {
@@ -780,7 +780,7 @@ impl Model {
         }));
     }
 
-    fn search_done(&mut self, token: Token, results: Vec<u32>) {
+    fn search_done(&mut self, token: Token, results: Vec<RowOffset>) {
         if token != self.generation {
             return;
         }
@@ -804,7 +804,7 @@ impl Model {
         self.displayed_source_generation = self.source_generation;
         let highlighted = self.shown.selection.highlighted_id.as_ref();
         self.shown.highlighted_row =
-            self.shown.results[..listed].iter().position(|&o| Some(&self.shown.items[o as usize].id) == highlighted);
+            self.shown.results[..listed].iter().position(|&o| Some(&self.shown.items[o].id) == highlighted);
         self.update_preview();
         if self.can_act()
             && let Some(intent) = self.pending_intent.take()

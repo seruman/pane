@@ -8,6 +8,14 @@ use nucleo_matcher::Utf32String;
 
 pub(crate) const CHUNK: usize = 8_192;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RowOffset(pub(crate) u32);
+
+impl TryFrom<usize> for RowOffset {
+    type Error = std::num::TryFromIntError;
+    fn try_from(offset: usize) -> Result<Self, Self::Error> { u32::try_from(offset).map(Self) }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Chunk {
     items: Vec<MenuItem>,
@@ -48,6 +56,12 @@ impl From<Vec<MenuItem>> for Items {
     }
 }
 
+impl Index<RowOffset> for Items {
+    type Output = MenuItem;
+    fn index(&self, offset: RowOffset) -> &MenuItem { &self.chunks[offset.0 as usize / CHUNK].items[offset.0 as usize % CHUNK] }
+}
+
+#[cfg(test)]
 impl Index<usize> for Items {
     type Output = MenuItem;
     fn index(&self, i: usize) -> &MenuItem { &self.chunks[i / CHUNK].items[i % CHUNK] }
@@ -73,15 +87,21 @@ mod tests {
     }
 
     #[test]
+    fn row_offsets_reject_truncation() {
+        assert_eq!(RowOffset::try_from(u32::MAX as usize), Ok(RowOffset(u32::MAX)));
+        assert!(RowOffset::try_from(u32::MAX as usize + 1).is_err());
+    }
+
+    #[test]
     fn appends_keep_search_offsets_and_item_payloads_together() {
         let mut items = Items::default();
         items.extend((0..CHUNK - 1).map(|i| MenuItem::new(i.to_string(), "old")));
         let snapshot = items.clone();
         items.extend((CHUNK - 1..CHUNK + 2).map(|i| MenuItem::new(i.to_string(), "new").with_value(format!("value-{i}"))));
         let offsets = items.search("new", false, &|| false).unwrap();
-        assert_eq!(offsets, [(CHUNK - 1) as u32, CHUNK as u32, (CHUNK + 1) as u32]);
+        assert_eq!(offsets, [CHUNK - 1, CHUNK, CHUNK + 1].map(|offset| RowOffset::try_from(offset).unwrap()));
         for offset in offsets {
-            assert_eq!(items[offset as usize].value(), format!("value-{offset}"));
+            assert_eq!(items[offset].value(), format!("value-{}", offset.0));
         }
         assert!(snapshot.search("new", false, &|| false).unwrap().is_empty());
     }

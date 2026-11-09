@@ -7,9 +7,13 @@ fn index(titles: &[&str]) -> SearchIndex {
     SearchIndex::from(items)
 }
 
-fn search(index: &SearchIndex, query: &str) -> Vec<u32> { index.search(query, true, &|| false).unwrap() }
+fn search(index: &SearchIndex, query: &str) -> Vec<usize> {
+    index.search(query, true, &|| false).unwrap().into_iter().map(|offset| offset.0 as usize).collect()
+}
 
-fn unsorted(index: &SearchIndex, query: &str) -> Vec<u32> { index.search(query, false, &|| false).unwrap() }
+fn unsorted(index: &SearchIndex, query: &str) -> Vec<usize> {
+    index.search(query, false, &|| false).unwrap().into_iter().map(|offset| offset.0 as usize).collect()
+}
 
 #[test]
 fn better_matches_rank_first_and_ties_keep_input_order() {
@@ -94,7 +98,7 @@ fn appends_past_a_chunk_leave_snapshots_alone() {
     let snapshot = rows.clone();
     rows.extend(items[CHUNK - 5..].iter().cloned());
     assert_eq!(search(&rows, "").len(), CHUNK + 10);
-    assert_eq!(unsorted(&rows, &format!("row-{}", CHUNK + 9)), [(CHUNK + 9) as u32]);
+    assert_eq!(unsorted(&rows, &format!("row-{}", CHUNK + 9)), [CHUNK + 9]);
     assert_eq!(search(&snapshot, "").len(), CHUNK - 5);
     assert!(unsorted(&snapshot, &format!("row-{}", CHUNK + 9)).is_empty());
 }
@@ -148,7 +152,7 @@ fn large_indexes_keep_input_order_for_ties() {
     let items: Vec<MenuItem> = titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), t.clone())).collect();
     let rows = SearchIndex::from(items);
     let ranked = search(&rows, "module1 swift");
-    let module1: Vec<u32> = (0..50_000).filter(|i| i % 13 == 1).collect();
+    let module1: Vec<usize> = (0..50_000).filter(|i| i % 13 == 1).collect();
     assert_eq!(ranked.len(), (0..50_000).filter(|i| i % 13 == 1 || i % 13 >= 10).count());
     assert_eq!(&ranked[..module1.len()], &module1[..], "module1 ranks first; its ties keep input order");
     let mut sorted = ranked.clone();
