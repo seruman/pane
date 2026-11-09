@@ -1,11 +1,10 @@
-//! Every `pane-ui` component on one scrolling page, as a program running in a Rex pane
-//! would draw them: tabs, buttons, a progress bar, a settings group with a select, a list, a
-//! menu, checkboxes, program status, badges, a colour slider, toasts, a dialog and the command
-//! palette.
+//! An interactive gallery of `pane-ui` components on one scrolling page.
+//! It includes tabs, buttons, progress, settings, lists, menus, checkboxes, status indicators,
+//! badges, a colour slider, toasts, a dialog, and a command palette.
 //!
 //! `RUNE_TERMINAL=1 cargo run --release -p gallery` runs it in a terminal with
-//! the kitty graphics protocol. Ctrl-P opens the command palette; Tab, Space, Enter and the arrow
-//! keys work as usual. Colours follow the terminal's theme. Make the pane narrow to see the
+//! the kitty graphics protocol. Ctrl-P opens the command palette.
+//! Colours follow the terminal's theme. Make the pane narrow to see the
 //! layout stack.
 
 use std::time::Duration;
@@ -59,35 +58,35 @@ struct Command {
 
 const COMMANDS: [Command; 8] = [
     Command {
-        entry: PaletteEntry::new("Run Tests").shortcut("⌃R"),
+        entry: PaletteEntry::new("Run tests").shortcut("⌃R"),
         action: CommandAction::Toast,
     },
     Command {
-        entry: PaletteEntry::new("Deploy to Staging").submenu(),
+        entry: PaletteEntry::new("Deploy to staging").submenu(),
         action: CommandAction::Toast,
     },
     Command {
-        entry: PaletteEntry::new("Open Logs"),
+        entry: PaletteEntry::new("Open logs"),
         action: CommandAction::Toast,
     },
     Command {
-        entry: PaletteEntry::new("Restart Server").shortcut("⌃⇧R"),
+        entry: PaletteEntry::new("Restart server").shortcut("⌃⇧R"),
         action: CommandAction::Toast,
     },
     Command {
-        entry: PaletteEntry::new("Clear Cache"),
+        entry: PaletteEntry::new("Clear cache"),
         action: CommandAction::Toast,
     },
     Command {
-        entry: PaletteEntry::new("Follow Terminal Theme").section("Appearance"),
+        entry: PaletteEntry::new("Follow terminal theme").section("Appearance"),
         action: CommandAction::Theme(ThemeChoice::Terminal),
     },
     Command {
-        entry: PaletteEntry::new("Light Theme").section("Appearance"),
+        entry: PaletteEntry::new("Light theme").section("Appearance"),
         action: CommandAction::Theme(ThemeChoice::Light),
     },
     Command {
-        entry: PaletteEntry::new("Dark Theme").section("Appearance"),
+        entry: PaletteEntry::new("Dark theme").section("Appearance"),
         action: CommandAction::Theme(ThemeChoice::Dark),
     },
 ];
@@ -342,7 +341,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
             Columns::new(220.0)
                 .child(section(heading("Menu", &theme), menu(s, &theme)))
                 .child(
-                    rune::col()
+                    col()
                         .w_full()
                         .gap(12.0)
                         .child(section(heading("Checklist", &theme), checklist(s, &theme)))
@@ -476,7 +475,7 @@ fn buttons(s: &State, theme: &Theme) -> El {
     if !running {
         return buttons;
     }
-    rune::col()
+    col()
         .gap(10.0)
         .child(buttons)
         .child(progress_bar(s.run.progress(), theme))
@@ -576,7 +575,7 @@ fn files(s: &State, theme: &Theme) -> El {
             EmptyState::new(&icons::INBOX, "No files match")
                 .message("Try a shorter filter.")
                 .action(
-                    Button::new("Clear Filter")
+                    Button::new("Clear filter")
                         .tinted()
                         .on_press(|s: &mut State| s.filter.clear())
                         .build("clear-filter", theme),
@@ -618,7 +617,7 @@ fn menu(s: &State, theme: &Theme) -> El {
 }
 
 fn checklist(s: &State, theme: &Theme) -> El {
-    let mut list = rune::col().gap(6.0);
+    let mut list = col().gap(6.0);
     for (i, task) in TASKS.into_iter().enumerate() {
         list = list.child(
             Checkbox::new(s.tasks[i])
@@ -719,9 +718,9 @@ fn on_key(s: &mut State, k: &KeyEvent, _: &mut Tx) -> bool {
     match k.key {
         Key::Command('p') if k.mods.ctrl => {
             if s.overlay == Overlay::Palette {
-                s.close_palette()
+                s.close_palette();
             } else {
-                s.open_palette()
+                s.open_palette();
             }
             true
         }
