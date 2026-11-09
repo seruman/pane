@@ -117,10 +117,8 @@ struct Spawned {
 /// Starts `program` in a new process group with only stdio. POSIX_SPAWN_CLOEXEC_DEFAULT closes
 /// every other descriptor in the exec itself, as mmenu does, so a descriptor another thread
 /// opens at the same moment can't slip through.
-fn spawn(program: &CString, argv: &[String], envp: &[CString], input: bool) -> Result<Spawned, CommandError> {
-    let args: Vec<CString> = argv.iter().map(|a| CString::new(a.as_str())).collect::<Result<_, _>>()
-        .map_err(|_| CommandError::InvalidArguments)?;
-    let mut arg_ptrs: Vec<*mut libc::c_char> = args.iter().map(|a| a.as_ptr() as *mut _).collect();
+fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> Result<Spawned, CommandError> {
+    let mut arg_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr() as *mut _).collect();
     arg_ptrs.push(std::ptr::null_mut());
     let mut env_ptrs: Vec<*mut libc::c_char> = envp.iter().map(|e| e.as_ptr() as *mut _).collect();
     env_ptrs.push(std::ptr::null_mut());
@@ -201,16 +199,16 @@ fn set_nonblocking(fd: RawFd) -> Result<(), CommandError> {
 pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], timeout: Duration,
            output_limit: usize, cancel: &Cancel) -> Result<CommandResult, CommandError> {
     if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
-    let has_nul = |s: &str| s.contains('\0');
     if argv.first().is_none_or(|program| program.is_empty())
-        || argv.iter().any(|a| has_nul(a))
-        || env.iter().any(|(k, v)| k.is_empty() || k.contains('=') || has_nul(k) || has_nul(v)) {
+        || env.iter().any(|(k, _)| k.is_empty() || k.contains('=')) {
         return Err(CommandError::InvalidArguments);
     }
+    let args: Vec<CString> = argv.iter().map(|a| CString::new(a.as_str())).collect::<Result<_, _>>()
+        .map_err(|_| CommandError::InvalidArguments)?;
     let deadline = Instant::now().checked_add(timeout);
     let (envp, path) = environment(env)?;
     let program = resolve(&argv[0], path.as_deref())?;
-    let spawned = spawn(&program, argv, &envp, input.is_some())?;
+    let spawned = spawn(&program, &args, &envp, input.is_some())?;
     let mut group = Group { pid: spawned.pid, reaped: false };
     pump(&mut group, spawned, input.unwrap_or_default(), deadline, output_limit, cancel)
 }
@@ -443,7 +441,7 @@ mod tests {
 
     #[test]
     fn exit_wait_wakes_before_its_cancellation_interval() {
-        let argv = strings(&["/bin/cat"]);
+        let argv = [c"/bin/cat".to_owned()];
         let spawned = spawn(&c"/bin/cat".to_owned(), &argv, &[], true).unwrap();
         let mut group = Group { pid: spawned.pid, reaped: false };
         assert_eq!(group.try_wait().unwrap(), None);
@@ -460,7 +458,7 @@ mod tests {
 
     #[test]
     fn exit_wait_is_bounded_while_the_child_is_alive() {
-        let argv = strings(&["/bin/cat"]);
+        let argv = [c"/bin/cat".to_owned()];
         let spawned = spawn(&c"/bin/cat".to_owned(), &argv, &[], true).unwrap();
         let mut group = Group { pid: spawned.pid, reaped: false };
         group.wait_for_exit(Duration::from_millis(10)).unwrap();
@@ -470,7 +468,7 @@ mod tests {
 
     #[test]
     fn exit_wait_handles_a_child_that_exited_before_registration() {
-        let argv = strings(&["/bin/echo", "hi"]);
+        let argv = [c"/bin/echo".to_owned(), c"hi".to_owned()];
         let mut spawned = spawn(&c"/bin/echo".to_owned(), &argv, &[], false).unwrap();
         let mut group = Group { pid: spawned.pid, reaped: false };
         let mut output = String::new();
@@ -560,6 +558,11 @@ mod tests {
     fn missing_executable_and_invalid_inputs_fail() {
         assert_eq!(quick(&[]), Err(CommandError::InvalidArguments));
         assert_eq!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments));
+        assert_eq!(quick(&["bad\0program"]), Err(CommandError::InvalidArguments));
+        for env in [[("BAD\0KEY", "value")], [("KEY", "bad\0value")], [("", "value")], [("BAD=KEY", "value")]] {
+            assert_eq!(run_with(&["/usr/bin/true"], None, &env, Duration::from_secs(10), 1024),
+                       Err(CommandError::InvalidArguments), "{env:?}");
+        }
         assert_eq!(quick(&["missing-command-rmenu-test"]),
                    Err(CommandError::System { operation: "posix_spawn".into(), code: libc::ENOENT }));
     }
