@@ -106,10 +106,10 @@ pub struct KeyChord {
 }
 
 impl MenuConfiguration {
-    pub const THEMES: [&str; 2] = ["native", "rex"];
+    const THEMES: [&str; 2] = ["native", "rex"];
 
     /// The configured theme with former names mapped to their replacement.
-    pub fn theme_name(&self) -> Option<&str> {
+    fn theme_name(&self) -> Option<&str> {
         self.theme.as_deref().map(|theme| if theme == "warm" { "rex" } else { theme })
     }
 
@@ -240,7 +240,7 @@ impl KeyChord {
     }
 
     /// Keys the input field and list keep for editing and navigation.
-    pub fn is_reserved(&self) -> bool {
+    fn is_reserved(&self) -> bool {
         let key = self.key.as_str();
         match (self.command, self.control, self.option) {
             (false, false, false) => true,
