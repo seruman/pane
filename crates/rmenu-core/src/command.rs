@@ -1129,9 +1129,22 @@ printf '%s\n' "$$" > "$1/leader"
 
     #[test]
     fn errors_describe_themselves() {
-        assert_eq!(CommandError::TimedOut.to_string(), "Command timed out");
-        assert!(CommandError::OutputLimitExceeded.to_string().contains("output limit"));
-        let missing = system("posix_spawn", io::Error::from_raw_os_error(libc::ENOENT));
-        assert!(missing.to_string().starts_with("posix_spawn: No such file or directory"));
+        for (error, detail) in [
+            (CommandError::TimedOut, "timed out"),
+            (CommandError::OutputLimitExceeded, "output limit"),
+            (CommandError::InvalidArguments, "arguments"),
+            (CommandError::Cancelled, "cancel"),
+        ] {
+            assert!(error.to_string().to_lowercase().contains(detail), "{error:?}");
+        }
+        let missing = quick(&["/rmenu-test-missing-directory/program"]).unwrap_err();
+        let CommandError::System { operation, error } = &missing else {
+            panic!("expected a system error, got {missing:?}");
+        };
+        assert_eq!(*operation, "posix_spawn");
+        assert_eq!(error.raw_os_error(), Some(libc::ENOENT));
+        let message = missing.to_string();
+        assert!(message.contains(operation), "{message}");
+        assert!(message.contains(&error.to_string()), "{message}");
     }
 }
