@@ -18,8 +18,8 @@ use rune::{Key, KeyEvent};
 
 use keymap::Lookup;
 pub use keymap::{
-    Command, Find, Hint, HintGroup, HintGroups, Keymap, Motion, NoAction, Object, Operator,
-    PendingCommand, Stroke, Table, hint,
+    Command, Find, Hint, HintGroup, HintGroups, KeyStroke, Keymap, Motion, NoAction, Object,
+    Operator, PendingCommand, Stroke, Table, hint,
 };
 
 /// The largest count Vim takes, as Vim caps its own. A motion repeats once per count, so a

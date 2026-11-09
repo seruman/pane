@@ -44,6 +44,26 @@ pub enum Stroke {
     Leader,
 }
 
+/// A concrete key, without the symbolic [`Stroke::Leader`] placeholder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum KeyStroke {
+    Char(char),
+    Ctrl(char),
+    Enter,
+    Tab,
+    BackTab,
+    Backspace,
+    Delete,
+    Up,
+    Down,
+    Left,
+    Right,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+}
+
 impl Stroke {
     /// The stroke a key event is; `None` for one no binding can name (Escape, which cancels,
     /// a Cmd chord, a modifier on its own).
@@ -80,42 +100,58 @@ impl Stroke {
         })
     }
 
-    fn resolve(self, leader: Stroke) -> Stroke {
-        if self == Stroke::Leader { leader } else { self }
+    fn resolve(self, leader: KeyStroke) -> KeyStroke {
+        match self {
+            Stroke::Char(c) => KeyStroke::Char(c),
+            Stroke::Ctrl(c) => KeyStroke::Ctrl(c),
+            Stroke::Enter => KeyStroke::Enter,
+            Stroke::Tab => KeyStroke::Tab,
+            Stroke::BackTab => KeyStroke::BackTab,
+            Stroke::Backspace => KeyStroke::Backspace,
+            Stroke::Delete => KeyStroke::Delete,
+            Stroke::Up => KeyStroke::Up,
+            Stroke::Down => KeyStroke::Down,
+            Stroke::Left => KeyStroke::Left,
+            Stroke::Right => KeyStroke::Right,
+            Stroke::Home => KeyStroke::Home,
+            Stroke::End => KeyStroke::End,
+            Stroke::PageUp => KeyStroke::PageUp,
+            Stroke::PageDown => KeyStroke::PageDown,
+            Stroke::Leader => leader,
+        }
     }
 
     /// How a hint shows it: `w`, `⌃d`, `enter`, `space`.
-    fn label(self, leader: Stroke) -> String {
+    fn label(self, leader: KeyStroke) -> String {
         match self.resolve(leader) {
-            Stroke::Char(' ') => "space".into(),
-            Stroke::Char(c) => c.to_string(),
-            Stroke::Ctrl(c) => format!("⌃{c}"),
-            Stroke::Enter => "enter".into(),
-            Stroke::Tab => "tab".into(),
-            Stroke::BackTab => "⇧tab".into(),
-            Stroke::Backspace => "⌫".into(),
-            Stroke::Delete => "⌦".into(),
-            Stroke::Up => "↑".into(),
-            Stroke::Down => "↓".into(),
-            Stroke::Left => "←".into(),
-            Stroke::Right => "→".into(),
-            Stroke::Home => "home".into(),
-            Stroke::End => "end".into(),
-            Stroke::PageUp => "pgup".into(),
-            Stroke::PageDown => "pgdn".into(),
-            Stroke::Leader => unreachable!("the leader is a real key"),
+            KeyStroke::Char(' ') => "space".into(),
+            KeyStroke::Char(c) => c.to_string(),
+            KeyStroke::Ctrl(c) => format!("⌃{c}"),
+            KeyStroke::Enter => "enter".into(),
+            KeyStroke::Tab => "tab".into(),
+            KeyStroke::BackTab => "⇧tab".into(),
+            KeyStroke::Backspace => "⌫".into(),
+            KeyStroke::Delete => "⌦".into(),
+            KeyStroke::Up => "↑".into(),
+            KeyStroke::Down => "↓".into(),
+            KeyStroke::Left => "←".into(),
+            KeyStroke::Right => "→".into(),
+            KeyStroke::Home => "home".into(),
+            KeyStroke::End => "end".into(),
+            KeyStroke::PageUp => "pgup".into(),
+            KeyStroke::PageDown => "pgdn".into(),
         }
     }
 }
 
 /// `keys` as a hint shows them: `gy`, `]c`, `\e`; spaced when a key's name is a word
 /// (`g enter`).
-pub(crate) fn render(keys: &[Stroke], leader: Stroke) -> String {
+pub(crate) fn render(keys: &[Stroke], leader: KeyStroke) -> String {
     let labels: Vec<String> = keys.iter().map(|k| k.label(leader)).collect();
     let spaced = keys
         .iter()
         .zip(&labels)
-        .any(|(k, l)| !matches!(k.resolve(leader), Stroke::Ctrl(_)) && l.chars().count() > 1);
+        .any(|(k, l)| !matches!(k.resolve(leader), KeyStroke::Ctrl(_)) && l.chars().count() > 1);
     labels.join(if spaced { " " } else { "" })
 }
 
@@ -351,7 +387,7 @@ pub(crate) enum Lookup<T> {
 /// ```
 #[derive(Clone, Debug)]
 pub struct Keymap<A, O = A> {
-    leader: Stroke,
+    leader: KeyStroke,
     tables: [Vec<Binding<Command<A, O>>>; 2],
     pending: Vec<Binding<PendingCommand>>,
     objects: Vec<Binding<Object>>,
@@ -361,7 +397,7 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
     /// No bindings, and `\` for the leader.
     pub fn empty() -> Self {
         Keymap {
-            leader: Stroke::Char('\\'),
+            leader: KeyStroke::Char('\\'),
             tables: [Vec::new(), Vec::new()],
             pending: Vec::new(),
             objects: Vec::new(),
@@ -504,10 +540,14 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
             )
     }
 
-    /// The key [`Stroke::Leader`] stands for. Panics on [`Stroke::Leader`] itself, or when the
-    /// new leader makes one binding start another.
-    pub fn leader(mut self, key: Stroke) -> Self {
-        assert!(key != Stroke::Leader, "the leader must be a real key");
+    /// The concrete key [`Stroke::Leader`] stands for.
+    /// Panics when the new leader makes one binding start another.
+    ///
+    /// ```compile_fail
+    /// use vimkeys::{Keymap, NoAction, Stroke};
+    /// Keymap::<NoAction>::empty().leader(Stroke::Leader);
+    /// ```
+    pub fn leader(mut self, key: KeyStroke) -> Self {
         self.leader = key;
         for table in [Table::Normal, Table::Visual] {
             check(&format!("{table:?}"), self.list(table), key);
@@ -729,18 +769,22 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
 }
 
 /// Whether `keys` (with the leader resolved) begin with `typed`.
-fn starts(keys: &[Stroke], typed: &[Stroke], leader: Stroke) -> bool {
-    keys.len() >= typed.len() && keys.iter().zip(typed).all(|(k, t)| k.resolve(leader) == *t)
+fn starts(keys: &[Stroke], typed: &[Stroke], leader: KeyStroke) -> bool {
+    keys.len() >= typed.len()
+        && keys
+            .iter()
+            .zip(typed)
+            .all(|(k, t)| k.resolve(leader) == t.resolve(leader))
 }
 
-fn same(a: &[Stroke], b: &[Stroke], leader: Stroke) -> bool {
+fn same(a: &[Stroke], b: &[Stroke], leader: KeyStroke) -> bool {
     a.len() == b.len()
         && a.iter()
             .zip(b)
             .all(|(x, y)| x.resolve(leader) == y.resolve(leader))
 }
 
-fn lookup<C: Clone>(list: &[Binding<C>], typed: &[Stroke], leader: Stroke) -> Lookup<C> {
+fn lookup<C: Clone>(list: &[Binding<C>], typed: &[Stroke], leader: KeyStroke) -> Lookup<C> {
     let mut longer = false;
     for b in list {
         if !starts(&b.keys, typed, leader) {
@@ -757,7 +801,7 @@ fn lookup<C: Clone>(list: &[Binding<C>], typed: &[Stroke], leader: Stroke) -> Lo
 fn insert<C>(
     name: &str,
     list: &mut Vec<Binding<C>>,
-    leader: Stroke,
+    leader: KeyStroke,
     keys: &[Stroke],
     command: C,
     what: Option<&'static str>,
@@ -779,7 +823,7 @@ fn insert<C>(
 
 /// Panics when one binding's keys start another's: with no timeout, the shorter would always
 /// win and the longer could never be typed.
-fn check<C>(name: &str, list: &[Binding<C>], leader: Stroke) {
+fn check<C>(name: &str, list: &[Binding<C>], leader: KeyStroke) {
     for (i, a) in list.iter().enumerate() {
         for b in &list[i + 1..] {
             let (short, long) = if a.keys.len() <= b.keys.len() {
@@ -787,8 +831,7 @@ fn check<C>(name: &str, list: &[Binding<C>], leader: Stroke) {
             } else {
                 (b, a)
             };
-            let resolved: Vec<Stroke> = short.keys.iter().map(|k| k.resolve(leader)).collect();
-            if starts(&long.keys, &resolved, leader) {
+            if starts(&long.keys, &short.keys, leader) {
                 panic!(
                     "{name}: {} starts {}; with no timeout, {} could never be typed",
                     render(&short.keys, leader),

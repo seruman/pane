@@ -40,6 +40,56 @@ fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
 }
 
 #[test]
+fn named_and_control_leaders_resolve_and_render() {
+    for (leader, event, label) in [
+        (
+            KeyStroke::Tab,
+            KeyEvent {
+                key: Key::Tab,
+                mods: Mods::default(),
+            },
+            "tab q",
+        ),
+        (
+            KeyStroke::Ctrl('q'),
+            KeyEvent {
+                key: Key::Text("q".into()),
+                mods: Mods {
+                    ctrl: true,
+                    ..Mods::default()
+                },
+            },
+            "⌃qq",
+        ),
+    ] {
+        let keys = Keymap::<bool>::empty().leader(leader).action(
+            &[Stroke::Leader, Stroke::Char('q')],
+            true,
+            "Quit",
+        );
+        assert_eq!(
+            keys.hints(Table::Normal),
+            vec![(HintGroup::App, vec![hint(label, "Quit")])]
+        );
+        let mut v = Vim::new(keys);
+        v.key(&event, TEXT);
+        assert_eq!(
+            v.key(
+                &KeyEvent {
+                    key: Key::Text("q".into()),
+                    mods: Mods::default()
+                },
+                TEXT
+            ),
+            Some(VimEffect::Action {
+                action: true,
+                count: None
+            })
+        );
+    }
+}
+
+#[test]
 fn actions_and_operators_can_have_distinct_types() {
     #[derive(Clone, Debug, PartialEq)]
     enum Action {
@@ -612,7 +662,7 @@ fn app_actions_sequences_and_the_leader() {
         .unbind(Table::Normal, &comma)
         .unbind(Table::Visual, &comma)
         .unbind_pending(&comma)
-        .leader(Stroke::Char(','));
+        .leader(KeyStroke::Char(','));
     let mut v = Vim::new(keys);
     assert_eq!(
         press_app(&mut v, ",q"),
@@ -736,7 +786,7 @@ fn rebinding_replaces_and_unbinding_drops() {
 fn a_leader_vim_already_uses_panics() {
     let _ = Keymap::<Act>::vim()
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None)
-        .leader(Stroke::Char(','));
+        .leader(KeyStroke::Char(','));
 }
 
 #[test]
