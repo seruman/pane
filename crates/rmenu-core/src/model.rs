@@ -150,6 +150,7 @@ pub enum Event {
     Nav(Nav),
     Highlight(usize),
     ToggleRow(usize),
+    /// Run the indexed binding. The model ignores missing bindings and bindings restricted to other sources.
     Perform(BindingIndex),
     SwitchSource(SourceId),
     StdinItems(Vec<MenuItem>),
@@ -685,8 +686,7 @@ impl Model {
     }
 
     fn highlighted(&self) -> Option<&MenuItem> {
-        let row = self.highlighted_row()?;
-        self.current.shown.results.get(row).map(|&o| &self.current.shown.items[o])
+        self.highlighted_row().map(|row| self.result(row))
     }
 
     fn set_query(&mut self, value: String, effects: &mut Vec<Effect>) {
