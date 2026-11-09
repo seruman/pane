@@ -24,9 +24,11 @@ pub(crate) struct Chunk {
     pub(crate) text: Vec<Utf32String>,
 }
 
-/// Rows in shared fixed-size chunks. Cloning copies one pointer, and appending while a clone
-/// is alive (a search running over a snapshot) copies at most the last, partial chunk, so
-/// streaming N rows costs O(N) however many snapshots are taken along the way.
+/// Rows and prepared search text share chunks of at most 8,192 rows. Cloning is O(1).
+/// Appending copies the chunk-pointer vector if a snapshot shares it.
+/// Appending also copies the final partial chunk if a snapshot shares it, but retains full chunks.
+/// Without shared snapshots, append work is amortized linear in the row count and prepared text size.
+/// Arbitrary snapshot frequency adds pointer-vector and partial-chunk copying costs.
 #[derive(Clone, Debug, Default)]
 pub struct Items {
     pub(crate) chunks: Arc<Vec<Arc<Chunk>>>,
