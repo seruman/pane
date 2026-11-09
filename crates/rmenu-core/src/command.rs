@@ -826,10 +826,14 @@ mod tests {
     }
 
     #[test]
-    fn missing_executable_and_invalid_inputs_fail() {
+    fn invalid_argv_is_rejected() {
         assert!(matches!(quick(&[]), Err(CommandError::InvalidArguments)));
         assert!(matches!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments)));
         assert!(matches!(quick(&["bad\0program"]), Err(CommandError::InvalidArguments)));
+    }
+
+    #[test]
+    fn invalid_environment_is_rejected() {
         for env in [[("BAD\0KEY", "value")], [("KEY", "bad\0value")], [("", "value")], [("BAD=KEY", "value")]] {
             assert!(
                 matches!(
@@ -839,6 +843,10 @@ mod tests {
                 "{env:?}"
             );
         }
+    }
+
+    #[test]
+    fn missing_executable_reports_not_found() {
         assert!(matches!(quick(&["missing-command-rmenu-test"]),
                          Err(CommandError::System { operation: "posix_spawn", error }) if error.raw_os_error() == Some(libc::ENOENT)));
     }
