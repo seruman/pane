@@ -4,7 +4,7 @@ use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::sync::Arc;
@@ -56,7 +56,7 @@ impl Cancel {
 }
 
 /// Bounds how long a cancel waits when no stream is active.
-const POLL_INTERVAL_MS: i32 = 10;
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 fn system(operation: &str, error: io::Error) -> CommandError {
     CommandError::System { operation: operation.to_owned(), code: error.raw_os_error().unwrap_or(libc::EIO) }
@@ -227,6 +227,41 @@ struct Group {
 }
 
 impl Group {
+    /// Blocks until the leader exits or `limit` passes, whichever comes first, so `run` can
+    /// still check cancellation and its deadline.
+    fn wait_for_exit(&self, limit: Duration) -> Result<(), CommandError> {
+        // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
+        let queue = unsafe { libc::kqueue() };
+        if queue < 0 { return Err(system("kqueue", io::Error::last_os_error())); }
+        // SAFETY: the descriptor was just created and has no other owner.
+        let queue = unsafe { OwnedFd::from_raw_fd(queue) };
+        let change = libc::kevent {
+            ident: self.pid as libc::uintptr_t,
+            filter: libc::EVFILT_PROC,
+            flags: libc::EV_ADD | libc::EV_ONESHOT,
+            fflags: libc::NOTE_EXIT,
+            data: 0,
+            udata: std::ptr::null_mut(),
+        };
+        let mut event = change;
+        let timeout = libc::timespec { tv_sec: limit.as_secs() as libc::time_t, tv_nsec: limit.subsec_nanos().into() };
+        // SAFETY: one change and room for one event, both live locals; the timeout is a live local.
+        let ready = unsafe { libc::kevent(queue.as_raw_fd(), &change, 1, &mut event, 1, &timeout) };
+        let error = if ready < 0 {
+            Some(io::Error::last_os_error())
+        } else if ready > 0 && event.flags & libc::EV_ERROR != 0 {
+            Some(io::Error::from_raw_os_error(event.data as i32))
+        } else {
+            None
+        };
+        // ESRCH can race with registration when the leader has already exited.
+        if let Some(error) = error
+            && !matches!(error.raw_os_error(), Some(libc::EINTR | libc::ESRCH)) {
+            return Err(system("kevent", error));
+        }
+        Ok(())
+    }
+
     /// The leader's exit status once it has exited (and been reaped), as an exit code or
     /// 128 + signal.
     fn try_wait(&mut self) -> Result<Option<i32>, CommandError> {
@@ -278,7 +313,8 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             if let Some(status) = group.try_wait()? {
                 return Ok(CommandResult { stdout: out, stderr: err, status });
             }
-            std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS as u64));
+            // The pipes can close a moment before the leader is reaped.
+            group.wait_for_exit(POLL_INTERVAL)?;
             continue;
         }
         let mut fds: Vec<libc::pollfd> = [
@@ -286,7 +322,7 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             stderr.as_ref().map(|s| (s.as_raw_fd(), libc::POLLIN)),
             stdin.as_ref().map(|s| (s.as_raw_fd(), libc::POLLOUT)),
         ].into_iter().flatten().map(|(fd, events)| libc::pollfd { fd, events, revents: 0 }).collect();
-        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL_MS) } < 0 {
+        if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL.as_millis() as libc::c_int) } < 0 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted { continue; }
             return Err(system("poll", error));
@@ -410,6 +446,48 @@ mod tests {
     }
 
     #[test]
+    fn exit_wait_wakes_before_its_cancellation_interval() {
+        let argv = strings(&["/bin/cat"]);
+        let spawned = spawn(&c"/bin/cat".to_owned(), &argv, &[], true).unwrap();
+        let mut group = Group { pid: spawned.pid, reaped: false };
+        assert_eq!(group.try_wait().unwrap(), None);
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(spawned);
+        });
+        let started = Instant::now();
+        group.wait_for_exit(Duration::from_secs(2)).unwrap();
+        release.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1), "exit wait used the full interval");
+        assert_eq!(group.try_wait().unwrap(), Some(0));
+    }
+
+    #[test]
+    fn exit_wait_is_bounded_while_the_child_is_alive() {
+        let argv = strings(&["/bin/cat"]);
+        let spawned = spawn(&c"/bin/cat".to_owned(), &argv, &[], true).unwrap();
+        let mut group = Group { pid: spawned.pid, reaped: false };
+        group.wait_for_exit(Duration::from_millis(10)).unwrap();
+        assert_eq!(group.try_wait().unwrap(), None);
+        drop(spawned);
+    }
+
+    #[test]
+    fn exit_wait_handles_a_child_that_exited_before_registration() {
+        let argv = strings(&["/bin/echo", "hi"]);
+        let mut spawned = spawn(&c"/bin/echo".to_owned(), &argv, &[], false).unwrap();
+        let mut group = Group { pid: spawned.pid, reaped: false };
+        let mut output = String::new();
+        spawned.stdout.read_to_string(&mut output).unwrap();
+        assert_eq!(output, "hi\n");
+        std::thread::sleep(Duration::from_millis(20));
+        let started = Instant::now();
+        group.wait_for_exit(Duration::from_secs(2)).unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(group.try_wait().unwrap(), Some(0));
+    }
+
+    #[test]
     fn stdin_and_environment_overlay() {
         let input = b"hello\0world\nwith spaces\n";
         let result = run_with(&["/bin/sh", "-c", "printf '%s\\n' \"$RUNNER_VALUE\"; /bin/cat"], Some(input),
@@ -521,6 +599,22 @@ mod tests {
                               Duration::from_millis(100), 1 << 20);
         assert_eq!(result, Err(CommandError::TimedOut));
         assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn cancellation_after_all_pipes_close() {
+        let dir = TempDir::new("closed-pipes");
+        let marker = dir.0.join("leader");
+        let argv = strings(&["/bin/sh", "-c", "exec 0<&- 1>&- 2>&-; echo $$ > \"$1\"; exec /bin/sleep 30", "runner", marker.to_str().unwrap()]);
+        let cancel = Cancel::default();
+        let task = {
+            let cancel = cancel.clone();
+            std::thread::spawn(move || run(&argv, None, &[], Duration::from_secs(10), 1024, &cancel))
+        };
+        let leader = pids(&marker, 1);
+        cancel.cancel();
+        assert_eq!(task.join().unwrap(), Err(CommandError::Cancelled));
+        assert_gone(&leader);
     }
 
     #[test]
