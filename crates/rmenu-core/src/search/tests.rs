@@ -134,6 +134,9 @@ fn cancellation_including_the_empty_fast_path() {
 
 #[test]
 fn workers_can_observe_cancellation_directly() {
+    if std::thread::available_parallelism().map_or(1, std::num::NonZero::get) <= 1 {
+        return;
+    }
     let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; CHUNK * 2]);
     let caller = std::thread::current().id();
     assert_eq!(rows.search("swift", Order::Ranked, &|| std::thread::current().id() != caller), Err(Cancelled));
