@@ -334,10 +334,10 @@ fn hints_follow_what_is_typed() {
     assert_eq!(v.hints(), None, "nothing half typed");
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!(typed, "y");
+    assert_eq!(typed, HintsFor::Typed("y".into()));
     assert_eq!(hints_for(&groups, HintGroup::Vim)[0], hint("y", "The line"));
     press(&mut v, "i");
-    assert_eq!(v.hints().unwrap().0, "yi");
+    assert_eq!(v.hints().unwrap().0, HintsFor::Typed("yi".into()));
     v.key(
         &KeyEvent {
             key: Key::Escape,
@@ -346,29 +346,28 @@ fn hints_follow_what_is_typed() {
         TEXT,
     );
     press(&mut v, "g");
-    assert_eq!(v.hints().unwrap().0, "g");
+    assert_eq!(v.hints().unwrap().0, HintsFor::Typed("g".into()));
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(
-        (
-            typed.as_str(),
-            hints_for(&groups, HintGroup::Vim)[0].clone()
-        ),
-        ("gy", hint("gy", "The line"))
+        (typed, hints_for(&groups, HintGroup::Vim)[0].clone()),
+        (HintsFor::Typed("gy".into()), hint("gy", "The line"))
     );
     press(&mut v, "a");
-    assert_eq!(v.hints().unwrap().0, "gya");
+    assert_eq!(v.hints().unwrap().0, HintsFor::Typed("gya".into()));
     press(&mut v, "w");
     assert_eq!(v.hints(), None);
     press(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!(typed, "visual");
+    assert_eq!(typed, HintsFor::Mode(VimMode::Visual));
     assert!(
         groups
             .iter()
             .flat_map(|(_, hints)| hints)
             .any(|h| *h == hint("gy", "Yank as source"))
     );
+    press(&mut v, "V");
+    assert_eq!(v.hints().unwrap().0, HintsFor::Mode(VimMode::VisualLine));
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -529,7 +528,7 @@ fn hints_come_from_the_keymap() {
     assert_eq!(
         v.hints().unwrap(),
         (
-            "]".to_owned(),
+            HintsFor::Typed("]".into()),
             vec![(HintGroup::App, vec![hint("c", "Next comment")])]
         )
     );
@@ -544,7 +543,7 @@ fn hints_come_from_the_keymap() {
     // In Visual mode the app's operator comes first, then Vim's.
     press_app(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!(typed, "visual");
+    assert_eq!(typed, HintsFor::Mode(VimMode::Visual));
     assert_eq!(
         hints_for(&groups, HintGroup::App),
         vec![hint("c", "Comment")]
@@ -556,7 +555,7 @@ fn hints_come_from_the_keymap() {
     // After an operator: the line, then text objects and motions.
     press_app(&mut v, "c");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!(typed, "c");
+    assert_eq!(typed, HintsFor::Typed("c".into()));
     assert_eq!(
         hints_for(&groups, HintGroup::App),
         vec![hint("c", "The line")]
@@ -565,7 +564,7 @@ fn hints_come_from_the_keymap() {
     assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("w", "To the next word")));
     press_app(&mut v, "i");
     let (typed, groups) = v.hints().unwrap();
-    assert_eq!(typed, "ci");
+    assert_eq!(typed, HintsFor::Typed("ci".into()));
     assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("p", "Paragraph")));
 }
 
@@ -821,7 +820,7 @@ fn hints_show_what_a_count_can_take() {
     let mut v = Vim::default();
     press(&mut v, "3");
     let (typed, groups) = v.hints().expect("a count is half typed");
-    assert_eq!(typed, "3");
+    assert_eq!(typed, HintsFor::Typed("3".into()));
     assert!(
         hints_for(&groups, HintGroup::Motion)
             .iter()
@@ -842,7 +841,10 @@ fn hints_show_what_a_count_can_take() {
         TEXT,
     );
     press(&mut v, "v3");
-    assert_eq!(v.hints().expect("in visual mode too").0, "3");
+    assert_eq!(
+        v.hints().expect("in visual mode too").0,
+        HintsFor::Typed("3".into())
+    );
 }
 
 #[test]

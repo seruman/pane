@@ -36,7 +36,8 @@ use rune::{
 use rune_kit::markdown::Highlight;
 use rune_kit::{Markdown, MarkdownStyle};
 use vimkeys::{
-    Hint, HintGroup, HintGroups, Keymap, Operator, Stroke, Table, Vim, VimEffect, VimMode, hint,
+    Hint, HintGroup, HintGroups, HintsFor, Keymap, Operator, Stroke, Table, Vim, VimEffect,
+    VimMode, hint,
 };
 
 use page::Page;
@@ -886,7 +887,19 @@ fn pending_keys(s: &App_) -> Option<(String, HintGroups)> {
         ));
         return Some(("keys".into(), groups));
     }
-    s.vim.hints()
+    s.vim.hints().map(|(header, groups)| {
+        let label = match header {
+            HintsFor::Typed(keys) => keys,
+            HintsFor::Mode(mode) => match mode {
+                VimMode::Normal => "normal",
+                VimMode::Visual => "visual",
+                VimMode::VisualLine => "v-line",
+                VimMode::Search => "search",
+            }
+            .to_owned(),
+        };
+        (label, groups)
+    })
 }
 
 /// The keys that can follow, in a floating panel: the mode or prefix as a pill, Escape to

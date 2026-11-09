@@ -37,6 +37,12 @@ pub enum VimMode {
     Search,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HintsFor {
+    Typed(String),
+    Mode(VimMode),
+}
+
 /// What a key asked the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VimEffect<A> {
@@ -247,18 +253,12 @@ impl<A: Clone> Vim<A> {
     /// `gy`, `yi`, `]`, the leader) or the visual mode, and the bound keys that can come next,
     /// grouped: the app's, then Vim's commands, then motions. `None` in Normal mode with
     /// nothing half typed, and while a search is being typed.
-    pub fn hints(&self) -> Option<(String, HintGroups)> {
-        let header = self.pending();
+    pub fn hints(&self) -> Option<(HintsFor, HintGroups)> {
+        let header = HintsFor::Typed(self.pending());
         match &self.pending {
-            Pending::None if self.visual() && self.count.is_none() => Some((
-                if self.mode == VimMode::Visual {
-                    "visual"
-                } else {
-                    "v-line"
-                }
-                .into(),
-                self.keymap.hints(Table::Visual),
-            )),
+            Pending::None if self.visual() && self.count.is_none() => {
+                Some((HintsFor::Mode(self.mode), self.keymap.hints(Table::Visual)))
+            }
             // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
                 Some((header, self.keymap.next(self.table(), &[])))
