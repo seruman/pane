@@ -376,31 +376,7 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         ));
     }
     if s.overlay == Overlay::ConfirmDelete {
-        let dialog = Dialog::new("Delete my-service?")
-            .icon(&icons::TRIANGLE_ALERT, Tone::Danger)
-            .message("Its settings and run history go too. This can't be undone.")
-            .action(
-                Button::new("Cancel")
-                    .gray()
-                    .on_press(|s: &mut State| s.show_overlay(Overlay::None))
-                    .build("cancel", &theme),
-            )
-            .action(
-                Button::new("Delete")
-                    .destructive()
-                    .on_press(|s: &mut State| {
-                        s.show_overlay(Overlay::None);
-                        s.toast = Some("Deleted my-service".to_owned());
-                    })
-                    .build("confirm", &theme),
-            )
-            .build("confirm-delete", &theme);
-        page = page.overlay(modal_layer(
-            "confirm-layer",
-            dialog,
-            |s: &mut State| s.show_overlay(Overlay::None),
-            &theme,
-        ));
+        page = page.overlay(delete_confirmation(&theme));
     }
     if s.overlay == Overlay::Palette {
         page = page.overlay(modal_layer(
@@ -411,6 +387,34 @@ fn view(s: &State, cx: &mut Cx<State>) -> El {
         ));
     }
     page.build(&theme)
+}
+
+fn delete_confirmation(theme: &Theme) -> El {
+    let dialog = Dialog::new("Delete my-service?")
+        .icon(&icons::TRIANGLE_ALERT, Tone::Danger)
+        .message("Its settings and run history go too. This can't be undone.")
+        .action(
+            Button::new("Cancel")
+                .gray()
+                .on_press(|s: &mut State| s.show_overlay(Overlay::None))
+                .build("cancel", theme),
+        )
+        .action(
+            Button::new("Delete")
+                .destructive()
+                .on_press(|s: &mut State| {
+                    s.show_overlay(Overlay::None);
+                    s.toast = Some("Deleted my-service".to_owned());
+                })
+                .build("confirm", theme),
+        )
+        .build("confirm-delete", theme);
+    modal_layer(
+        "confirm-layer",
+        dialog,
+        |s: &mut State| s.show_overlay(Overlay::None),
+        theme,
+    )
 }
 
 fn buttons(s: &State, theme: &Theme) -> El {
