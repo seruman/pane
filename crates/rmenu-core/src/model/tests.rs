@@ -216,9 +216,9 @@ impl Harness {
     fn titles(&self) -> Vec<String> { (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect() }
     fn values(&self) -> Vec<String> { self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect() }
     fn marked(&self) -> HashSet<String> {
-        self.model.shown.items.iter().filter(|item| self.model.is_marked(item)).map(|item| item.id.clone()).collect()
+        self.model.current.shown.items.iter().filter(|item| self.model.is_marked(item)).map(|item| item.id.clone()).collect()
     }
-    fn all_items(&self) -> Vec<String> { self.model.shown.items.iter().map(|i| i.title().to_owned()).collect() }
+    fn all_items(&self) -> Vec<String> { self.model.current.shown.items.iter().map(|i| i.title().to_owned()).collect() }
 
     fn is_open(&self) -> bool { self.finished.is_none() }
 
@@ -287,7 +287,7 @@ fn outcomes_define_the_process_exit_codes() {
 fn cancelling_carries_the_original_stdin_error_in_the_finish_effect() {
     let (mut model, _) = Model::new(options(json!({})));
     model.handle(Event::StdinFailed("invalid input record".into()));
-    model.message = Some(Status::Ack("unrelated status".into()));
+    model.current.message = Some(Status::Ack("unrelated status".into()));
     let effects = model.handle(Event::Nav(Nav::Cancel));
     assert!(matches!(effects.as_slice(), [Effect::Finish(Outcome::Failed(message))]
         if message == "invalid input record"));
@@ -933,6 +933,24 @@ fn level_restricted_bindings_fire_only_at_their_levels() {
     assert_eq!(h.model.target(&chord("ctrl+o")), Some(Target::Perform(BindingIndex(1))));
     h.perform(1);
     assert_eq!(h.context().action, "open-child");
+}
+
+#[test]
+fn a_deferred_push_preserves_stdin_catch_up_when_the_parent_returns() {
+    let mut h = start(json!({"sources": [hidden("child", json!({"format": "lines"}))], "bindings": [push_binding()]}));
+    h.stdin("alpha\n");
+    h.settle();
+    h.query("a");
+    h.perform(0);
+    h.stdin("beta\n");
+    let done = h.run_search();
+    h.send(done);
+    assert_eq!(h.model.depth(), 1);
+    h.load("child\n");
+    h.nav(Nav::Back);
+    h.settle();
+    assert_eq!(h.titles(), ["alpha", "beta"]);
+    assert_eq!(h.model.query(), "a");
 }
 
 #[test]
