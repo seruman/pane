@@ -1469,16 +1469,18 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
 }
 
 #[test]
-fn reload_of_piped_input_says_it_cannot_be_rerun() {
+fn reload_of_piped_input_reports_a_persistent_error() {
     let mut o = options(json!({"bindings": [{"key": "ctrl+r", "action": "reload"}]}));
     o.output = OutputFormat::Lines;
     let mut h = Harness::new(o);
-    h.stdin("one\n");
+    h.stdin("one\ntwo\n");
     h.settle();
     h.perform(0);
     assert_eq!(h.model.message(), Some("Piped input cannot be re-run"));
+    assert!(h.model.message_is_error());
     assert_eq!(h.beeps, 1);
     h.nav(Nav::Down);
+    assert_eq!(h.model.highlighted_row(), Some(1));
     assert_eq!(h.model.message(), Some("Piped input cannot be re-run"), "the refusal survives a move");
     assert!(h.model.message_is_error());
     assert!(!h.started.iter().any(|t| t.kind() == TaskKind::Source));
