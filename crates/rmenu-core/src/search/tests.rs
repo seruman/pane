@@ -1,4 +1,4 @@
-use std::cell::Cell;
+use std::sync::atomic::AtomicUsize;
 
 use super::*;
 
@@ -127,12 +127,19 @@ fn cancellation_including_the_empty_fast_path() {
 }
 
 #[test]
+fn workers_can_observe_cancellation_directly() {
+    let rows = index(&["Sources/MenuCore/SearchIndex.swift"; CHUNK * 2]);
+    let caller = std::thread::current().id();
+    assert_eq!(rows.search("swift", true, &|| std::thread::current().id() != caller), Err(Cancelled));
+}
+
+#[test]
 fn cancellation_mid_scan_stops_early() {
     let rows = index(&["Sources/MenuCore/SearchIndex.swift"; 50_000]);
-    let polls = Cell::new(0);
-    let result = rows.search("swift", true, &|| { polls.set(polls.get() + 1); polls.get() > 3 });
+    let polls = AtomicUsize::new(0);
+    let result = rows.search("swift", true, &|| polls.fetch_add(1, Ordering::Relaxed) >= 3);
     assert_eq!(result, Err(Cancelled));
-    assert!(polls.get() >= 4);
+    assert!(polls.load(Ordering::Relaxed) >= 4);
 }
 
 #[test]

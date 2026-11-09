@@ -2,8 +2,7 @@
 
 use std::ops::Range;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str, Utf32String};
@@ -105,12 +104,12 @@ impl SearchIndex {
 
     /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
     /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
-    /// Blocks are matched on all cores; `cancelled` is polled on the calling thread every 0.2 ms.
-    pub fn search(&self, query: &str, sorted: bool, cancelled: &dyn Fn() -> bool) -> Result<Vec<u32>, Cancelled> {
+    /// Workers poll `cancelled` while matching. Single-chunk searches run on the caller.
+    pub fn search(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<u32>, Cancelled> {
         Ok(self.ranked(query, sorted, cancelled)?.into_iter().map(|m| m.offset).collect())
     }
 
-    fn ranked(&self, query: &str, sorted: bool, cancelled: &dyn Fn() -> bool) -> Result<Vec<Ranked>, Cancelled> {
+    fn ranked(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Ranked>, Cancelled> {
         if cancelled() { return Err(Cancelled); }
         let pattern = pattern(query);
         if pattern.atoms.is_empty() {
@@ -118,18 +117,17 @@ impl SearchIndex {
         }
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).min(self.chunks.len());
         let next = AtomicUsize::new(0);
-        let stop = AtomicBool::new(false);
-        let parts: Vec<Vec<(usize, Vec<Ranked>)>> = std::thread::scope(|scope| {
-            let workers: Vec<_> = (0..threads).map(|_| scope.spawn(|| self.match_chunks(&pattern, &next, &stop))).collect();
-            // `cancelled` need not be Sync, so only this thread polls it and forwards a stop.
-            while !workers.iter().all(|w| w.is_finished()) {
-                if cancelled() { stop.store(true, Ordering::Relaxed); }
-                std::thread::sleep(Duration::from_micros(200));
-            }
-            workers.into_iter().map(|w| w.join().expect("search worker panicked")).collect()
-        });
-        if stop.load(Ordering::Relaxed) || cancelled() { return Err(Cancelled); }
-        let mut chunks: Vec<(usize, Vec<Ranked>)> = parts.into_iter().flatten().collect();
+        let mut chunks = if threads <= 1 {
+            self.match_chunks(&pattern, &next, cancelled)?
+        } else {
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..threads).map(|_| scope.spawn(|| self.match_chunks(&pattern, &next, cancelled))).collect();
+                let parts: Result<Vec<_>, Cancelled> = workers.into_iter()
+                    .map(|w| w.join().expect("search worker panicked")).collect();
+                parts.map(|parts| parts.into_iter().flatten().collect::<Vec<_>>())
+            })?
+        };
+        if cancelled() { return Err(Cancelled); }
         chunks.sort_unstable_by_key(|(index, _)| *index);
         let mut out: Vec<Ranked> = chunks.into_iter().flat_map(|(_, rows)| rows).collect();
         if sorted {
@@ -139,35 +137,25 @@ impl SearchIndex {
         Ok(out)
     }
 
-    fn match_chunks(&self, pattern: &Pattern, next: &AtomicUsize, stop: &AtomicBool) -> Vec<(usize, Vec<Ranked>)> {
+    fn match_chunks(&self, pattern: &Pattern, next: &AtomicUsize,
+                    cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<(usize, Vec<Ranked>)>, Cancelled> {
         let mut matcher = Matcher::new(MATCHER_CONFIG);
         let mut out = Vec::new();
-        while let Some(index) = self.claim(next, stop) {
-            match self.match_chunk(index, pattern, &mut matcher, &|| stop.load(Ordering::Relaxed)) {
-                Some(rows) => out.push((index, rows)),
-                None => break,
+        loop {
+            if cancelled() { return Err(Cancelled); }
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(chunk) = self.chunks.get(index) else { break };
+            let base = index * CHUNK;
+            let mut rows = Vec::new();
+            for (local, text) in chunk.iter().enumerate() {
+                if local % 256 == 0 && cancelled() { return Err(Cancelled); }
+                if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
+                    rows.push(Ranked { score, len: text.len() as u32, offset: (base + local) as u32 });
+                }
             }
+            out.push((index, rows));
         }
-        out
-    }
-
-    fn claim(&self, next: &AtomicUsize, stop: &AtomicBool) -> Option<usize> {
-        let index = next.fetch_add(1, Ordering::Relaxed);
-        (index < self.chunks.len() && !stop.load(Ordering::Relaxed)).then_some(index)
-    }
-
-    /// None when stopped part-way.
-    fn match_chunk(&self, index: usize, pattern: &Pattern, matcher: &mut Matcher,
-                   stopped: &dyn Fn() -> bool) -> Option<Vec<Ranked>> {
-        let base = index * CHUNK;
-        let mut out = Vec::new();
-        for (local, text) in self.chunks[index].iter().enumerate() {
-            if local % 256 == 0 && stopped() { return None; }
-            if let Some(score) = pattern.score(text.slice(..), matcher) {
-                out.push(Ranked { score, len: text.len() as u32, offset: (base + local) as u32 });
-            }
-        }
-        Some(out)
+        Ok(out)
     }
 
     #[cfg(test)]
