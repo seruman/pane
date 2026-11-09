@@ -61,7 +61,6 @@ impl ControlSize {
 /// Button::new("Run").icon(&icons::PLAY).on_press(|s: &mut App| s.run()).build("run", &theme)
 /// Button::icon_only(&icons::REFRESH_CW, "Refresh").plain().build("refresh", &theme)
 /// ```
-#[derive(Default)]
 pub struct Button {
     label: Option<String>,
     name: Option<String>,
@@ -74,10 +73,23 @@ pub struct Button {
 }
 
 impl Button {
+    fn base() -> Self {
+        Button {
+            label: None,
+            name: None,
+            leading: None,
+            trailing: None,
+            variant: ButtonVariant::default(),
+            size: ControlSize::default(),
+            disabled: false,
+            press: None,
+        }
+    }
+
     pub fn new(label: impl Into<String>) -> Self {
         Button {
             label: Some(label.into()),
-            ..Default::default()
+            ..Self::base()
         }
     }
 
@@ -86,7 +98,7 @@ impl Button {
         Button {
             leading: Some(glyph),
             name: Some(name.into()),
-            ..Default::default()
+            ..Self::base()
         }
     }
 
