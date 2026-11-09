@@ -40,6 +40,23 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
 }
 
 #[test]
+fn query_keys_are_not_taken_by_the_menu() {
+    let mut menu = menu_without_stdin();
+    for (key, mods) in [
+        (rune::Key::Text("w".into()), rune::Mods::default()),
+        (rune::Key::Text("W".into()), rune::Mods { shift: true, ..rune::Mods::default() }),
+        (rune::Key::Text(" ".into()), rune::Mods::default()),
+    ] {
+        assert!(!crate::view::key(&mut menu, &rune::KeyEvent { key, mods }, &mut Tx::default()));
+        assert_eq!(menu.model.query(), "");
+    }
+    for key in ["w", "shift+w", "space"] {
+        let config = serde_json::json!({"bindings": [{"key": key, "action": "accept"}]});
+        assert!(serde_json::from_value::<rmenu_core::config::MenuConfiguration>(config).is_err());
+    }
+}
+
+#[test]
 fn startup_effects_are_queued_once() {
     let menu = menu_without_stdin();
     assert!(menu.tasks.is_empty());

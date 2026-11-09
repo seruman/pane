@@ -294,7 +294,6 @@ pub fn chord(event: &KeyEvent) -> Option<KeyChord> {
 /// Configured chords first, then the palette's own keys; true when the key was taken.
 pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
     if let Some(chord) = chord(event)
-        && (chord.control || chord.option || chord.key.chars().count() > 1)
         && let Some(target) = menu.model.target(&chord)
     {
         let event = match target {
