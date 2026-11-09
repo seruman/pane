@@ -1,7 +1,6 @@
 use rune::Color;
 
-use crate::{Palette, PaletteEntry, PaletteKey, Theme, palette_matches};
-use rune_kit::Kit;
+use crate::{palette_matches, Palette, PaletteEntry, PaletteKey, Theme};
 
 const ENTRIES: &[PaletteEntry] = &[
     PaletteEntry::new("Dark Theme").section("Appearance"),
@@ -40,36 +39,44 @@ fn ansi_indices_outside_the_palette_are_rejected() {
 }
 
 #[test]
-fn text_on_a_fill_contrasts_with_it() {
-    let theme = Theme::new(Palette::merino_light());
-    assert_eq!(theme.on(Color::BLACK), Color::WHITE);
-    assert!(theme.on(Color::WHITE).luminance() < 0.2);
+fn text_on_a_fill_uses_white_or_the_palettes_darkest_ink() {
+    for (background, foreground, expected_ink) in [
+        (0xffffff, 0x555555, "#333333"),
+        (0x101010, 0xeeeeee, "#101010"),
+    ] {
+        let palette = Palette::new(
+            "Contrast fixture",
+            crate::rgb(background),
+            crate::rgb(foreground),
+            crate::rgb(0x0066cc),
+            Palette::merino_light().ansi,
+        );
+        let theme = Theme::new(palette);
+        assert_eq!(theme.on(Color::BLACK), Color::WHITE);
+        assert_eq!(crate::hex_code(theme.on(Color::WHITE)), expected_ink);
+    }
 }
 
 #[test]
-fn the_kit_is_rune_kits_terminal_kit() {
+fn builtin_palettes_share_the_cursor_accent_and_status_colours_with_the_kit() {
     for palette in [
         Palette::merino_dark(),
         Palette::merino_light(),
         Palette::charcoal_atelier(),
     ] {
         let theme = Theme::new(palette.clone());
-        let terminal = Kit::from_terminal_colors(palette.terminal_colors()).unwrap();
-        assert_eq!(theme.kit.c.page, terminal.c.page, "{}", palette.name);
-        assert_eq!(theme.accent, terminal.c.bg_accent);
-        assert_eq!(theme.success, terminal.c.success.fg);
-        assert_eq!(theme.warning, terminal.c.warning.fg);
-        assert_eq!(theme.danger, terminal.c.danger.fg);
+        assert_eq!(theme.background, palette.background);
+        assert_eq!(theme.kit.c.page, palette.background, "{}", palette.name);
+        assert_eq!(theme.accent, theme.kit.c.bg_accent);
+        assert_eq!(theme.success, theme.kit.c.success.fg);
+        assert_eq!(theme.warning, theme.kit.c.warning.fg);
+        assert_eq!(theme.danger, theme.kit.c.danger.fg);
         assert_eq!(
             theme.kit.c.bg_accent, palette.cursor,
             "{}: the cursor is the accent",
             palette.name
         );
-        assert_eq!(
-            theme.kit.c.border_focus, terminal.c.border_focus,
-            "{}",
-            palette.name
-        );
+        assert_eq!(theme.kit.c.border_focus, palette.cursor, "{}", palette.name);
         assert_eq!(
             theme.kit.c.danger.fg,
             palette.ansi[if palette.dark { 9 } else { 1 }],
@@ -321,20 +328,83 @@ fn every_status_mark_has_a_name() {
 }
 
 #[test]
-fn the_theme_and_its_kit_agree_on_the_terminal_colours() {
-    // A dark terminal that reports its text, background and ANSI table, but no cursor.
-    let mut colors = rune::TerminalColors::default();
-    colors.background = Some(crate::rgb(0x101010));
-    colors.foreground = Some(crate::rgb(0xe0e0e0));
-    colors.palette = Palette::merino_dark().ansi.map(Some);
-    let theme = Theme::from_terminal_colors(colors).expect("text and background are reported");
-    assert_eq!(
-        theme.accent, theme.kit.c.bg_accent,
-        "one accent when the cursor falls back"
-    );
-    assert_eq!(theme.danger, theme.kit.c.danger.fg, "one red");
-    assert_eq!(theme.warning, theme.kit.c.warning.fg, "one yellow");
-    assert_eq!(theme.success, theme.kit.c.success.fg, "one green");
+fn the_terminal_constructor_keeps_pane_and_kit_colours_in_agreement() {
+    for dark in [false, true] {
+        for cursor in [None, Some(crate::rgb(0xcc44bb))] {
+            let background = crate::rgb(if dark { 0x101010 } else { 0xf0f0f0 });
+            let foreground = crate::rgb(if dark { 0xe0e0e0 } else { 0x202020 });
+            let mut colors = rune::TerminalColors::default();
+            colors.background = Some(background);
+            colors.foreground = Some(foreground);
+            colors.cursor = cursor;
+            colors.dark = Some(!dark);
+            colors.palette[1] = Some(crate::rgb(0xaa2211));
+            colors.palette[2] = Some(crate::rgb(0x228833));
+            colors.palette[3] = Some(crate::rgb(0x886622));
+            colors.palette[4] = Some(crate::rgb(0x2255aa));
+            colors.palette[9] = Some(crate::rgb(0xff7755));
+            colors.palette[10] = Some(crate::rgb(0x66ee88));
+            colors.palette[11] = Some(crate::rgb(0xffcc66));
+            colors.palette[12] = Some(crate::rgb(0x88aaff));
+            let accent = cursor.unwrap_or(crate::rgb(if dark { 0x88aaff } else { 0x2255aa }));
+            let danger = crate::rgb(if dark { 0xff7755 } else { 0xaa2211 });
+            let success = crate::rgb(if dark { 0x66ee88 } else { 0x228833 });
+            let warning = crate::rgb(if dark { 0xffcc66 } else { 0x886622 });
+            let theme = Theme::from_terminal_colors(colors).unwrap();
+            assert_eq!(
+                theme.palette.dark, dark,
+                "colours override the reported scheme"
+            );
+            assert_eq!(theme.background, background);
+            assert_eq!(theme.kit.c.page, background);
+            assert_eq!(theme.text, foreground);
+            assert_eq!(theme.accent, accent);
+            assert_eq!(theme.kit.c.bg_accent, accent);
+            assert_eq!(theme.kit.c.border_focus, accent);
+            assert_eq!(theme.danger, danger);
+            assert_eq!(theme.kit.c.danger.fg, danger);
+            assert_eq!(theme.success, success);
+            assert_eq!(theme.kit.c.success.fg, success);
+            assert_eq!(theme.warning, warning);
+            assert_eq!(theme.kit.c.warning.fg, warning);
+        }
+    }
+}
+
+#[test]
+fn an_unreported_terminal_palette_uses_the_matching_merino_colours() {
+    for (background, foreground, accent, danger, success, warning) in [
+        (0xffffff, 0x202020, 0x0969da, 0xcf222e, 0x116329, 0x9d5c00),
+        (0x101010, 0xeeeeee, 0x79c0ff, 0xffa198, 0x56d364, 0xe3b341),
+    ] {
+        let mut colors = rune::TerminalColors::default();
+        colors.background = Some(crate::rgb(background));
+        colors.foreground = Some(crate::rgb(foreground));
+        let theme = Theme::from_terminal_colors(colors).unwrap();
+        assert_eq!(theme.accent, crate::rgb(accent));
+        assert_eq!(theme.kit.c.bg_accent, theme.accent);
+        assert_eq!(theme.danger, crate::rgb(danger));
+        assert_eq!(theme.kit.c.danger.fg, theme.danger);
+        assert_eq!(theme.success, crate::rgb(success));
+        assert_eq!(theme.kit.c.success.fg, theme.success);
+        assert_eq!(theme.warning, crate::rgb(warning));
+        assert_eq!(theme.kit.c.warning.fg, theme.warning);
+    }
+}
+
+#[test]
+fn a_terminal_theme_needs_both_background_and_foreground() {
+    for (background, foreground) in [
+        (None, None),
+        (Some(Color::BLACK), None),
+        (None, Some(Color::WHITE)),
+    ] {
+        let mut colors = rune::TerminalColors::default();
+        colors.background = background;
+        colors.foreground = foreground;
+        colors.cursor = Some(Color::WHITE);
+        assert!(Theme::from_terminal_colors(colors).is_none());
+    }
 }
 
 #[test]
