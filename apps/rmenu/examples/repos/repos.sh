@@ -1,5 +1,4 @@
 #!/bin/sh
-# Repositories as JSONL. The title is the name under the longest ghq root, the value the full path.
 roots=$(ghq root --all) || exit
 paths=$(ghq list -p) || exit
 printf '%s\n' "$paths" | jq -Rc --arg roots "$roots" '

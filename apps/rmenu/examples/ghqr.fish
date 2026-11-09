@@ -17,7 +17,6 @@ function ghqr --inherit-variable examples --description 'Pick a ghq repository, 
         return 127
     end
     set -l query "$argv"
-    # One private directory for the config and everything the picker hands back.
     set -l dir (command mktemp -d -t ghqr); or return
     function __ghqr_interrupted --on-signal INT -V dir
         functions -e __ghqr_interrupted
@@ -39,8 +38,6 @@ function ghqr --inherit-variable examples --description 'Pick a ghq repository, 
     _mmenu_git_dispatch "$result" "$source_repo"
 end
 
-# Writes the config into DIR and runs rmenu, in a Rex floating layer when this shell is in
-# Rex. Leaves the --json result in DIR/out and returns rmenu's status.
 function _ghqr_pick --inherit-variable examples --argument-names dir menu query
     command jq -n --arg fish (status fish-path) --arg examples $examples --argjson rex (_mmenu_rex_bindings) '
         {
@@ -59,10 +56,9 @@ function _ghqr_pick --inherit-variable examples --argument-names dir menu query
     if _mmenu_in_rex
         set -l run (status fish-path) --no-config $examples/_ghqr_run.fish \
             $dir $menu --config $dir/config --json --query=$query
-        # Over the window this shell is in, not whichever window is active.
-        set -l window (rex session inspect $REX_SESSION --json | command jq -r --arg b $REX_BLOCK \
+        set -l caller_window (rex session inspect $REX_SESSION --json | command jq -r --arg b $REX_BLOCK \
             'first(.windows[] | select(any(.layers[].blocks[]; .block_id == $b)) | .window_id) // empty')
-        set -l request (command jq -nc --arg s $REX_SESSION --arg w "$window" --arg cwd $PWD --args '{
+        set -l request (command jq -nc --arg s $REX_SESSION --arg w "$caller_window" --arg cwd $PWD --args '{
             session_id: $s, bounds: [0.24, 0.16, 0.52, 0.48], focus: true}
             + (if $w == "" then {} else {window_id: $w} end) + {
             layout: {block: {flavor: "com.superlogical.terminal.shell", label: "ghqr",
@@ -73,7 +69,6 @@ function _ghqr_pick --inherit-variable examples --argument-names dir menu query
         rex wait (printf '%s\n' $created | command jq -r '.block_ids[0]') >/dev/null
         set -l waited $status
         if not test -s $dir/status
-            # No status: the picker never ran, or the layer was closed under it.
             printf 'ghqr: the picker layer ended without a result (rex wait exited %s)\n' $waited >&2
             return 1
         end
@@ -84,11 +79,9 @@ function _ghqr_pick --inherit-variable examples --argument-names dir menu query
     end
 end
 
-# Closes the picker's layer, if one opened, and deletes DIR. Safe to call twice.
 function _ghqr_close --argument-names dir
     if test -s $dir/layer
-        # wait returns when rmenu exits, while the layer may still hold focus. Close it and
-        # focus this shell's block, so a split or tab is anchored here, not in the layer.
+        # Rex wait can return while the picker layer still has focus.
         # The layer may already be gone, because its shell exits with rmenu.
         set -l error (rex api call -s $REX_SESSION session.close_layer (command jq -nc --arg s $REX_SESSION --arg l (cat $dir/layer) \
             '{session_id: $s, layer_id: $l}') 2>&1 >/dev/null)
