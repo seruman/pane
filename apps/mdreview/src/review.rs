@@ -27,11 +27,46 @@ impl std::fmt::Display for CommentId {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Subject {
+    General,
+    On(Range<usize>),
+    Remove(Range<usize>),
+}
+
+impl Subject {
+    pub fn kind(&self) -> Kind {
+        match self {
+            Self::General | Self::On(_) => Kind::Comment,
+            Self::Remove(_) => Kind::Remove,
+        }
+    }
+
+    pub fn range(&self) -> Option<&Range<usize>> {
+        match self {
+            Self::General => None,
+            Self::On(range) | Self::Remove(range) => Some(range),
+        }
+    }
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::On(_) => "Comment",
+            Self::Remove(_) => "Remove",
+        }
+    }
+
+    pub fn feedback_title(&self) -> &'static str {
+        match self {
+            Self::Remove(_) => "Remove this",
+            _ => self.title(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
-    pub kind: Kind,
-    /// What it's about, in the page's text; `None` for a general comment, about the whole
-    /// document.
-    pub range: Option<Range<usize>>,
+    pub subject: Subject,
     /// What the reviewer wrote; may be empty for a removal.
     pub body: String,
 }
@@ -40,8 +75,7 @@ impl Comment {
     /// A comment in words on `range`.
     pub fn on(range: Range<usize>, body: impl Into<String>) -> Comment {
         Comment {
-            kind: Kind::Comment,
-            range: Some(range),
+            subject: Subject::On(range),
             body: body.into(),
         }
     }
@@ -49,25 +83,33 @@ impl Comment {
     /// A general comment.
     pub fn general(body: impl Into<String>) -> Comment {
         Comment {
-            kind: Kind::Comment,
-            range: None,
+            subject: Subject::General,
             body: body.into(),
         }
     }
 
-    /// The heading word for it: "General", "Comment" or "Remove".
-    pub fn title(&self) -> &'static str {
-        match (self.kind, &self.range) {
-            (_, None) => "General",
-            (Kind::Comment, _) => "Comment",
-            (Kind::Remove, _) => "Remove",
+    pub fn remove(range: Range<usize>) -> Comment {
+        Comment {
+            subject: Subject::Remove(range),
+            body: String::new(),
         }
+    }
+
+    pub fn kind(&self) -> Kind {
+        self.subject.kind()
+    }
+
+    pub fn range(&self) -> Option<&Range<usize>> {
+        self.subject.range()
+    }
+
+    pub fn title(&self) -> &'static str {
+        self.subject.title()
     }
 
     /// Where it sorts: general comments first, as written, then the rest in document order.
     fn order(&self) -> (bool, usize, usize) {
-        self.range
-            .as_ref()
+        self.range()
             .map_or((false, 0, 0), |r| (true, r.start, r.end))
     }
 }
@@ -139,7 +181,7 @@ impl Review {
     fn anchored(&self) -> Vec<(CommentId, Range<usize>)> {
         self.comments
             .iter()
-            .filter_map(|(id, c)| c.range.clone().map(|r| (*id, r)))
+            .filter_map(|(id, c)| c.range().cloned().map(|r| (*id, r)))
             .collect()
     }
 
@@ -199,7 +241,7 @@ impl Review {
         let general: Vec<&str> = self
             .iter()
             .map(|(_, c)| c)
-            .filter(|c| c.range.is_none())
+            .filter(|c| c.range().is_none())
             .map(|c| c.body.trim())
             .filter(|b| !b.is_empty())
             .collect();
@@ -230,15 +272,12 @@ impl Review {
             }
             // The section the comment starts in, unless it's on that heading itself.
             let block = page.block_at(range.start);
-            if page.blocks[block].heading.is_none()
+            if !matches!(page.blocks[block].kind, crate::page::BlockKind::Heading(_))
                 && let Some(section) = page.section(block)
             {
                 place.push(format!("under {}", inline_code(section)));
             }
-            let title = match c.kind {
-                Kind::Comment => "Comment",
-                Kind::Remove => "Remove this",
-            };
+            let title = c.subject.feedback_title();
             out.push_str(&format!("## {}. {title}", number + 1));
             if !place.is_empty() {
                 out.push_str(&format!(" ({})", place.join(", ")));
@@ -251,7 +290,7 @@ impl Review {
             let whole_lines = (range.start == 0 || full[..range.start].ends_with('\n'))
                 && (range.end >= full.len() || full[range.end..].starts_with('\n'));
             let text = full.get(range).unwrap_or_default().trim();
-            if text.contains('\n') || (whole_lines && c.kind == Kind::Remove) {
+            if text.contains('\n') || (whole_lines && c.kind() == Kind::Remove) {
                 // More than a line reads best as the Markdown it came from, whole lines of it.
                 out.push_str(&fenced(
                     "markdown",
@@ -259,14 +298,14 @@ impl Review {
                 ));
             } else {
                 let md = source_of(source, &ranges, false);
-                if c.kind == Kind::Remove || md.trim() != text {
+                if c.kind() == Kind::Remove || md.trim() != text {
                     out.push_str(&format!("On {}, written as:\n\n", inline_code(text)));
                     out.push_str(&fenced("markdown", md.trim()));
                 } else {
                     out.push_str(&format!("On {}\n\n", inline_code(text)));
                 }
             }
-            if c.kind == Kind::Remove {
+            if c.kind() == Kind::Remove {
                 out.push_str("I don't want this in the document.\n\n");
             }
             let body = c.body.trim();

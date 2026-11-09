@@ -5,8 +5,7 @@ const SRC: &str = "# Title\n\nSome **bold phrase** and more.\n\n- one\n- two\n\n
 
 fn app(src: &str) -> App_ {
     App_::new(Input {
-        title: "t.md".into(),
-        name: None,
+        origin: Origin::Sample,
         source: src.into(),
         out: None,
     })
@@ -93,7 +92,7 @@ fn editing_comment_bodies_preserves_document_order() {
     );
     let comment = review.get(later).unwrap();
     assert_eq!(comment.body, "edited");
-    assert_eq!(comment.range, Some(20..25));
+    assert_eq!(comment.range().cloned(), Some(20..25));
     assert!(review.remove(earlier));
     assert!(!review.set_body(earlier, "deleted".into()));
     assert_eq!(
@@ -106,11 +105,7 @@ fn editing_comment_bodies_preserves_document_order() {
 fn feedback_quotes_and_numbers_in_document_order() {
     let s = app(SRC);
     let mut review = Review::default();
-    review.add(Comment {
-        kind: Kind::Remove,
-        range: Some(range(&s, "let x = 1;")),
-        body: String::new(),
-    });
+    review.add(Comment::remove(range(&s, "let x = 1;")));
     review.add(Comment::on(
         range(&s, "phrase and"),
         "Why bold?\nSay it plainly.",
@@ -181,11 +176,7 @@ fn feedback_names_the_nearest_section_and_quotes_safely() {
     // Removing a whole list item quotes its source line, marker and all.
     let s = app("## Later\n\n- Sharing by link\n- Replies\n");
     let mut review = Review::default();
-    review.add(Comment {
-        kind: Kind::Remove,
-        range: Some(range(&s, "Sharing by link")),
-        body: String::new(),
-    });
+    review.add(Comment::remove(range(&s, "Sharing by link")));
     let out = review.feedback(&s.source, &s.page, None).unwrap();
     assert!(out.contains("```markdown\n- Sharing by link\n```"), "{out}");
 }
@@ -196,7 +187,7 @@ fn select_comment_save_edit_and_delete() {
     // Down to the paragraph, select "Some bold", comment.
     press(&mut rt, "jveec");
     assert!(
-        rt.state.composer.is_some(),
+        rt.state.composer().is_some(),
         "c on a selection opens the composer"
     );
     press(&mut rt, "Too loud");
@@ -205,11 +196,11 @@ fn select_comment_save_edit_and_delete() {
         "the field has the keys, not Vim"
     );
     key(&mut rt, Key::Enter);
-    assert!(rt.state.composer.is_none());
+    assert!(rt.state.composer().is_none());
     let c = &rt.state.review.comments()[0];
     assert_eq!(
         (
-            &rt.state.page.text()[c.range.clone().unwrap()],
+            &rt.state.page.text()[c.range().cloned().unwrap()],
             c.body.as_str()
         ),
         ("Some bold", "Too loud")
@@ -221,10 +212,13 @@ fn select_comment_save_edit_and_delete() {
 
     // Enter on the comment edits it; Escape leaves it as it was.
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.composer, Some(Target::Edit(id_at(&rt, 0))));
+    assert_eq!(
+        rt.state.composer().cloned(),
+        Some(Target::Edit(id_at(&rt, 0)))
+    );
     press(&mut rt, "!");
     key(&mut rt, Key::Escape);
-    assert!(rt.state.composer.is_none());
+    assert!(rt.state.composer().is_none());
     assert_eq!(rt.state.review.comments()[0].body, "Too loud");
 
     // `ce` too; Shift-Enter is a new line, Enter saves.
@@ -278,7 +272,7 @@ fn several_general_comments_listed_and_stepped_through() {
     press(&mut rt, "]c");
     let at = rt.state.selected.unwrap();
     key(&mut rt, Key::Enter);
-    assert_eq!(rt.state.composer, Some(Target::Edit(at)));
+    assert_eq!(rt.state.composer().cloned(), Some(Target::Edit(at)));
 }
 
 #[test]
@@ -312,7 +306,13 @@ fn removals_and_jumps() {
     key(&mut rt, Key::Enter);
     press(&mut rt, "gg");
     press(&mut rt, "dd"); // the heading, "Remove this"
-    let kinds: Vec<Kind> = rt.state.review.comments().iter().map(|c| c.kind).collect();
+    let kinds: Vec<Kind> = rt
+        .state
+        .review
+        .comments()
+        .iter()
+        .map(|c| c.kind())
+        .collect();
     assert_eq!(
         kinds,
         [Kind::Remove, Kind::Comment],
@@ -351,7 +351,7 @@ fn quitting() {
     press(&mut rt, ":q!");
     key(&mut rt, Key::Enter);
     assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
-    assert_eq!(rt.state.feedback(), None);
+    assert_eq!(rt.state.quit, Quit::Drop);
 
     // :wq sends it; ZZ is the same.
     let mut rt = runtime(SRC);
@@ -360,7 +360,7 @@ fn quitting() {
     key(&mut rt, Key::Enter);
     press(&mut rt, "ZZ");
     assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
-    assert!(rt.state.feedback().is_some());
+    assert_eq!(rt.state.quit, Quit::Send);
 }
 
 #[test]
@@ -447,7 +447,7 @@ fn which_key_shows_what_can_follow() {
 fn comment_and_remove_are_operators() {
     let mut rt = runtime(SRC);
     let quote = |rt: &Runtime<App_>, n: usize| {
-        rt.state.page.text()[rt.state.review.comments()[n].range.clone().unwrap()].to_owned()
+        rt.state.page.text()[rt.state.review.comments()[n].range().cloned().unwrap()].to_owned()
     };
     // `cw` on the paragraph's first word.
     press(&mut rt, "jcw");
@@ -457,14 +457,32 @@ fn comment_and_remove_are_operators() {
     // `dip`: the list, as a paragraph.
     press(&mut rt, "jdip");
     assert_eq!(quote(&rt, 1), "one\ntwo");
-    assert_eq!(rt.state.review.comments()[1].kind, Kind::Remove);
+    assert_eq!(rt.state.review.comments()[1].kind(), Kind::Remove);
     // `2cc`: two lines.
     press(&mut rt, "gg2cc");
     press(&mut rt, "b");
     key(&mut rt, Key::Enter);
     let comments = rt.state.review.comments();
     let c = comments.iter().find(|c| c.body == "b").unwrap();
-    assert!(rt.state.page.text()[c.range.clone().unwrap()].starts_with("Title"));
+    assert!(rt.state.page.text()[c.range().cloned().unwrap()].starts_with("Title"));
+}
+
+#[test]
+fn opening_an_editor_replaces_the_comment_list() {
+    let mut state = App_::default();
+    let id = state.review.add(Comment::general("review"));
+    let mut rt = Runtime::new(state, view, (900.0, 900.0), Env::default());
+    rt.on_key = Some(on_key);
+    rt.frame(0.0);
+    key(&mut rt, Key::Tab);
+    assert!(rt.find("comment-list").is_some());
+    rt.state.open(Target::Edit(id));
+    key(&mut rt, Key::Left);
+    assert!(rt.find("composer").is_some());
+    assert!(rt.find("comment-list").is_none());
+    key(&mut rt, Key::Escape);
+    assert!(rt.find("composer").is_none());
+    assert!(rt.find("comment-list").is_none());
 }
 
 #[test]
@@ -485,7 +503,7 @@ fn the_comment_list_floats_and_jumps() {
     key(&mut rt, Key::Tab);
     assert!(rt.find("comment-list").is_some());
     assert_eq!(
-        rt.state.list,
+        rt.state.list(),
         Some(0),
         "opens on the comment under the cursor"
     );
@@ -497,13 +515,13 @@ fn the_comment_list_floats_and_jumps() {
 
     // j and k move the list's cursor, not Vim's, and the page marks that comment.
     press(&mut rt, "jj");
-    assert_eq!(rt.state.list, Some(2));
+    assert_eq!(rt.state.list(), Some(2));
     assert_eq!(position(&rt), Some(2), "the page marks the list's comment");
     assert!(rt.find(CURRENT_MARK).is_some(), "keyed, to scroll to");
     press(&mut rt, "j");
-    assert_eq!(rt.state.list, Some(2), "stops at the end");
+    assert_eq!(rt.state.list(), Some(2), "stops at the end");
     press(&mut rt, "k");
-    assert_eq!(rt.state.list, Some(1));
+    assert_eq!(rt.state.list(), Some(1));
     assert_eq!(rt.state.cursor(), cursor);
 
     // Escape closes it where it was; the mark goes back to the cursor's comment.
@@ -516,11 +534,15 @@ fn the_comment_list_floats_and_jumps() {
     key(&mut rt, Key::Tab);
     press(&mut rt, "G");
     key(&mut rt, Key::Enter);
-    assert!(rt.state.list.is_none());
+    assert!(rt.state.list().is_none());
     assert_eq!(position(&rt), Some(2));
     assert_eq!(
         rt.state.cursor(),
-        rt.state.review.comments()[2].range.clone().unwrap().start
+        rt.state.review.comments()[2]
+            .range()
+            .cloned()
+            .unwrap()
+            .start
     );
 
     // A click on a row goes there too.
@@ -529,7 +551,7 @@ fn the_comment_list_floats_and_jumps() {
     rt.pointer_down(x, y);
     rt.pointer_up(x, y);
     rt.frame(1.0 / 60.0);
-    assert!(rt.state.list.is_none());
+    assert!(rt.state.list().is_none());
     assert_eq!(position(&rt), Some(0));
 }
 

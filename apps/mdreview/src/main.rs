@@ -28,29 +28,50 @@ use std::io::{IsTerminal as _, Read as _, Write};
 use std::ops::Range;
 use std::rc::Rc;
 
-use pane_ui::{Badge, Button, Theme, Tone, icons, kbd};
+use pane_ui::markdown::{self, VIM_CURSOR, find_text, style, type_keys};
+use pane_ui::{Badge, Button, Theme, Tone, icons};
 use rune::{
-    App, AppSpec, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, TextStyle, Tx, col, el, row, text,
-    text_input,
+    App, AppSpec, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, row, text, text_input,
 };
+use rune_kit::Markdown;
 use rune_kit::markdown::Highlight;
-use rune_kit::{Markdown, MarkdownStyle};
 use vimkeys::{
     Hint, HintGroup, HintGroups, HintsFor, Keymap, Operator, Stroke, Table, Vim, VimEffect,
     VimMode, hint,
 };
 
 use page::Page;
-use review::{Comment, CommentId, Kind, Review};
+use review::{Comment, CommentId, Kind, Review, Subject};
 
 const SAMPLE: &str = include_str!("sample.md");
 
 /// The document and where its review goes, read from the command line before the terminal is
 /// taken over, so a bad path is an error in the shell rather than a page.
+enum Origin {
+    Sample,
+    Stdin,
+    File(String),
+}
+
+impl Origin {
+    fn title(&self) -> &str {
+        match self {
+            Self::Sample => "sample.md",
+            Self::Stdin => "stdin",
+            Self::File(path) => path,
+        }
+    }
+
+    fn name(&self) -> Option<&str> {
+        match self {
+            Self::File(path) => Some(path),
+            Self::Sample | Self::Stdin => None,
+        }
+    }
+}
+
 struct Input {
-    title: String,
-    /// The path, for the feedback's title; `None` for stdin and the sample.
-    name: Option<String>,
+    origin: Origin,
     source: String,
     out: Option<String>,
 }
@@ -59,21 +80,20 @@ struct Input {
 #[derive(Clone, Debug, PartialEq)]
 enum Target {
     /// A new comment on this range of the page's text, or with `None`, a general one.
-    New {
-        kind: Kind,
-        range: Option<Range<usize>>,
-    },
+    New { range: Option<Range<usize>> },
     /// A saved comment, again.
     Edit(CommentId),
 }
 
 /// What the review adds to Vim's keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Act {
-    /// `c{motion}`, `cc`, `v…c`: comment on what it covers.
+enum Op {
     Comment,
-    /// `d{motion}`, `dd`, `v…d`: mark it to be removed.
     Remove,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Act {
     /// `C`: a comment on the whole document.
     General,
     /// `]c`, `[c`.
@@ -95,12 +115,12 @@ enum Act {
 }
 
 /// Vim's keys, and the review's on top of them.
-fn keymap() -> Keymap<Act> {
+fn keymap() -> Keymap<Act, Op> {
     use Stroke::{Char as C, Leader};
     Keymap::vim()
         .operator(&[C('g'), C('y')], Operator::YankSource, "Yank as Markdown")
-        .operator(&[C('c')], Operator::App(Act::Comment), "Comment")
-        .operator(&[C('d')], Operator::App(Act::Remove), "Remove this")
+        .operator(&[C('c')], Operator::App(Op::Comment), "Comment")
+        .operator(&[C('d')], Operator::App(Op::Remove), "Remove this")
         .action(&[C('C')], Act::General, "General comment")
         .action(&[C(']'), C('c')], Act::NextComment, "Next comment")
         .action(&[C('['), C('c')], Act::PreviousComment, "Previous comment")
@@ -122,33 +142,55 @@ fn keymap() -> Keymap<Act> {
         )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Quit {
+    Send,
+    Drop,
+}
+
+enum Command {
+    Quit,
+    ForceQuit,
+    SendAndQuit,
+}
+
+impl Command {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "q" | "quit" => Some(Self::Quit),
+            "q!" | "quit!" => Some(Self::ForceQuit),
+            "wq" | "x" | "wq!" | "x!" => Some(Self::SendAndQuit),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+enum Mode {
+    #[default]
+    Normal,
+    Composing(Target),
+    Command(String),
+    List(usize),
+    AllKeys,
+}
+
 struct App_ {
-    title: String,
-    /// The document's name for the feedback's title: the path given, or `None` for stdin and
-    /// the sample.
-    name: Option<String>,
+    origin: Origin,
     /// Where the feedback goes: a file, or stdout when `None`.
     out: Option<String>,
     source: String,
     page: Page,
-    vim: Vim<Act>,
+    vim: Vim<Act, Op>,
     review: Review,
     /// The comment being written. Its text is `draft`, kept while the composer is closed too:
     /// Rune reaches a field's `TextEdit` once more after it goes, to clear its focus.
-    composer: Option<Target>,
+    mode: Mode,
     draft: TextEdit,
     /// The comment `]c`, `[c` or a click went to, until the cursor moves; it tells comments
     /// apart that start at the same place, and it's how a general comment is picked.
     selected: Option<CommentId>,
-    /// `\\?` asked for every key; the next key closes the list.
-    all_keys: bool,
-    /// The `:` command being typed.
-    cmdline: Option<String>,
-    /// The comment list floating over the page, and the row its cursor is on; `None` while
-    /// it's closed. It takes no focus: while it's open, keys move its cursor.
-    list: Option<usize>,
-    /// Quitting sends the review: `ZZ`, `:wq` or `:x`. Any other way out sends nothing.
-    send: bool,
+    quit: Quit,
     send_failed: Rc<Cell<bool>>,
     note: Option<String>,
 }
@@ -156,8 +198,7 @@ struct App_ {
 impl Default for App_ {
     fn default() -> Self {
         App_::new(Input {
-            title: "sample.md".into(),
-            name: None,
+            origin: Origin::Sample,
             source: SAMPLE.into(),
             out: None,
         })
@@ -167,28 +208,37 @@ impl Default for App_ {
 impl App_ {
     fn new(input: Input) -> Self {
         let Input {
-            title,
-            name,
+            origin,
             source,
             out,
         } = input;
         App_ {
-            name,
-            title,
+            origin,
             out,
             page: Page::new(&source),
             source,
             vim: Vim::new(keymap()).skip_blank_lines(true),
             review: Review::default(),
-            composer: None,
+            mode: Mode::Normal,
             draft: TextEdit::default(),
             selected: None,
-            all_keys: false,
-            cmdline: None,
-            list: None,
-            send: false,
+            quit: Quit::Drop,
             send_failed: Rc::new(Cell::new(false)),
             note: None,
+        }
+    }
+
+    fn composer(&self) -> Option<&Target> {
+        match &self.mode {
+            Mode::Composing(target) => Some(target),
+            _ => None,
+        }
+    }
+
+    fn list(&self) -> Option<usize> {
+        match self.mode {
+            Mode::List(row) => Some(row),
+            _ => None,
         }
     }
 
@@ -199,7 +249,7 @@ impl App_ {
     /// The comment Enter, `ce` and `dc` act on, and the one the page marks: the comment list's
     /// row while it's open, else the one stepped to, or the one under the cursor.
     fn current(&self) -> Option<CommentId> {
-        if let Some(row) = self.list {
+        if let Some(row) = self.list() {
             return self.review.at_position(row);
         }
         self.selected
@@ -210,7 +260,7 @@ impl App_ {
     /// Shows comment `n` on the page without moving Vim's cursor: its text centred, or for a
     /// general comment, its card.
     fn show(&self, id: CommentId, tx: &mut Tx) {
-        match self.review.get(id).map(|c| c.range.is_some()) {
+        match self.review.get(id).map(|c| c.range().is_some()) {
             Some(true) => tx.scroll_center(CURRENT_MARK),
             Some(false) => tx.scroll_into_view(thread_key(id)),
             None => {}
@@ -234,22 +284,24 @@ impl App_ {
         };
         self.draft = TextEdit::new(body);
         self.draft.focused = true;
-        self.composer = Some(target);
+        self.mode = Mode::Composing(target);
         self.note = None;
     }
 
     /// Saves what the composer holds. A comment in words with nothing written is dropped.
     fn save(&mut self) {
-        let Some(target) = self.composer.take() else {
+        let Some(target) = self.composer().cloned() else {
             return;
         };
+        self.mode = Mode::Normal;
         let body = self.draft.text.trim().to_owned();
         match target {
-            Target::New { kind, range } => {
-                if kind == Kind::Comment && body.is_empty() {
+            Target::New { range } => {
+                if body.is_empty() {
                     return;
                 }
-                let id = self.review.add(Comment { kind, range, body });
+                let subject = range.map_or(Subject::General, Subject::On);
+                let id = self.review.add(Comment { subject, body });
                 self.selected = Some(id);
                 self.note = Some(format!("Comment #{} saved", self.number(id)));
             }
@@ -257,7 +309,7 @@ impl App_ {
                 let Some(c) = self.review.get(id) else {
                     return;
                 };
-                if c.kind == Kind::Comment && body.is_empty() {
+                if c.kind() == Kind::Comment && body.is_empty() {
                     self.delete(id);
                 } else if self.review.set_body(id, body) {
                     self.note = Some(format!("Comment #{} saved", self.number(id)));
@@ -269,11 +321,7 @@ impl App_ {
     /// Marks the selection (or the line) to be removed. Enter adds words to it.
     fn remove(&mut self, range: Range<usize>) {
         self.vim.set_cursor(range.start, self.page.text());
-        let id = self.review.add(Comment {
-            kind: Kind::Remove,
-            range: Some(range),
-            body: String::new(),
-        });
+        let id = self.review.add(Comment::remove(range));
         self.selected = Some(id);
         self.note = Some("Marked to remove. Enter adds a note.".into());
     }
@@ -284,9 +332,9 @@ impl App_ {
         if !self.review.remove(id) {
             return;
         }
-        if self.composer == Some(Target::Edit(id)) {
-            self.composer = None;
-        } else if self.composer.is_some() {
+        if self.composer() == Some(&Target::Edit(id)) {
+            self.mode = Mode::Normal;
+        } else if self.composer().is_some() {
             self.draft.focused = true;
         }
         if self.selected == Some(id) {
@@ -305,7 +353,7 @@ impl App_ {
         let Some(c) = self.review.get(id) else {
             return;
         };
-        if let Some(range) = &c.range {
+        if let Some(range) = c.range() {
             self.vim.set_cursor(range.start, self.page.text());
         }
         self.selected = Some(id);
@@ -317,15 +365,6 @@ impl App_ {
         tx.scroll_into_view(thread_key(id));
     }
 
-    /// The feedback, when quitting sends it.
-    fn feedback(&self) -> Option<String> {
-        if !self.send {
-            return None;
-        }
-        self.review
-            .feedback(&self.source, &self.page, self.name.as_deref())
-    }
-
     /// Opens the comment list on the comment picked or under the cursor, or the first, and
     /// shows that comment on the page.
     fn open_list(&mut self, tx: &mut Tx) {
@@ -333,7 +372,7 @@ impl App_ {
             .current()
             .and_then(|id| self.review.position(id))
             .unwrap_or(0);
-        self.list = Some(row);
+        self.mode = Mode::List(row);
         tx.scroll_into_view(list_key(row));
         if let Some(id) = self.review.at_position(row) {
             self.show(id, tx);
@@ -342,17 +381,27 @@ impl App_ {
 
     /// Runs a `:` command.
     fn command(&mut self, cmd: &str, tx: &mut Tx) {
-        match cmd.trim() {
-            "q" | "quit" if !self.review.is_empty() => {
+        let text = cmd.trim();
+        if let Some(command) = Command::parse(text) {
+            self.execute(command, tx);
+        } else if !text.is_empty() {
+            self.note = Some(format!("Not a command: {text}"));
+        }
+    }
+
+    fn execute(&mut self, command: Command, tx: &mut Tx) {
+        match command {
+            Command::Quit if !self.review.is_empty() => {
                 self.note = Some("The review isn't sent. :wq sends it, :q! drops it.".into());
             }
-            "q" | "quit" | "q!" | "quit!" => tx.quit(),
-            "wq" | "x" | "wq!" | "x!" => {
-                self.send = true;
+            Command::Quit | Command::ForceQuit => {
+                self.quit = Quit::Drop;
                 tx.quit();
             }
-            "" => {}
-            other => self.note = Some(format!("Not a command: {other}")),
+            Command::SendAndQuit => {
+                self.quit = Quit::Send;
+                tx.quit();
+            }
         }
     }
 }
@@ -365,34 +414,12 @@ fn thread_key(id: CommentId) -> String {
     format!("thread-{id}")
 }
 
-/// GitHub's reading width and type, in the theme's colours, as `mdview` draws.
-fn style(theme: &Theme) -> MarkdownStyle {
-    let heading = |size: f32, line_height: f32| TextStyle {
-        size,
-        weight: 600.0,
-        line_height,
-        ..theme.ty.body
-    };
-    MarkdownStyle::from_kit(&theme.kit)
-        .text(theme.text)
-        .muted(theme.text_secondary)
-        .link(theme.accent_text)
-        .link_underline(theme.accent_text.alpha(0.4))
-        .quote_rule(theme.separator)
-        .rule(theme.separator)
-        .code_block(theme.group, theme.separator)
-        .inline_code_bg(theme.field)
-        .heading_font(1, heading(26.0, 34.0))
-        .heading_font(2, heading(20.0, 28.0))
-        .heading_font(3, heading(16.0, 24.0))
-}
-
 /// The colour that marks a kind of comment: its text's tint and its badge.
 fn tone(c: &Comment) -> Tone {
-    match (c.kind, &c.range) {
-        (_, None) => Tone::Neutral,
-        (Kind::Comment, _) => Tone::Warning,
-        (Kind::Remove, _) => Tone::Danger,
+    match c.subject {
+        Subject::General => Tone::Neutral,
+        Subject::On(_) => Tone::Warning,
+        Subject::Remove(_) => Tone::Danger,
     }
 }
 
@@ -412,13 +439,13 @@ fn highlights(s: &App_, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize>>, 
     let mut out = Vec::new();
     let current = s.current();
     for (id, c) in s.review.iter() {
-        let Some(range) = c.range.clone() else {
+        let Some(range) = c.range().cloned() else {
             continue;
         };
-        let mut h = Highlight::new().bg(tint(c.kind, theme));
+        let mut h = Highlight::new().bg(tint(c.kind(), theme));
         if current == Some(id) {
             // The same ring whether the cursor or the list picks it.
-            h = h.ring(tint(c.kind, theme).alpha(0.9), 1.0);
+            h = h.ring(tint(c.kind(), theme).alpha(0.9), 1.0);
             // Keyed in the block it starts in, for the list to scroll to.
             if page.block_at(range.start) == index {
                 h = h.key(CURRENT_MARK);
@@ -426,35 +453,19 @@ fn highlights(s: &App_, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize>>, 
         }
         out.push((local(range), h));
     }
-    if let Some(Target::New {
-        range: Some(range),
-        kind,
-    }) = &s.composer
-    {
+    if let Some(Target::New { range: Some(range) }) = s.composer() {
         out.push((
             local(range.clone()),
-            Highlight::new().bg(tint(*kind, theme)),
+            Highlight::new().bg(tint(Kind::Comment, theme)),
         ));
     }
-    for range in s.vim.matches(text) {
-        out.push((local(range), Highlight::new()));
-    }
-    if let Some(range) = s.vim.selection(text) {
-        out.push((
-            local(range),
-            Highlight::new().bg(theme.accent_soft).fg(theme.text),
-        ));
-    }
-    if s.composer.is_none() {
-        let cursor = local(s.vim.cursor(text));
-        out.push((
-            cursor,
-            Highlight::new()
-                .bg(theme.accent)
-                .fg(theme.on_accent)
-                .key("vim-cursor"),
-        ));
-    }
+    out.extend(markdown::vim_highlights(
+        &s.vim,
+        text,
+        local,
+        s.composer().is_none(),
+        theme,
+    ));
     out.retain(|(ranges, _)| !ranges.is_empty());
     out
 }
@@ -475,7 +486,7 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
             if k.key != Key::Escape {
                 return false;
             }
-            s.composer = None;
+            s.mode = Mode::Normal;
             s.note = Some("Cancelled".into());
             tx.blur();
             true
@@ -491,7 +502,7 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
         .small()
         .gray()
         .on_press_tx(|s: &mut App_, tx: &mut Tx| {
-            s.composer = None;
+            s.mode = Mode::Normal;
             tx.blur();
         })
         .build("composer-cancel", theme);
@@ -628,66 +639,48 @@ fn thread(cards: Vec<El>, theme: &Theme) -> El {
         .child(c.grow(1.0).min_w(0.0))
 }
 
+fn thread_card(s: &App_, id: CommentId, number: usize, c: &Comment, theme: &Theme) -> El {
+    if s.composer() == Some(&Target::Edit(id)) {
+        composer_view(
+            &s.draft,
+            &format!("Edit #{number} · {}", c.title()),
+            None,
+            theme,
+        )
+    } else {
+        comment_view(id, number, c, s.current() == Some(id), theme)
+    }
+}
+
 /// The comments that end in block `index`, and the composer when it's for one there.
 fn block_thread(s: &App_, index: usize, theme: &Theme) -> Option<El> {
     let page = &s.page;
     let ends_here =
         |range: &Range<usize>| page.block_at(range.end.saturating_sub(1).max(range.start)) == index;
-    let current = s.current();
     let mut cards = Vec::new();
     for (number, (id, c)) in s.review.iter().enumerate() {
-        let number = number + 1;
-        if !c.range.as_ref().is_some_and(ends_here) {
-            continue;
-        }
-        if s.composer == Some(Target::Edit(id)) {
-            cards.push(composer_view(
-                &s.draft,
-                &format!("Edit #{number} · {}", c.title()),
-                None,
-                theme,
-            ));
-        } else {
-            cards.push(comment_view(id, number, c, current == Some(id), theme));
+        if c.range().is_some_and(ends_here) {
+            cards.push(thread_card(s, id, number + 1, c, theme));
         }
     }
-    if let Some(Target::New {
-        kind,
-        range: Some(range),
-    }) = &s.composer
+    if let Some(Target::New { range: Some(range) }) = s.composer()
         && ends_here(range)
     {
         let quote = page.text().get(range.clone()).unwrap_or_default();
-        let title = match kind {
-            Kind::Comment => "New comment",
-            Kind::Remove => "Remove this",
-        };
-        cards.push(composer_view(&s.draft, title, Some(quote), theme));
+        cards.push(composer_view(&s.draft, "New comment", Some(quote), theme));
     }
     (!cards.is_empty()).then(|| thread(cards, theme))
 }
 
 /// The general comments, above the document, and the composer for a new one.
 fn general_thread(s: &App_, theme: &Theme) -> Option<El> {
-    let current = s.current();
     let mut cards = Vec::new();
     for (number, (id, c)) in s.review.iter().enumerate() {
-        let number = number + 1;
-        if c.range.is_some() {
-            continue;
-        }
-        if s.composer == Some(Target::Edit(id)) {
-            cards.push(composer_view(
-                &s.draft,
-                &format!("Edit #{number} · General"),
-                None,
-                theme,
-            ));
-        } else {
-            cards.push(comment_view(id, number, c, current == Some(id), theme));
+        if c.range().is_none() {
+            cards.push(thread_card(s, id, number + 1, c, theme));
         }
     }
-    if matches!(s.composer, Some(Target::New { range: None, .. })) {
+    if matches!(s.composer(), Some(Target::New { range: None })) {
         cards.push(composer_view(&s.draft, "General comment", None, theme));
     }
     (!cards.is_empty()).then(|| thread(cards, theme).mb(20.0))
@@ -707,7 +700,7 @@ fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
         );
     }
     for (n, (id, c)) in s.review.iter().enumerate() {
-        let quote = c.range.clone().map(|r| {
+        let quote = c.range().cloned().map(|r| {
             s.page
                 .text()
                 .get(r)
@@ -727,7 +720,7 @@ fn list_view(s: &App_, at: usize, theme: &Theme) -> El {
                 rune::Color::TRANSPARENT
             })
             .on_press_tx(move |s: &mut App_, tx: &mut Tx| {
-                s.list = None;
+                s.mode = Mode::Normal;
                 s.jump(id, tx);
             })
             .child(
@@ -849,7 +842,7 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
     // The comment list floats over the page's right side and the which-key panel over its
     // bottom right, as Rex's prefix panel does; neither moves the page.
     let mut body = el().w_full().grow(1.0).min_h(0.0).child(content);
-    if let Some(at) = s.list {
+    if let Some(at) = s.list() {
         body = body.child(
             col()
                 .pin(None, Some(16.0), Some(16.0), Some(16.0))
@@ -874,10 +867,10 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
 /// what Vim has half typed (`y`, `gy`, `ci`, `]`, the leader) or the visual mode, or every key
 /// after `\\?`. `None` when nothing is half typed.
 fn pending_keys(s: &App_) -> Option<(String, HintGroups)> {
-    if s.composer.is_some() || s.cmdline.is_some() {
+    if matches!(s.mode, Mode::Composing(_) | Mode::Command(_)) {
         return None;
     }
-    if s.all_keys {
+    if s.mode == Mode::AllKeys {
         let mut groups = s.vim.keymap().hints(Table::Normal);
         groups.push((
             HintGroup::App,
@@ -971,130 +964,62 @@ fn which_key(s: &App_, theme: &Theme) -> Option<El> {
 }
 
 fn bar(s: &App_, theme: &Theme) -> El {
-    let hint = |k: &str, what: &str| {
-        row().gap(4.0).center_y().child(kbd(k, theme)).child(
-            text(what.to_owned())
-                .font(theme.ty.caption)
-                .color(theme.text_tertiary),
-        )
-    };
-    row()
-        .key("bar")
-        .w_full()
-        .min_h(40.0)
-        .px(20.0)
-        .py(6.0)
-        .gap(10.0)
-        .center_y()
-        .child(rune::icon(&icons::FILE_TEXT, 16.0).color(theme.text_secondary))
-        .child(
-            text(s.title.clone())
-                .font(theme.ty.strong)
-                .color(theme.text)
-                .truncate()
-                .shrink(),
-        )
-        .child(el().grow(1.0))
-        .child(hint("v", "select"))
-        .child(hint("C", "general"))
-        .child(hint("Tab", "comments"))
-        .child(hint(":wq", "send"))
-        .child(hint(":q!", "quit"))
-        .child(hint("\\?", "keys"))
+    markdown::title_bar(
+        s.origin.title(),
+        &[
+            ("v", "select"),
+            ("C", "general"),
+            ("Tab", "comments"),
+            (":wq", "send"),
+            (":q!", "quit"),
+            ("\\?", "keys"),
+        ],
+        theme,
+    )
 }
 
 fn status_line(s: &App_, theme: &Theme) -> El {
-    let page_text = s.page.text();
-    let line = page_text[..s.cursor()].matches('\n').count() + 1;
-    let lines = page_text.matches('\n').count() + 1;
-    let typed = if let Some(cmd) = &s.cmdline {
-        Some(format!(":{cmd}"))
-    } else if s.vim.mode() == VimMode::Search && s.composer.is_none() {
-        Some(s.vim.status())
+    let mode = if let Mode::Command(cmd) = &s.mode {
+        Some(
+            text(format!(":{cmd}"))
+                .font(theme.ty.mono)
+                .color(theme.text),
+        )
+    } else if s.composer().is_some() {
+        Some(el().child(Badge::new("COMMENT").tone(Tone::Warning).build(theme)))
     } else {
         None
     };
-    let mode = match typed {
-        Some(t) => text(t).font(theme.ty.mono).color(theme.text),
-        None => {
-            let (label, tone) = if s.composer.is_some() {
-                ("COMMENT".to_owned(), Tone::Warning)
-            } else if s.vim.mode() == VimMode::Normal {
-                (s.vim.status(), Tone::Neutral)
-            } else {
-                (s.vim.status(), Tone::Accent)
-            };
-            el().child(Badge::new(label).tone(tone).build(theme))
-        }
-    };
     let count = s.review.len();
     let summary = format!("{count} comment{}", if count == 1 { "" } else { "s" });
-    let note = s
-        .note
-        .clone()
-        .or_else(|| s.vim.message().map(str::to_owned))
-        .unwrap_or_default();
-    let pending = s.vim.pending();
-    row()
-        .key("status")
-        .w_full()
-        .h(28.0)
-        .px(16.0)
-        .gap(12.0)
-        .center_y()
-        .fill(theme.group)
-        .child(mode)
-        .child(
-            text(note)
-                .font(theme.ty.caption)
-                .color(theme.text_secondary)
-                .truncate()
-                .shrink(),
-        )
-        .child(el().grow(1.0))
-        .child(
-            text(summary)
-                .font(theme.ty.caption)
-                .color(theme.text_secondary),
-        )
-        .child(
-            text(pending)
-                .font(theme.ty.mono)
-                .color(theme.text_secondary),
-        )
-        .child(
-            text(format!("{line}:{lines}"))
-                .font(theme.ty.mono)
-                .color(theme.text_tertiary),
-        )
-}
-
-/// The character a key types, without Cmd or Ctrl.
-fn ch(k: &KeyEvent) -> Option<char> {
-    match &k.key {
-        Key::Text(t) if !k.mods.cmd && !k.mods.ctrl => {
-            let mut chars = t.chars();
-            let c = chars.next()?;
-            chars.next().is_none().then_some(c)
-        }
-        _ => None,
-    }
+    let extra = text(summary)
+        .font(theme.ty.caption)
+        .color(theme.text_secondary);
+    markdown::status_line(
+        &s.vim,
+        s.page.text(),
+        s.note.as_deref(),
+        mode,
+        Some(extra),
+        theme,
+    )
 }
 
 /// A key while a `:` command is being typed.
 fn cmdline_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
-    let Some(cmd) = s.cmdline.as_mut() else {
+    let Mode::Command(cmd) = &mut s.mode else {
         return;
     };
     match &k.key {
-        Key::Escape => s.cmdline = None,
+        Key::Escape => s.mode = Mode::Normal,
         Key::Backspace => {
             if cmd.pop().is_none() {
-                s.cmdline = None;
+                s.mode = Mode::Normal;
             }
         }
         Key::Enter => {
-            let cmd = s.cmdline.take().unwrap_or_default();
+            let cmd = std::mem::take(cmd);
+            s.mode = Mode::Normal;
             s.command(&cmd, tx);
         }
         Key::Text(t) if !k.mods.cmd && !k.mods.ctrl => cmd.push_str(t),
@@ -1103,57 +1028,54 @@ fn cmdline_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
 }
 
 fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
-    // A click elsewhere takes focus from the editor's field, and its keys come here. Escape
-    // closes the editor. Any other key gives the field its focus back.
-    if s.composer.is_some() {
-        if k.key == Key::Escape {
-            s.composer = None;
-            s.note = Some("Cancelled".into());
-        } else {
-            s.draft.focused = true;
+    match s.mode {
+        Mode::Composing(_) => {
+            if k.key == Key::Escape {
+                s.mode = Mode::Normal;
+                s.note = Some("Cancelled".into());
+            } else {
+                // A pointer click can blur the field without ending composition.
+                s.draft.focused = true;
+            }
+            return true;
         }
-        return true;
-    }
-    if s.cmdline.is_some() {
-        cmdline_key(s, k, tx);
-        return true;
-    }
-    s.note = None;
-    if s.list.is_some() {
-        list_key_press(s, k, tx);
-        return true;
-    }
-    // The list of every key only shows them: the next key closes it and does what it does.
-    if std::mem::take(&mut s.all_keys) && k.key == Key::Escape {
-        return true;
+        Mode::Command(_) => {
+            cmdline_key(s, k, tx);
+            return true;
+        }
+        Mode::List(_) => {
+            s.note = None;
+            list_key_press(s, k, tx);
+            return true;
+        }
+        Mode::AllKeys => {
+            s.mode = Mode::Normal;
+            s.note = None;
+            if k.key == Key::Escape {
+                return true;
+            }
+        }
+        Mode::Normal => s.note = None,
     }
     let before = (s.cursor(), s.vim.mode());
     let effect = s.vim.key(k, s.page.text());
     match effect {
-        Some(VimEffect::Moved) => {
+        Some(VimEffect::Consumed) => {
             // The comment `]c` picked holds until the cursor moves; a key toward a command
             // (the `]` of `]c`) isn't a move.
             if (s.cursor(), s.vim.mode()) != before {
                 s.selected = None;
             }
-            tx.scroll_into_view("vim-cursor");
+            tx.scroll_into_view(VIM_CURSOR);
         }
         Some(VimEffect::Copy(yanked)) => tx.copy(yanked),
         Some(VimEffect::CopySource { range, linewise }) => {
             let ranges = s.page.source_ranges(range);
-            let mut md = page::source_of(&s.source, &ranges, linewise);
-            if linewise {
-                md.push('\n');
-            }
-            tx.copy(md);
+            tx.copy(markdown::source_of(&s.source, &ranges, linewise));
         }
         Some(VimEffect::Operator { action, range, .. }) => match action {
-            Act::Comment => s.open(Target::New {
-                kind: Kind::Comment,
-                range: Some(range),
-            }),
-            Act::Remove => s.remove(range),
-            _ => {}
+            Op::Comment => s.open(Target::New { range: Some(range) }),
+            Op::Remove => s.remove(range),
         },
         Some(VimEffect::Action { action, .. }) => act(s, action, tx),
         None => return false,
@@ -1164,10 +1086,7 @@ fn on_key(s: &mut App_, k: &KeyEvent, tx: &mut Tx) -> bool {
 /// An action the review bound.
 fn act(s: &mut App_, action: Act, tx: &mut Tx) {
     match action {
-        Act::General => s.open(Target::New {
-            kind: Kind::Comment,
-            range: None,
-        }),
+        Act::General => s.open(Target::New { range: None }),
         Act::NextComment | Act::PreviousComment => {
             match s
                 .review
@@ -1186,12 +1105,10 @@ fn act(s: &mut App_, action: Act, tx: &mut Tx) {
             None => s.note = Some("No comment here".into()),
         },
         Act::List => s.open_list(tx),
-        Act::Keys => s.all_keys = true,
-        Act::CommandLine => s.cmdline = Some(String::new()),
-        Act::SendAndQuit => s.command("wq", tx),
-        Act::QuitWithoutSending => s.command("q!", tx),
-        // Operators come back as `VimEffect::Operator`.
-        Act::Comment | Act::Remove => {}
+        Act::Keys => s.mode = Mode::AllKeys,
+        Act::CommandLine => s.mode = Mode::Command(String::new()),
+        Act::SendAndQuit => s.execute(Command::SendAndQuit, tx),
+        Act::QuitWithoutSending => s.execute(Command::ForceQuit, tx),
     }
 }
 
@@ -1199,30 +1116,35 @@ fn act(s: &mut App_, action: Act, tx: &mut Tx) {
 /// marks that comment and scrolls to it. Enter puts Vim's cursor there and closes the list;
 /// Escape, Tab or `q` close it and scroll back to the cursor, which never moved.
 fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
-    let Some(at) = s.list else { return };
+    let Some(at) = s.list() else { return };
     let n = s.review.len();
     let step =
         |at: usize, by: isize| (at as isize + by).clamp(0, n.saturating_sub(1) as isize) as usize;
-    let to = match (&k.key, ch(k)) {
-        (Key::Escape | Key::Tab, _) | (_, Some('q')) => {
-            s.list = None;
-            tx.scroll_into_view("vim-cursor");
+    let to = match Stroke::from_event(k) {
+        None if k.key == Key::Escape => {
+            s.mode = Mode::Normal;
+            tx.scroll_into_view(VIM_CURSOR);
             return;
         }
-        (Key::Enter, _) => {
-            s.list = None;
+        Some(Stroke::Tab | Stroke::BackTab | Stroke::Char('q')) => {
+            s.mode = Mode::Normal;
+            tx.scroll_into_view(VIM_CURSOR);
+            return;
+        }
+        Some(Stroke::Enter) => {
+            s.mode = Mode::Normal;
             if let Some(id) = s.review.at_position(at) {
                 s.jump(id, tx);
             }
             return;
         }
-        (Key::Down, _) | (_, Some('j')) => step(at, 1),
-        (Key::Up, _) | (_, Some('k')) => step(at, -1),
-        (_, Some('g')) => 0,
-        (_, Some('G')) => n.saturating_sub(1),
+        Some(Stroke::Down | Stroke::Char('j')) => step(at, 1),
+        Some(Stroke::Up | Stroke::Char('k')) => step(at, -1),
+        Some(Stroke::Char('g')) => 0,
+        Some(Stroke::Char('G')) => n.saturating_sub(1),
         _ => return,
     };
-    s.list = Some(to);
+    s.mode = Mode::List(to);
     tx.scroll_into_view(list_key(to));
     if let Some(id) = s.review.at_position(to) {
         s.show(id, tx);
@@ -1230,10 +1152,13 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
 }
 
 fn send(s: &mut App_, _: &mut Tx) {
-    if s.send && s.composer.is_some() {
-        s.save();
+    if s.quit == Quit::Drop {
+        return;
     }
-    let Some(feedback) = s.feedback() else { return };
+    s.save();
+    let Some(feedback) = s.review.feedback(&s.source, &s.page, s.origin.name()) else {
+        return;
+    };
     if let Err(e) = deliver(&feedback, s.out.as_deref(), &mut std::io::stdout()) {
         eprintln!("mdreview: {e}");
         s.send_failed.set(true);
@@ -1302,7 +1227,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
 /// be read.
 fn read_input() -> Input {
     let Args { path, out } = parse_args(rune::extra_args()).unwrap_or_else(|e| fail(&e));
-    let (title, source) = match path.as_deref() {
+    let (origin, source) = match path.as_deref() {
         Some("-") => {
             if std::io::stdin().is_terminal() {
                 fail("`-` reads the document from stdin, but stdin is the terminal");
@@ -1311,18 +1236,16 @@ fn read_input() -> Input {
             if let Err(e) = std::io::stdin().read_to_string(&mut s) {
                 fail(&format!("could not read stdin: {e}"));
             }
-            ("stdin".to_owned(), s)
+            (Origin::Stdin, s)
         }
         Some(p) => match std::fs::read_to_string(p) {
-            Ok(s) => (p.to_owned(), s),
+            Ok(s) => (Origin::File(p.to_owned()), s),
             Err(e) => fail(&format!("could not read {p}: {e}")),
         },
-        None => ("sample.md".to_owned(), SAMPLE.to_owned()),
+        None => (Origin::Sample, SAMPLE.to_owned()),
     };
-    let name = path.filter(|p| p != "-");
     Input {
-        title,
-        name,
+        origin,
         source,
         out,
     }
@@ -1340,10 +1263,7 @@ fn main() {
         scenes: &[
             ("comments", |s| {
                 let text = s.page.text().to_owned();
-                let find = |needle: &str| {
-                    let at = text.find(needle).unwrap_or(0);
-                    at..at + needle.len()
-                };
+                let find = |needle: &str| find_text(&text, needle);
                 s.review.add(Comment::general(
                     "Good direction overall. Keep the first version small.",
                 ));
@@ -1355,72 +1275,41 @@ fn main() {
                     find("Escape cancels"),
                     "Is Escape the only way out?",
                 ));
-                s.review.add(Comment {
-                    kind: Kind::Remove,
-                    range: Some(find("Sharing a review by link")),
-                    body: String::new(),
-                });
+                s.review
+                    .add(Comment::remove(find("Sharing a review by link")));
                 s.selected = Some(picked);
             }),
             ("composing", |s| {
                 let text = s.page.text().to_owned();
-                let at = text.find("one general comment").unwrap_or(0);
-                s.open(Target::New {
-                    kind: Kind::Comment,
-                    range: Some(at..at + "one general comment".len()),
-                });
+                let range = find_text(&text, "one general comment");
+                s.open(Target::New { range: Some(range) });
                 s.draft = TextEdit::new("Should the general comment go first in the feedback?");
                 s.draft.focused = true;
             }),
             ("panel", |s| {
                 let text = s.page.text().to_owned();
-                let at = text.find("stores the quote").unwrap_or(0);
+                let find = |needle: &str| find_text(&text, needle);
                 s.review
                     .add(Comment::general("Ship the first version small."));
+                s.review.add(Comment::on(
+                    find("stores the quote"),
+                    "Anchor on the quote.",
+                ));
                 s.review
-                    .add(Comment::on(at..at + 16, "Anchor on the quote."));
-                s.review.add(Comment {
-                    kind: Kind::Remove,
-                    range: Some(at + 20..at + 30),
-                    body: String::new(),
-                });
-                s.list = Some(1);
+                    .add(Comment::remove(find("Sharing a review by link")));
+                s.mode = Mode::List(1);
             }),
             ("visual", |s| {
-                let text = s.page.text().to_owned();
-                for c in "jjwwvee".chars() {
-                    s.vim.key(
-                        &KeyEvent {
-                            key: Key::Text(c.to_string()),
-                            mods: rune::Mods::default(),
-                        },
-                        &text,
-                    );
-                }
+                type_keys(&mut s.vim, "jjwwvee", s.page.text())
             }),
-            ("keys", |s| s.all_keys = true),
-            ("yank", |s| {
-                let text = s.page.text().to_owned();
-                for c in "gy".chars() {
-                    s.vim.key(
-                        &KeyEvent {
-                            key: Key::Text(c.to_string()),
-                            mods: rune::Mods::default(),
-                        },
-                        &text,
-                    );
-                }
-            }),
+            ("keys", |s| s.mode = Mode::AllKeys),
+            ("yank", |s| type_keys(&mut s.vim, "gy", s.page.text())),
             ("prefix", |s| {
-                s.review.add(Comment::on(0..4, "x"));
-                let text = s.page.text().to_owned();
-                s.vim.key(
-                    &KeyEvent {
-                        key: Key::Text("c".into()),
-                        mods: rune::Mods::default(),
-                    },
-                    &text,
-                );
+                s.review.add(Comment::on(
+                    find_text(s.page.text(), "stores the quote"),
+                    "x",
+                ));
+                type_keys(&mut s.vim, "c", s.page.text());
             }),
         ],
         on_key: Some(on_key),

@@ -187,6 +187,6 @@ pub fn type_keys<A: Clone, O: Clone>(vim: &mut Vim<A, O>, keys: &str, text: &str
 pub fn find_text(text: &str, needle: &str) -> Range<usize> {
     let at = text
         .find(needle)
-        .expect("scene text must exist in the sample");
+        .unwrap_or_else(|| panic!("scene text {needle:?} must exist in the sample"));
     at..at + needle.len()
 }

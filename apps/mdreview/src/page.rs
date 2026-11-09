@@ -7,6 +7,8 @@
 
 use std::ops::Range;
 
+use pane_ui::markdown::line_start;
+pub use pane_ui::markdown::source_of;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rune_kit::markdown::RenderedText;
 
@@ -53,8 +55,7 @@ pub struct Block {
     rendered: RenderedText,
     /// Where its text starts in [`Page::text`].
     pub text_at: usize,
-    /// A heading's level (1–6); `None` for any other block.
-    pub heading: Option<u8>,
+    pub kind: BlockKind,
     /// The space above it on the page.
     pub top: f32,
 }
@@ -127,7 +128,7 @@ impl Page {
         let mut prev_bottom = 0.0f32;
         let mut after_heading = false;
         for (kind, range) in found {
-            let start = source[..range.start].rfind('\n').map_or(0, |i| i + 1);
+            let start = line_start(source, range.start);
             let src = start..range.end;
             let markdown = format!("{}{refs}", source[src.clone()].trim_end());
             let rendered = RenderedText::new(&markdown);
@@ -147,16 +148,12 @@ impl Page {
             }
             let text_at = page.text.len();
             page.text.push_str(rendered.text());
-            let heading = match kind {
-                BlockKind::Heading(level) => Some(level),
-                _ => None,
-            };
             page.blocks.push(Block {
                 src,
                 markdown,
                 rendered,
                 text_at,
-                heading,
+                kind,
                 top,
             });
         }
@@ -206,7 +203,7 @@ impl Page {
         self.blocks[..=index.min(self.blocks.len().saturating_sub(1))]
             .iter()
             .rev()
-            .find(|b| b.heading.is_some())
+            .find(|b| matches!(b.kind, BlockKind::Heading(_)))
             .map(|b| b.rendered.text())
     }
 
@@ -236,18 +233,4 @@ pub fn lines_of(source: &str, ranges: &[Range<usize>]) -> Option<(usize, usize)>
     let last = ranges.last()?.end.saturating_sub(1).max(first);
     let line = |at: usize| source[..at.min(source.len())].matches('\n').count() + 1;
     Some((line(first), line(last)))
-}
-
-/// The Markdown behind `ranges`: from the first source byte drawn to the last, or with
-/// `linewise`, the whole source lines they fall on.
-pub fn source_of(source: &str, ranges: &[Range<usize>], linewise: bool) -> String {
-    let (Some(first), Some(last)) = (ranges.first(), ranges.last()) else {
-        return String::new();
-    };
-    let (mut start, mut end) = (first.start, last.end);
-    if linewise {
-        start = source[..start].rfind('\n').map_or(0, |i| i + 1);
-        end = source[end..].find('\n').map_or(source.len(), |i| end + i);
-    }
-    source[start..end].to_owned()
 }
