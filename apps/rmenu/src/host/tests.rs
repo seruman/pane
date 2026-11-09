@@ -4,6 +4,10 @@ use std::sync::Arc;
 
 fn menu_without_stdin() -> Menu {
     let launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
+    menu_with_launch(launch)
+}
+
+fn menu_with_launch(launch: crate::cli::Launch) -> Menu {
     let mut menu = Menu::new(launch, Rc::default());
     assert!(matches!(menu.events.try_recv().unwrap(), Message::Start(effects)
         if effects.iter().any(|e| matches!(e, Effect::ReadStdin))));
@@ -37,6 +41,30 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
     drop(second);
     assert_eq!(first_result.borrow_mut().take(), Some(Outcome::Chosen(b"chosen\\n".to_vec())));
     assert_eq!(second_result.borrow_mut().take(), Some(Outcome::Cancelled));
+}
+
+#[test]
+fn footer_fits_labels_then_keycaps_then_drops_bindings() {
+    let mut launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
+    launch.options.configuration = serde_json::from_value(serde_json::json!({"bindings": [
+        {"key": "ctrl+w", "label": "Open the selected worktree", "action": "accept"},
+        {"key": "ctrl+o", "label": "Open the selected repository", "action": "accept"},
+        {"key": "alt+n", "label": "Read all repository memos", "action": "accept"}
+    ]})).unwrap();
+    let mut rt = rune::Runtime::new(menu_with_launch(launch), crate::view::view, (1200.0, 400.0), rune::Env::new(true, 1.0));
+    for (width, labelled, bindings) in [(1200.0, true, 3), (400.0, false, 3), (270.0, false, 1), (230.0, false, 0)] {
+        rt.set_viewport((width, 400.0), 1.0);
+        rt.frame(0.0);
+        rt.frame(0.0);
+        let elements = rt.elements();
+        let has = |text: &str| elements.iter().any(|e| e.text.as_deref() == Some(text));
+        assert_eq!(has("Open the selected worktree"), labelled, "width={width}");
+        assert_eq!(["⌃W", "⌃O", "⌥N"].iter().filter(|key| has(key)).count(), bindings, "width={width}");
+        for text in ["Esc", "Choose", "↩"] {
+            let e = elements.iter().find(|e| e.text.as_deref() == Some(text)).unwrap();
+            assert!(e.rect[0] >= 0.0 && e.rect[0] + e.rect[2] <= width, "{text} at {:?}, width={width}", e.rect);
+        }
+    }
 }
 
 #[test]

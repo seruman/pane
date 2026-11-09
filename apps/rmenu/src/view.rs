@@ -17,6 +17,8 @@ const QUERY_H: f32 = 30.0;
 const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
 const FOOTER_H: f32 = 30.0;
+const FOOTER_PAD: f32 = 14.0;
+const FOOTER_GAP: f32 = 14.0;
 const PREVIEW_W: f32 = 380.0;
 
 const TITLE: TextStyle = TextStyle::new(13.0, 400.0).lh(18.0);
@@ -223,7 +225,7 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     // Enter during a search is queued by the model, so Choose stays lit while one runs.
     let can_act = model.can_navigate() && !model.running_operation() && model.has_choice();
     let back = if model.depth() > 0 { "Back" } else { "" };
-    let mut bar = row().h(FOOTER_H).w_full().px(14.0).gap(14.0).center_y()
+    let mut bar = row().h(FOOTER_H).w_full().px(FOOTER_PAD).gap(FOOTER_GAP).center_y()
         .child(keycap_button(back, "Esc", true, c)
             .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Back), tx)))
         .child(text(status).font(SMALL).color(if failed { c.error } else { c.secondary }).truncate().grow(1.0).min_w(0.0));
@@ -234,10 +236,10 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     // Esc, Choose and a readable status always fit: what's left goes to bindings, labelled
     // when they all fit that way, keycaps only when that's what fits, the rightmost dropped
     // after that.
-    let fixed = 28.0 + keycap_width(back, "Esc") + keycap_width("Choose", "↩") + STATUS_MIN_W + 2.0 * 14.0;
+    let fixed = 2.0 * FOOTER_PAD + keycap_width(back, "Esc") + keycap_width("Choose", "↩") + STATUS_MIN_W + 2.0 * FOOTER_GAP;
     let room = (width - fixed).max(0.0);
     let cost = |labelled: bool, n: usize| bindings[..n].iter()
-        .map(|(_, label, key)| 14.0 + keycap_width(if labelled { label } else { "" }, key)).sum::<f32>();
+        .map(|(_, label, key)| FOOTER_GAP + keycap_width(if labelled { label } else { "" }, key)).sum::<f32>();
     let labelled = cost(true, bindings.len()) <= room;
     let shown = (0..=bindings.len()).rev().find(|&n| cost(labelled, n) <= room).unwrap_or(0);
     for (index, label, key) in &bindings[..shown] {
