@@ -81,8 +81,8 @@ impl Harness {
 
     /// Runs the live search to completion and returns its event, undelivered.
     fn run_search(&mut self) -> Event {
-        let Task::Search { token, index, query, sorted } = self.take(TaskKind::Search) else { unreachable!() };
-        Event::SearchDone { token, results: index.search(&query, sorted, &|| false).unwrap() }
+        let Task::Search { token, index, query, order } = self.take(TaskKind::Search) else { unreachable!() };
+        Event::SearchDone { token, results: index.search(&query, order, &|| false).unwrap() }
     }
 
     fn settle(&mut self) {

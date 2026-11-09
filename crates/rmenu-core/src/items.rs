@@ -70,6 +70,7 @@ impl Index<usize> for Items {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search::Order;
 
     fn titles(items: &Items) -> Vec<String> { items.iter().map(|i| i.title().to_owned()).collect() }
 
@@ -98,12 +99,12 @@ mod tests {
         items.extend((0..CHUNK - 1).map(|i| MenuItem::new(i.to_string(), "old")));
         let snapshot = items.clone();
         items.extend((CHUNK - 1..CHUNK + 2).map(|i| MenuItem::new(i.to_string(), "new").with_value(format!("value-{i}"))));
-        let offsets = items.search("new", false, &|| false).unwrap();
+        let offsets = items.search("new", Order::Input, &|| false).unwrap();
         assert_eq!(offsets, [CHUNK - 1, CHUNK, CHUNK + 1].map(|offset| RowOffset::try_from(offset).unwrap()));
         for offset in offsets {
             assert_eq!(items[offset].value(), format!("value-{}", offset.0));
         }
-        assert!(snapshot.search("new", false, &|| false).unwrap().is_empty());
+        assert!(snapshot.search("new", Order::Input, &|| false).unwrap().is_empty());
     }
 
     #[test]

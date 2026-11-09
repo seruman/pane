@@ -9,8 +9,8 @@ use std::time::Duration;
 use crate::command::{CommandResult, Limits};
 use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId};
 use crate::item::{ActionContext, MenuItem, PathEntry};
-use crate::search::{RowOffset, SearchIndex};
-use crate::selection::MenuSelection;
+use crate::search::{Order, RowOffset, SearchIndex};
+use crate::selection::{Marks, MenuSelection};
 
 #[derive(Clone, Debug)]
 pub struct Options {
@@ -50,7 +50,7 @@ pub enum Task {
     /// `SourceDone`. A nonzero exit is an error worded by [`command_failure`].
     Source { token: Token, argv: Vec<String>, input: Vec<u8>, env: Vec<(String, String)>, format: InputFormat },
     /// Search `index` off the UI thread, answer `SearchDone`.
-    Search { token: Token, index: SearchIndex, query: String, sorted: bool },
+    Search { token: Token, index: SearchIndex, query: String, order: Order },
     /// After `delay`, run a preview command under `PREVIEW_LIMITS` with stdin on /dev/null, answer `PreviewDone`.
     Preview { token: Token, argv: Vec<String>, env: Vec<(String, String)>, delay: Duration },
     /// Run an operation under `OPERATION_LIMITS`, answer `OperationDone`.
@@ -776,7 +776,7 @@ impl Model {
             token: self.generation,
             index: self.store.clone(),
             query: self.query.clone(),
-            sorted: self.options.sorted,
+            order: if self.options.sorted { Order::Ranked } else { Order::Input },
         }));
     }
 
@@ -796,7 +796,7 @@ impl Model {
         }
         let prune_now = self.pending_prune && !self.loading;
         let listed = self.listed();
-        self.shown.selection.reconcile(&self.shown.items, &self.shown.results[..listed], prune_now);
+        self.shown.selection.reconcile(&self.shown.items, &self.shown.results[..listed], if prune_now { Marks::Prune } else { Marks::Keep });
         if prune_now {
             self.pending_prune = false;
         }

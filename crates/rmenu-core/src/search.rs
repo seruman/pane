@@ -71,15 +71,21 @@ pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cancelled;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Order {
+    Ranked,
+    Input,
+}
+
 impl SearchIndex {
     /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
     /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
     /// Workers poll `cancelled` while matching. Single-chunk searches run on the caller.
-    pub fn search(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<RowOffset>, Cancelled> {
-        Ok(self.ranked(query, sorted, cancelled)?.into_iter().map(|m| m.offset).collect())
+    pub fn search(&self, query: &str, order: Order, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<RowOffset>, Cancelled> {
+        Ok(self.ranked(query, order, cancelled)?.into_iter().map(|m| m.offset).collect())
     }
 
-    fn ranked(&self, query: &str, sorted: bool, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Ranked>, Cancelled> {
+    fn ranked(&self, query: &str, order: Order, cancelled: &(dyn Fn() -> bool + Sync)) -> Result<Vec<Ranked>, Cancelled> {
         if cancelled() { return Err(Cancelled); }
         let pattern = pattern(query);
         if pattern.atoms.is_empty() {
@@ -100,7 +106,7 @@ impl SearchIndex {
         if cancelled() { return Err(Cancelled); }
         chunks.sort_unstable_by_key(|(index, _)| *index);
         let mut out: Vec<Ranked> = chunks.into_iter().flat_map(|(_, rows)| rows).collect();
-        if sorted {
+        if order == Order::Ranked {
             out.sort_unstable_by_key(|m| (std::cmp::Reverse(m.score), m.len, m.offset));
         }
         if cancelled() { return Err(Cancelled); }
@@ -131,7 +137,7 @@ impl SearchIndex {
 
     #[cfg(test)]
     fn scored_matches(&self, query: &str) -> Vec<(RowOffset, u32)> {
-        self.ranked(query, true, &|| false).unwrap().into_iter().map(|m| (m.offset, m.score)).collect()
+        self.ranked(query, Order::Ranked, &|| false).unwrap().into_iter().map(|m| (m.offset, m.score)).collect()
     }
 }
 

@@ -237,8 +237,8 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
 
 fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
     match task {
-        Task::Search { token, index, query, sorted } => {
-            if let Ok(results) = index.search(&query, sorted, &|| cancel.is_cancelled()) {
+        Task::Search { token, index, query, order } => {
+            if let Ok(results) = index.search(&query, order, &|| cancel.is_cancelled()) {
                 emit(Event::SearchDone { token, results });
             }
         }

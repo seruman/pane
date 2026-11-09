@@ -4,7 +4,7 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use rmenu_core::item::MenuItem;
-use rmenu_core::search::SearchIndex;
+use rmenu_core::search::{Order, SearchIndex};
 
 fn main() {
     let args: Vec<usize> = std::env::args().skip(1).map(|a| a.parse().expect("expected a positive integer")).collect();
@@ -34,9 +34,9 @@ fn bench(count: usize, runs: usize, calls: usize) {
     let index = SearchIndex::from(items);
     println!("{count} paths, index {:.3} ms, {runs} runs, {calls} calls per run", ms(start.elapsed()));
     let queries = ["", "swift", "srchidx", "mcore srch", "tests cache", "project-42 settings", "不存在", "zzzz-no-match"];
-    for sorted in [true, false] {
+    for order in [Order::Ranked, Order::Input] {
         for query in queries {
-            let expected = index.search(query, sorted, &|| false).unwrap();
+            let expected = index.search(query, order, &|| false).unwrap();
             if query.is_empty() || query == "swift" { assert_eq!(expected.len(), count); }
             if query == "不存在" || query == "zzzz-no-match" { assert!(expected.is_empty()); }
             let mut times = Vec::new();
@@ -44,7 +44,7 @@ fn bench(count: usize, runs: usize, calls: usize) {
                 let mut elapsed = Duration::ZERO;
                 for _ in 0..calls {
                     let start = Instant::now();
-                    let results = black_box(index.search(black_box(query), sorted, &|| false).unwrap());
+                    let results = black_box(index.search(black_box(query), order, &|| false).unwrap());
                     elapsed += start.elapsed();
                     assert_eq!(results, expected);
                 }
@@ -52,7 +52,7 @@ fn bench(count: usize, runs: usize, calls: usize) {
             }
             times.sort_by(f64::total_cmp);
             println!("{} {query:?}: min {:.3}, median {:.3}, max {:.3} ms, {} matches, {} verified calls, 0 errors",
-                     if sorted { "ranked  " } else { "unsorted" }, times[0], times[runs / 2], times[runs - 1], expected.len(), runs * calls);
+                     if order == Order::Ranked { "ranked  " } else { "unsorted" }, times[0], times[runs / 2], times[runs - 1], expected.len(), runs * calls);
         }
     }
 }
