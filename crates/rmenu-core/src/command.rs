@@ -94,17 +94,22 @@ fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError>
     Err(system("posix_spawn", io::Error::from_raw_os_error(code)))
 }
 
-/// A pipe whose ends are close-on-exec, so no other command inherits them.
 fn pipe() -> Result<(File, File), CommandError> {
     let mut fds = [0 as RawFd; 2];
     // SAFETY: `fds` holds two descriptors, as pipe(2) requires.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 { return Err(system("pipe", io::Error::last_os_error())); }
-    for fd in fds {
-        // SAFETY: sets a flag on a descriptor just created here.
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    }
     // SAFETY: both descriptors were just created and are owned by nothing else.
-    Ok(unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) })
+    let ends = unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) };
+    set_cloexec(ends.0.as_raw_fd())?;
+    set_cloexec(ends.1.as_raw_fd())?;
+    Ok(ends)
+}
+
+fn set_cloexec(fd: RawFd) -> Result<(), CommandError> {
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(system("close-on-exec pipe", io::Error::last_os_error()));
+    }
+    Ok(())
 }
 
 /// Fails with the operation's name when a posix_spawn* call returns an error number.
@@ -724,6 +729,22 @@ printf '%s\n' "$$" > "$1/leader"
             }
         })).collect();
         for handle in handles { handle.join().unwrap(); }
+    }
+
+    #[test]
+    fn close_on_exec_reports_invalid_descriptors() {
+        assert!(matches!(set_cloexec(-1), Err(CommandError::System { error, .. })
+                         if error.raw_os_error() == Some(libc::EBADF)));
+    }
+
+    #[test]
+    fn pipe_ends_have_close_on_exec_set() {
+        let (read, write) = pipe().unwrap();
+        for end in [read, write] {
+            let flags = unsafe { libc::fcntl(end.as_raw_fd(), libc::F_GETFD) };
+            assert!(flags >= 0);
+            assert_ne!(flags & libc::FD_CLOEXEC, 0);
+        }
     }
 
     #[test]
