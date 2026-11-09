@@ -243,7 +243,7 @@ struct SuspendedLevel {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Status {
     Ack(String),
-    Running(String),
+    Operation(Token),
     Error(String),
     StdinFailed,
 }
@@ -293,6 +293,7 @@ struct SearchRun {
 struct Operation {
     token: Token,
     action: String,
+    message: String,
     reload: bool,
     source_generation: SourceGeneration,
 }
@@ -398,7 +399,8 @@ impl Model {
 
     pub fn message(&self) -> Option<&str> {
         match self.current.message.as_ref()? {
-            Status::Ack(text) | Status::Running(text) | Status::Error(text) => Some(text),
+            Status::Ack(text) | Status::Error(text) => Some(text),
+            Status::Operation(token) => self.operation.as_ref().filter(|operation| operation.token == *token).map(|operation| operation.message.as_str()),
             Status::StdinFailed => self.stdin_error(),
         }
     }
@@ -669,7 +671,6 @@ impl Model {
         self.current = parent.level;
         self.current.source_generation = SourceGeneration(self.fresh());
         self.current.shown.source_generation = Some(self.current.source_generation);
-        self.current.message = self.current.message.take().filter(|m| !matches!(m, Status::Running(_)) || self.operation.is_some());
         self.preview_generation = None;
         self.preview_identity = None;
         self.preview_text.clear();
@@ -891,8 +892,14 @@ impl Model {
             path: self.path(chosen),
         };
         let token = self.fresh();
-        self.current.message = Some(Status::Running(format!("Running {action}…")));
-        self.operation = Some(Operation { token, action, reload, source_generation: self.current.source_generation });
+        self.current.message = Some(Status::Operation(token));
+        self.operation = Some(Operation {
+            token,
+            message: format!("Running {action}…"),
+            action,
+            reload,
+            source_generation: self.current.source_generation,
+        });
         self.effects.push(Effect::Start(Task::Operation {
             token,
             argv,

@@ -1422,6 +1422,35 @@ fn acknowledgements_retire_on_the_next_key() {
 }
 
 #[test]
+fn going_back_restores_a_still_running_operation_message() {
+    let mut h = start(json!({
+        "sources": [repos(json!({})), hidden("child", json!({}))],
+        "bindings": [{"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"]}, push_binding()]}));
+    h.load(r#"{"id":"a","title":"alpha"}"#);
+    h.perform(0);
+    h.perform(1);
+    h.load(r#"{"id":"x","title":"xray"}"#);
+    assert_eq!(h.model.message(), None);
+    h.nav(Nav::Back);
+    assert_eq!(h.model.message(), Some("Running star…"));
+}
+
+#[test]
+fn replacing_a_running_message_does_not_restore_it_after_an_acknowledgement() {
+    let mut h = operations(json!([
+        {"key": "ctrl+d", "action": "run", "command": ["ok"]},
+        {"key": "ctrl+y", "action": "copy"}
+    ]));
+    h.load("one\ntwo\n");
+    h.perform(0);
+    h.perform(1);
+    assert_eq!(h.model.message(), Some("Copied 1"));
+    h.nav(Nav::Down);
+    assert_eq!(h.model.message(), None);
+    assert!(h.model.running_operation());
+}
+
+#[test]
 fn going_back_does_not_show_a_finished_operations_running_line() {
     let mut h = start(json!({
         "sources": [repos(json!({})), hidden("child", json!({}))],
