@@ -139,7 +139,7 @@ pub struct Select {
     placeholder: String,
     open: bool,
     size: ControlSize,
-    width: Option<f32>,
+    width: crate::layout::Width,
     toggle: Option<(Transform, Transform)>,
     choose: Option<Rc<dyn Fn(usize) -> Transform>>,
 }
@@ -152,7 +152,7 @@ impl Select {
             placeholder: "Choose…".to_owned(),
             open: false,
             size: ControlSize::Regular,
-            width: Some(200.0),
+            width: crate::layout::Width::Prefer(200.0),
             toggle: None,
             choose: None,
         }
@@ -177,11 +177,11 @@ impl Select {
 
     /// The width it prefers, in points; it shrinks below it to fit. 200 by default.
     pub fn width(mut self, width: f32) -> Self {
-        self.width = Some(width);
+        self.width = crate::layout::Width::Prefer(width);
         self
     }
     pub fn fill(mut self) -> Self {
-        self.width = None;
+        self.width = crate::layout::Width::Fill;
         self
     }
 
@@ -239,10 +239,7 @@ impl Select {
                     .grow(1.0),
             )
             .child(icon(&icons::CHEVRON_DOWN, 13.0).color(theme.text_secondary));
-        trigger = match self.width {
-            Some(w) => trigger.w(w).shrink(),
-            None => trigger.w_full(),
-        };
+        trigger = self.width.apply(trigger);
         let (trigger, close) = match self.toggle {
             Some((toggle, close)) => (toggle(trigger), Some(close)),
             None => (trigger, None),

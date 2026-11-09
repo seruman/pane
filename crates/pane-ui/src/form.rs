@@ -21,7 +21,7 @@ pub struct TextField<'a> {
     placeholder: String,
     leading: Option<&'static Icon>,
     size: ControlSize,
-    width: Option<f32>,
+    width: crate::layout::Width,
     extra: Vec<Transform>,
 }
 
@@ -36,7 +36,7 @@ impl<'a> TextField<'a> {
             placeholder: String::new(),
             leading: None,
             size: ControlSize::Regular,
-            width: Some(200.0),
+            width: crate::layout::Width::Prefer(200.0),
             extra: Vec::new(),
         }
     }
@@ -66,12 +66,12 @@ impl<'a> TextField<'a> {
     }
     /// The width it prefers, in points; it shrinks below it to fit. 200 by default.
     pub fn width(mut self, width: f32) -> Self {
-        self.width = Some(width);
+        self.width = crate::layout::Width::Prefer(width);
         self
     }
     /// Take all the width the parent gives.
     pub fn fill(mut self) -> Self {
-        self.width = None;
+        self.width = crate::layout::Width::Fill;
         self
     }
 
@@ -111,10 +111,7 @@ impl<'a> TextField<'a> {
             .radius(theme.radius.field)
             .fill(theme.field)
             .min_w(0.0);
-        f = match self.width {
-            Some(w) => f.w(w).shrink(),
-            None => f.w_full(),
-        };
+        f = self.width.apply(f);
         if let Some(glyph) = self.leading {
             f = f.child(icon(glyph, h * 0.5).color(theme.text_tertiary));
         }
@@ -260,7 +257,7 @@ pub struct Slider {
     label: Option<String>,
     value_label: Option<String>,
     stops: Vec<Color>,
-    width: Option<f32>,
+    width: crate::layout::Width,
     change: Option<Transform>,
 }
 
@@ -273,7 +270,7 @@ impl Slider {
             label: None,
             value_label: None,
             stops: Vec::new(),
-            width: Some(240.0),
+            width: crate::layout::Width::Prefer(240.0),
             change: None,
         }
     }
@@ -294,12 +291,12 @@ impl Slider {
     }
     /// The width it prefers, in points; it shrinks below it to fit. 240 by default.
     pub fn width(mut self, width: f32) -> Self {
-        self.width = Some(width);
+        self.width = crate::layout::Width::Prefer(width);
         self
     }
     /// Take all the width the parent gives.
     pub fn fill(mut self) -> Self {
-        self.width = None;
+        self.width = crate::layout::Width::Fill;
         self
     }
 
@@ -394,10 +391,7 @@ impl Slider {
             slider = change(slider);
         }
         let mut c = col().key(key).gap(6.0).min_w(80.0);
-        c = match self.width {
-            Some(w) => c.w(w).shrink(),
-            None => c.w_full(),
-        };
+        c = self.width.apply(c);
         if self.label.is_some() || self.value_label.is_some() {
             c = c.child(
                 row()

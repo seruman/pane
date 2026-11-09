@@ -5,6 +5,20 @@ use rune::{El, ScrollSpec, col, el, row, text};
 
 use crate::Theme;
 
+pub(crate) enum Width {
+    Prefer(f32),
+    Fill,
+}
+
+impl Width {
+    pub(crate) fn apply(self, element: El) -> El {
+        match self {
+            Self::Prefer(width) => element.w(width).shrink(),
+            Self::Fill => element.w_full(),
+        }
+    }
+}
+
 /// The whole pane: the terminal background, scrolling content with padding, and overlays
 /// (toasts, modals) above it.
 ///
