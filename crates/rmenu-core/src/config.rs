@@ -1,5 +1,3 @@
-//! The `--config` JSON. Port of `Sources/MenuCore/Configuration.swift`.
-
 use std::collections::HashSet;
 use std::fmt;
 
@@ -37,87 +35,190 @@ impl std::str::FromStr for Theme {
         match raw {
             "rex" => Ok(Self::Rex),
             "native" => Ok(Self::Native),
-            _ => error(format!("Unknown theme: {raw}")),
+            _ => Err(ConfigurationError::UnknownTheme(raw.into())),
         }
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MenuConfiguration {
-    pub prompt: Option<String>,
-    #[serde(default, deserialize_with = "null_as_false")]
-    pub multi: bool,
-    pub theme: Option<Theme>,
-    #[serde(default)]
-    pub sources: Vec<MenuSource>,
-    #[serde(default)]
-    pub bindings: Vec<MenuBinding>,
-    pub preview: Option<Vec<String>>,
-    pub initial_source: Option<String>,
-    #[serde(default)]
-    pub marks: MarkScope,
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SourceId(String);
+
+impl SourceId {
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+impl fmt::Display for SourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(self.as_str()) }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(try_from = "RawConfiguration")]
+pub struct MenuConfiguration {
+    prompt: Option<String>,
+    multi: bool,
+    sources: Vec<MenuSource>,
+    bindings: Vec<MenuBinding>,
+    preview: Option<Vec<String>>,
+    initial_source: Option<SourceId>,
+    marks: MarkScope,
+}
+
+#[derive(Clone, Debug)]
 pub struct MenuSource {
-    pub id: String,
+    pub id: SourceId,
     pub label: String,
-    pub key: Option<String>,
+    pub key: Option<KeyChord>,
     pub command: Vec<String>,
-    #[serde(default)]
     pub format: InputFormat,
     pub prompt: Option<String>,
     pub preview: Option<Vec<String>>,
-    #[serde(default)]
     pub hidden: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum BindingAction {
-    Accept,
-    Copy,
-    Run,
-    Reload,
-    Source,
-    Push,
-    TogglePreview,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub struct MenuBinding {
-    pub key: String,
-    pub id: Option<String>,
-    pub label: Option<String>,
-    pub action: BindingAction,
-    pub command: Option<Vec<String>>,
-    pub source: Option<String>,
-    #[serde(default, deserialize_with = "null_as_false")]
-    pub reload: bool,
-    pub sources: Option<Vec<String>>,
+    raw_key: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ConfigurationError(pub String);
-
-impl fmt::Display for ConfigurationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
+pub enum BindingAction {
+    Accept,
+    Copy,
+    Run { command: Vec<String>, reload: bool },
+    Reload,
+    Source { source: SourceId },
+    Push { source: SourceId },
+    TogglePreview,
 }
 
-impl std::error::Error for ConfigurationError {}
+#[derive(Clone, Debug)]
+pub struct MenuBinding {
+    pub key: KeyChord,
+    pub label: Option<String>,
+    pub action: BindingAction,
+    id: Option<String>,
+    raw_key: String,
+    sources: Option<Vec<SourceId>>,
+}
+
+#[derive(Debug)]
+pub enum ConfigurationError {
+    Json(serde_json::Error),
+    UnknownTheme(String),
+    EmptySourceId,
+    DuplicateSourceId(String),
+    MissingProgram { entry: String },
+    CommandNul { entry: String },
+    HiddenSourceKey(String),
+    UnknownInitialSource(String),
+    EmptyBindingId { key: String },
+    DuplicateBindingId(String),
+    MissingSource { key: String },
+    UnknownSource { key: String, source: String },
+    HiddenSourceTarget { key: String, source: String },
+    EmptySources { key: String },
+    UnknownRestriction { key: String, source: String },
+    InvalidChord(String),
+    InvalidModifiers(String),
+    MissingModifier(String),
+    ReservedChord(String),
+    DuplicateChord(String),
+}
+
+impl fmt::Display for ConfigurationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json(error) => error.fmt(f),
+            Self::UnknownTheme(theme) => write!(f, "Unknown theme: {theme}"),
+            Self::EmptySourceId => f.write_str("Source IDs cannot be empty."),
+            Self::DuplicateSourceId(id) => write!(f, "Duplicate source ID: {id}"),
+            Self::MissingProgram { entry } => write!(f, "{entry} needs a program to run."),
+            Self::CommandNul { entry } => write!(f, "{entry} contains a NUL character."),
+            Self::HiddenSourceKey(id) => write!(f, "Hidden source {id} cannot have a key."),
+            Self::UnknownInitialSource(id) => write!(f, "Unknown initialSource: {id}"),
+            Self::EmptyBindingId { key } => write!(f, "Binding {key} has an empty ID."),
+            Self::DuplicateBindingId(id) => write!(f, "Duplicate binding ID: {id}"),
+            Self::MissingSource { key } => write!(f, "Binding {key} needs a source."),
+            Self::UnknownSource { key, source } => write!(f, "Binding {key} references unknown source {source}."),
+            Self::HiddenSourceTarget { key, source } => write!(f, "Binding {key} cannot switch to hidden source {source}. Push it instead."),
+            Self::EmptySources { key } => write!(f, "Binding {key} has an empty sources list."),
+            Self::UnknownRestriction { key, source } => write!(f, "Binding {key} is restricted to unknown source {source}."),
+            Self::InvalidChord(raw) => write!(f, "Invalid key chord: {raw}"),
+            Self::InvalidModifiers(raw) => write!(f, "Use the cmd, ctrl, alt, or shift modifiers in {raw}."),
+            Self::MissingModifier(raw) => write!(f, "Bindings need a modifier: {raw}"),
+            Self::ReservedChord(raw) => write!(f, "{raw} is reserved for editing and navigation."),
+            Self::DuplicateChord(raw) => write!(f, "Duplicate binding: {raw}"),
+        }
+    }
+}
+
+impl std::error::Error for ConfigurationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self { Self::Json(error) => Some(error), _ => None }
+    }
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawConfiguration {
+    prompt: Option<String>,
+    #[serde(default, deserialize_with = "null_as_false")]
+    multi: bool,
+    #[serde(rename = "theme")]
+    _theme: Option<Theme>,
+    #[serde(default)]
+    sources: Vec<RawSource>,
+    #[serde(default)]
+    bindings: Vec<RawBinding>,
+    preview: Option<Vec<String>>,
+    initial_source: Option<String>,
+    #[serde(default)]
+    marks: MarkScope,
+}
+
+#[derive(Deserialize)]
+struct RawSource {
+    id: String,
+    label: String,
+    key: Option<String>,
+    command: Vec<String>,
+    #[serde(default)]
+    format: InputFormat,
+    prompt: Option<String>,
+    preview: Option<Vec<String>>,
+    #[serde(default)]
+    hidden: bool,
+}
+
+#[derive(Deserialize)]
+struct RawBinding {
+    key: String,
+    id: Option<String>,
+    label: Option<String>,
+    #[serde(flatten)]
+    action: RawAction,
+    sources: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "camelCase")]
+enum RawAction {
+    Accept,
+    Copy,
+    Run {
+        command: Option<Vec<String>>,
+        #[serde(default, deserialize_with = "null_as_false")]
+        reload: bool,
+    },
+    Reload,
+    Source { source: Option<String> },
+    Push { source: Option<String> },
+    TogglePreview,
+}
 
 /// mmenu decodes `null` as an absent key.
 fn null_as_false<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(false))
 }
 
-fn error<T>(message: impl Into<String>) -> Result<T, ConfigurationError> { Err(ConfigurationError(message.into())) }
-
-/// A key and its modifiers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyChord {
-    /// Lowercased: one character, or enter/escape/tab/up/down/space.
     pub key: String,
     pub command: bool,
     pub control: bool,
@@ -126,130 +227,160 @@ pub struct KeyChord {
 }
 
 impl MenuConfiguration {
-    pub fn source(&self, id: Option<&str>) -> Option<&MenuSource> {
-        self.sources.iter().find(|source| Some(source.id.as_str()) == id)
+    pub fn parse(bytes: &[u8], preview_override: Option<Vec<String>>) -> Result<Self, ConfigurationError> {
+        let mut raw: RawConfiguration = serde_json::from_slice(bytes).map_err(ConfigurationError::Json)?;
+        if let Some(preview) = preview_override { raw.preview = Some(preview); }
+        raw.try_into()
     }
 
-    /// The root level's source; `None` means the root reads piped stdin. Hidden sources are
-    /// push targets, so a config with only hidden sources still reads stdin.
-    pub fn root_source(&self) -> Option<&str> {
-        self.initial_source.as_deref().or_else(|| self.sources.iter().find(|s| !s.hidden).map(|s| s.id.as_str()))
+    pub fn prompt(&self) -> Option<&str> { self.prompt.as_deref() }
+    pub fn multi(&self) -> bool { self.multi }
+    pub fn sources(&self) -> &[MenuSource] { &self.sources }
+    pub fn bindings(&self) -> &[MenuBinding] { &self.bindings }
+    pub fn preview(&self) -> Option<&[String]> { self.preview.as_deref() }
+    pub fn marks(&self) -> MarkScope { self.marks }
+
+    pub fn source(&self, id: &SourceId) -> Option<&MenuSource> {
+        self.sources.iter().find(|source| &source.id == id)
     }
 
-    /// Source and binding keys, as written, that hold `cmd`. Call after `validate`.
+    pub fn root_source(&self) -> Option<&MenuSource> {
+        match &self.initial_source {
+            Some(id) => self.source(id),
+            None => self.sources.iter().find(|s| !s.hidden),
+        }
+    }
+
     pub fn command_chords(&self) -> impl Iterator<Item = &str> {
-        self.sources.iter().filter_map(|s| s.key.as_deref()).chain(self.bindings.iter().map(|b| b.key.as_str()))
-            .filter(|raw| KeyChord::parse(raw).is_ok_and(|chord| chord.command))
+        self.sources.iter().filter(|s| s.key.as_ref().is_some_and(|key| key.command)).filter_map(|s| s.raw_key.as_deref())
+            .chain(self.bindings.iter().filter(|b| b.key.command).map(|b| b.raw_key.as_str()))
     }
+}
 
-    pub fn validate(&self) -> Result<(), ConfigurationError> {
+impl TryFrom<RawConfiguration> for MenuConfiguration {
+    type Error = ConfigurationError;
+
+    fn try_from(raw: RawConfiguration) -> Result<Self, Self::Error> {
         let mut ids = HashSet::new();
         let mut keys = HashSet::new();
-        for source in &self.sources {
-            if source.id.is_empty() { return error("Source IDs cannot be empty."); }
-            if !ids.insert(source.id.as_str()) { return error(format!("Duplicate source ID: {}", source.id)); }
-            check_argv(&source.command, &format!("Source {} command", source.id))?;
-            if let Some(preview) = &source.preview { check_argv(preview, &format!("Source {} preview command", source.id))?; }
-            if let Some(key) = &source.key {
-                if source.hidden { return error(format!("Hidden source {} cannot have a key.", source.id)); }
-                add_key(key, &mut keys)?;
-            }
-        }
-        if let Some(initial) = self.initial_source.as_deref().filter(|id| !ids.contains(id)) {
-            return error(format!("Unknown initialSource: {initial}"));
-        }
-        if let Some(preview) = &self.preview { check_argv(preview, "Preview command")?; }
+        let sources = raw.sources.into_iter().map(|source| source.parse(&mut ids, &mut keys)).collect::<Result<Vec<_>, _>>()?;
+        let initial_source = raw.initial_source.map(|id| {
+            sources.iter().find(|s| s.id.as_str() == id).map(|s| s.id.clone())
+                .ok_or(ConfigurationError::UnknownInitialSource(id))
+        }).transpose()?;
+        if let Some(preview) = &raw.preview { check_argv(preview, "Preview command".into())?; }
         let mut binding_ids = HashSet::new();
-        for binding in &self.bindings {
-            let key = &binding.key;
-            add_key(key, &mut keys)?;
-            if let Some(id) = &binding.id {
-                if id.is_empty() { return error(format!("Binding {key} has an empty ID.")); }
-                if !binding_ids.insert(id.as_str()) { return error(format!("Duplicate binding ID: {id}")); }
-            }
-            if binding.action == BindingAction::Run {
-                check_argv(binding.command.as_deref().unwrap_or_default(), &format!("Run binding {key} command"))?;
-            }
-            if matches!(binding.action, BindingAction::Source | BindingAction::Push) {
-                match binding.source.as_deref() {
-                    None => return error(format!("Binding {key} needs a source.")),
-                    Some(source) if !ids.contains(source) =>
-                        return error(format!("Binding {key} references unknown source {source}.")),
-                    Some(_) => {}
-                }
-            }
-            if binding.action == BindingAction::Source
-                && self.source(binding.source.as_deref()).is_some_and(|s| s.hidden) {
-                let source = binding.source.as_deref().unwrap_or("");
-                return error(format!("Binding {key} cannot switch to hidden source {source}; push it instead."));
-            }
-            if let Some(levels) = &binding.sources {
-                if levels.is_empty() { return error(format!("Binding {key} has an empty sources list.")); }
-                if let Some(id) = levels.iter().find(|id| !ids.contains(id.as_str())) {
-                    return error(format!("Binding {key} is restricted to unknown source {id}."));
-                }
-            }
-        }
-        Ok(())
+        let bindings = raw.bindings.into_iter().map(|binding| binding.parse(&sources, &mut binding_ids, &mut keys))
+            .collect::<Result<_, _>>()?;
+        Ok(Self { prompt: raw.prompt, multi: raw.multi, sources, bindings, preview: raw.preview, initial_source, marks: raw.marks })
     }
 }
 
-/// The checks `command::run` makes on an argv, made at load so the error names its entry.
-fn check_argv(argv: &[String], what: &str) -> Result<(), ConfigurationError> {
-    if argv.first().is_none_or(String::is_empty) { return error(format!("{what} needs a program to run.")); }
-    if argv.iter().any(|a| a.contains('\0')) { return error(format!("{what} contains a NUL character.")); }
+impl RawSource {
+    fn parse(self, ids: &mut HashSet<String>, keys: &mut HashSet<KeyChord>) -> Result<MenuSource, ConfigurationError> {
+        if self.id.is_empty() { return Err(ConfigurationError::EmptySourceId); }
+        if !ids.insert(self.id.clone()) { return Err(ConfigurationError::DuplicateSourceId(self.id)); }
+        check_argv(&self.command, format!("Source {} command", self.id))?;
+        if let Some(preview) = &self.preview { check_argv(preview, format!("Source {} preview command", self.id))?; }
+        let key = self.key.as_ref().map(|raw| {
+            if self.hidden { return Err(ConfigurationError::HiddenSourceKey(self.id.clone())); }
+            add_key(raw, keys)
+        }).transpose()?;
+        Ok(MenuSource { id: SourceId(self.id), label: self.label, key, raw_key: self.key, command: self.command,
+            format: self.format, prompt: self.prompt, preview: self.preview, hidden: self.hidden })
+    }
+}
+
+impl RawBinding {
+    fn parse(self, sources: &[MenuSource], ids: &mut HashSet<String>, keys: &mut HashSet<KeyChord>) -> Result<MenuBinding, ConfigurationError> {
+        let key = add_key(&self.key, keys)?;
+        if let Some(id) = &self.id {
+            if id.is_empty() { return Err(ConfigurationError::EmptyBindingId { key: self.key }); }
+            if !ids.insert(id.clone()) { return Err(ConfigurationError::DuplicateBindingId(id.clone())); }
+        }
+        let target = |id: Option<String>| -> Result<&MenuSource, ConfigurationError> {
+            let id = id.ok_or_else(|| ConfigurationError::MissingSource { key: self.key.clone() })?;
+            sources.iter().find(|s| s.id.as_str() == id)
+                .ok_or_else(|| ConfigurationError::UnknownSource { key: self.key.clone(), source: id })
+        };
+        let action = match self.action {
+            RawAction::Accept => BindingAction::Accept,
+            RawAction::Copy => BindingAction::Copy,
+            RawAction::Reload => BindingAction::Reload,
+            RawAction::TogglePreview => BindingAction::TogglePreview,
+            RawAction::Run { command, reload } => {
+                let command = command.unwrap_or_default();
+                check_argv(&command, format!("Run binding {} command", self.key))?;
+                BindingAction::Run { command, reload }
+            }
+            RawAction::Source { source } => {
+                let source = target(source)?;
+                if source.hidden {
+                    return Err(ConfigurationError::HiddenSourceTarget { key: self.key, source: source.id.to_string() });
+                }
+                BindingAction::Source { source: source.id.clone() }
+            }
+            RawAction::Push { source } => BindingAction::Push { source: target(source)?.id.clone() },
+        };
+        let restrictions = self.sources.map(|ids| {
+            if ids.is_empty() { return Err(ConfigurationError::EmptySources { key: self.key.clone() }); }
+            ids.into_iter().map(|id| sources.iter().find(|s| s.id.as_str() == id).map(|s| s.id.clone())
+                .ok_or_else(|| ConfigurationError::UnknownRestriction { key: self.key.clone(), source: id })).collect()
+        }).transpose()?;
+        Ok(MenuBinding { key, id: self.id, label: self.label, action, raw_key: self.key, sources: restrictions })
+    }
+}
+
+fn check_argv(argv: &[String], entry: String) -> Result<(), ConfigurationError> {
+    if argv.first().is_none_or(String::is_empty) { return Err(ConfigurationError::MissingProgram { entry }); }
+    if argv.iter().any(|a| a.contains('\0')) { return Err(ConfigurationError::CommandNul { entry }); }
     Ok(())
 }
 
-fn add_key(raw: &str, keys: &mut HashSet<KeyChord>) -> Result<(), ConfigurationError> {
+fn add_key(raw: &str, keys: &mut HashSet<KeyChord>) -> Result<KeyChord, ConfigurationError> {
     let chord = KeyChord::parse(raw)?;
-    if chord.is_reserved() { return error(format!("{raw} is reserved for editing and navigation.")); }
-    if !keys.insert(chord) { return error(format!("Duplicate binding: {raw}")); }
-    Ok(())
+    if chord.is_reserved() { return Err(ConfigurationError::ReservedChord(raw.into())); }
+    if !keys.insert(chord.clone()) { return Err(ConfigurationError::DuplicateChord(raw.into())); }
+    Ok(chord)
 }
 
 impl MenuBinding {
-    /// A binding restricted to sources never applies to piped stdin (`None`).
-    pub fn applies(&self, source_id: Option<&str>) -> bool {
+    pub fn applies(&self, source_id: Option<&SourceId>) -> bool {
         match (&self.sources, source_id) {
             (None, _) => true,
-            (Some(sources), Some(id)) => sources.iter().any(|s| s == id),
+            (Some(sources), Some(id)) => sources.contains(id),
             (Some(_), None) => false,
         }
     }
 
-    /// Reported as the context's `action` and MMENU_ACTION.
     pub fn action_name(&self) -> &str {
-        self.id.as_deref().or(self.label.as_deref()).unwrap_or(&self.key)
+        self.id.as_deref().or(self.label.as_deref()).unwrap_or(&self.raw_key)
     }
 }
 
 const NAMED_KEYS: [&str; 6] = ["enter", "escape", "tab", "up", "down", "space"];
 
 impl KeyChord {
-    /// `[cmd+][ctrl+][alt+][shift+]key` in any modifier order, case-insensitive. A single
-    /// character key needs cmd, ctrl or alt.
     pub fn parse(raw: &str) -> Result<KeyChord, ConfigurationError> {
         let lowered = raw.to_lowercase();
         let parts: Vec<&str> = lowered.split('+').collect();
         let (key, modifiers) = parts.split_last().expect("split yields at least one part");
         if parts.contains(&"") || (key.chars().count() != 1 && !NAMED_KEYS.contains(key)) {
-            return error(format!("Invalid key chord: {raw}"));
+            return Err(ConfigurationError::InvalidChord(raw.into()));
         }
         let unique: HashSet<_> = modifiers.iter().collect();
         if unique.len() != modifiers.len() || !modifiers.iter().all(|m| ["cmd", "ctrl", "alt", "shift"].contains(m)) {
-            return error(format!("Use the cmd, ctrl, alt, or shift modifiers in {raw}."));
+            return Err(ConfigurationError::InvalidModifiers(raw.into()));
         }
         let has = |m: &str| modifiers.contains(&m);
         let chord = KeyChord { key: (*key).to_owned(), command: has("cmd"), control: has("ctrl"),
                                option: has("alt"), shift: has("shift") };
         if !chord.command && !chord.control && !chord.option && key.chars().count() == 1 {
-            return error(format!("Bindings need a modifier: {raw}"));
+            return Err(ConfigurationError::MissingModifier(raw.into()));
         }
         Ok(chord)
     }
 
-    /// Keys the input field and list keep for editing and navigation.
     fn is_reserved(&self) -> bool {
         let key = self.key.as_str();
         match (self.command, self.control, self.option) {
@@ -277,180 +408,4 @@ impl KeyChord {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse(json: &str) -> MenuConfiguration { serde_json::from_str(json).unwrap() }
-
-    #[test]
-    fn minimal_configuration() {
-        let config = parse("{}");
-        config.validate().unwrap();
-        assert!(config.sources.is_empty());
-        assert_eq!(config.marks, MarkScope::Level);
-    }
-
-    #[test]
-    fn unknown_fields_are_ignored() {
-        parse(r#"{"future":1,"sources":[{"id":"a","label":"A","command":["echo"],"x":true}]}"#).validate().unwrap();
-    }
-
-    #[test]
-    fn invalid_configuration() {
-        for json in [
-            r#"{"bindings":[{"key":"cmd+a","action":"copy"}]}"#,
-            r#"{"bindings":[{"key":"cmd+d","action":"run"}]}"#,
-            r#"{"bindings":[{"key":"cmd+1","action":"source","source":"missing"}]}"#,
-            r#"{"sources":[{"id":"a","label":"A","key":"cmd+1","command":["echo"]}],"bindings":[{"key":"cmd+1","action":"copy"}]}"#,
-            r#"{"preview":[]}"#,
-        ] {
-            assert!(parse(json).validate().is_err(), "{json}");
-        }
-    }
-
-    #[test]
-    fn binding_ids_name_the_action_independently_of_labels() {
-        let config = parse(r#"{"bindings":[{"key":"ctrl+v","id":"split-right","label":"Split right","action":"accept"},{"key":"cmd+d","label":"Star","action":"accept"},{"key":"cmd+e","action":"accept"}]}"#);
-        config.validate().unwrap();
-        assert_eq!(config.bindings.iter().map(MenuBinding::action_name).collect::<Vec<_>>(), ["split-right", "Star", "cmd+e"]);
-        let duplicate = parse(r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#);
-        assert!(duplicate.validate().is_err());
-    }
-
-    #[test]
-    fn chord_parsing() {
-        assert_eq!(KeyChord::parse("shift+cmd+r"), KeyChord::parse("cmd+shift+r"));
-        assert_eq!(KeyChord::parse("cmd+shift+r").unwrap().display(), "⇧⌘R");
-        assert_eq!(KeyChord::parse("Ctrl+Enter").unwrap().display(), "⌃↩");
-        for bad in ["cmd+cmd+r", "r", "cmd+", "cmd+foo", "hyper+r"] {
-            assert!(KeyChord::parse(bad).is_err(), "{bad}");
-        }
-        assert!(KeyChord::parse("enter").unwrap().is_reserved());
-        assert!(KeyChord::parse("ctrl+n").unwrap().is_reserved());
-        assert!(KeyChord::parse("ctrl+shift+n").unwrap().is_reserved());
-        assert!(!KeyChord::parse("ctrl+alt+n").unwrap().is_reserved());
-        assert!(!KeyChord::parse("cmd+e").unwrap().is_reserved());
-    }
-
-    #[test]
-    fn push_levels_decode() {
-        let config = parse(r#"
-        {"marks":"global","sources":[
-          {"id":"repos","label":"Repositories","prompt":"Repos","command":["/bin/echo"]},
-          {"id":"worktrees","label":"Worktrees","hidden":true,"preview":["/bin/echo","wt"],"command":["/bin/echo"],"format":"jsonl"}],
-         "bindings":[{"key":"ctrl+w","id":"worktrees","label":"Worktrees","action":"push","source":"worktrees","sources":["repos"]},
-                     {"key":"ctrl+v","id":"split","action":"accept"}]}"#);
-        config.validate().unwrap();
-        assert_eq!(config.marks, MarkScope::Global);
-        let (repos, worktrees) = (&config.sources[0], &config.sources[1]);
-        assert!(repos.prompt.as_deref() == Some("Repos") && repos.preview.is_none() && !repos.hidden);
-        assert!(worktrees.hidden && worktrees.prompt.is_none() && worktrees.format == InputFormat::Jsonl);
-        assert_eq!(worktrees.preview.as_deref(), Some(&["/bin/echo".to_owned(), "wt".to_owned()][..]));
-        assert_eq!(config.bindings[0].action, BindingAction::Push);
-        assert!(config.bindings[0].applies(Some("repos")) && !config.bindings[0].applies(Some("worktrees")));
-        assert!(!config.bindings[0].applies(None), "restricted bindings do not apply to piped stdin");
-        assert!(config.bindings[1].applies(Some("worktrees")) && config.bindings[1].applies(None));
-        assert_eq!(config.root_source(), Some("repos"));
-        assert_eq!(config.source(Some("worktrees")).map(|s| s.label.as_str()), Some("Worktrees"));
-    }
-
-    #[test]
-    fn only_hidden_sources_means_the_root_reads_stdin() {
-        let config = parse(r#"{"sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}],"bindings":[{"key":"ctrl+w","action":"push","source":"w"}]}"#);
-        config.validate().unwrap();
-        assert_eq!(config.root_source(), None);
-        let initial = parse(r#"{"initialSource":"w","sources":[{"id":"w","label":"W","hidden":true,"command":["/bin/echo"]}]}"#);
-        initial.validate().unwrap();
-        assert_eq!(initial.root_source(), Some("w"));
-    }
-
-    #[test]
-    fn invalid_push_configuration() {
-        for json in [r#"{"marks":"shared"}"#, r#"{"sources":[{"id":"a","label":"A","hidden":"yes","command":["echo"]}]}"#] {
-            assert!(serde_json::from_str::<MenuConfiguration>(json).is_err(), "{json}");
-        }
-        let source = r#"{"id":"a","label":"A","command":["echo"]}"#;
-        let hidden = r#"{"id":"h","label":"H","hidden":true,"command":["echo"]}"#;
-        for json in [
-            format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"push"}}]}}"#),
-            format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"push","source":"missing"}}]}}"#),
-            format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":[]}}]}}"#),
-            format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"copy","sources":["missing"]}}]}}"#),
-            format!(r#"{{"sources":[{source},{hidden}],"bindings":[{{"key":"cmd+2","action":"source","source":"h"}}]}}"#),
-            r#"{"sources":[{"id":"h","label":"H","hidden":true,"key":"cmd+2","command":["echo"]}]}"#.to_owned(),
-            r#"{"sources":[{"id":"a","label":"A","preview":[],"command":["echo"]}]}"#.to_owned(),
-            format!(r#"{{"sources":[{source},{source}]}}"#),
-            format!(r#"{{"initialSource":"missing","sources":[{source}]}}"#),
-        ] {
-            assert!(parse(&json).validate().is_err(), "{json}");
-        }
-    }
-
-    #[test]
-    fn errors_name_the_rejected_item() {
-        let source = r#"{"id":"a","label":"A","command":["echo"]}"#;
-        for (json, message) in [
-            (format!(r#"{{"sources":[{source},{source}]}}"#), "Duplicate source ID: a"),
-            (r#"{"sources":[{"id":"","label":"A","command":["echo"]}]}"#.to_owned(), "Source IDs cannot be empty."),
-            (format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"push","source":"b"}}]}}"#),
-             "Binding ctrl+w references unknown source b."),
-            (format!(r#"{{"sources":[{source}],"bindings":[{{"key":"ctrl+w","action":"source"}}]}}"#),
-             "Binding ctrl+w needs a source."),
-            (r#"{"bindings":[{"key":"ctrl+v","id":"","action":"accept"}]}"#.to_owned(), "Binding ctrl+v has an empty ID."),
-            (r#"{"bindings":[{"key":"ctrl+n","action":"accept"}]}"#.to_owned(), "ctrl+n is reserved for editing and navigation."),
-            (r#"{"bindings":[{"key":"hyper+r","action":"accept"}]}"#.to_owned(),
-             "Use the cmd, ctrl, alt, or shift modifiers in hyper+r."),
-            (r#"{"bindings":[{"key":"ctrl+v","id":"x","action":"accept"},{"key":"ctrl+s","id":"x","action":"accept"}]}"#.to_owned(),
-             "Duplicate binding ID: x"),
-        ] {
-            assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
-        }
-    }
-
-    #[test]
-    fn commands_without_a_runnable_program_fail_at_load() {
-        let source = |field: &str| format!(r#"{{"sources":[{{"id":"a","label":"A",{field}}}]}}"#);
-        for (json, message) in [
-            (source(r#""command":[""]"#), "Source a command needs a program to run."),
-            (source(r#""command":[]"#), "Source a command needs a program to run."),
-            (source(r#""command":["echo","a\u0000b"]"#), "Source a command contains a NUL character."),
-            (source(r#""command":["echo"],"preview":[""]"#), "Source a preview command needs a program to run."),
-            (r#"{"preview":["","x"]}"#.to_owned(), "Preview command needs a program to run."),
-            (r#"{"bindings":[{"key":"ctrl+r","action":"run","command":[""]}]}"#.to_owned(),
-             "Run binding ctrl+r command needs a program to run."),
-            (r#"{"bindings":[{"key":"ctrl+r","action":"run"}]}"#.to_owned(),
-             "Run binding ctrl+r command needs a program to run."),
-        ] {
-            assert_eq!(parse(&json).validate(), Err(ConfigurationError(message.into())), "{json}");
-        }
-    }
-
-    #[test]
-    fn command_chords_are_listed_once_each() {
-        let config = parse(r#"{"sources":[{"id":"a","label":"A","key":"cmd+1","command":["echo"]},{"id":"b","label":"B","key":"ctrl+2","command":["echo"]}],
-            "bindings":[{"key":"Shift+Cmd+R","action":"accept"},{"key":"ctrl+e","action":"accept"},{"key":"cmd+e","action":"copy"}]}"#);
-        config.validate().unwrap();
-        assert_eq!(config.command_chords().collect::<Vec<_>>(), ["cmd+1", "Shift+Cmd+R", "cmd+e"]);
-    }
-
-    #[test]
-    fn multi_and_reload_are_off_unless_true() {
-        for (json, multi) in [("{}", false), (r#"{"multi":null}"#, false), (r#"{"multi":false}"#, false), (r#"{"multi":true}"#, true)] {
-            assert_eq!(parse(json).multi, multi, "{json}");
-        }
-        let binding = |extra: &str| parse(&format!(r#"{{"bindings":[{{"key":"ctrl+d","action":"run","command":["x"]{extra}}}]}}"#)).bindings[0].reload;
-        for (extra, reload) in [("", false), (r#","reload":null"#, false), (r#","reload":false"#, false), (r#","reload":true"#, true)] {
-            assert_eq!(binding(extra), reload, "{extra}");
-        }
-        assert!(serde_json::from_str::<MenuConfiguration>(r#"{"multi":"yes"}"#).is_err());
-    }
-
-    #[test]
-    fn former_warm_theme_name_still_validates() {
-        for theme in ["rex", "native", "warm"] {
-            parse(&format!(r#"{{"theme":"{theme}"}}"#)).validate().unwrap();
-        }
-        assert_eq!(parse(r#"{"theme":"warm"}"#).theme, Some(Theme::Rex));
-        assert!(serde_json::from_str::<MenuConfiguration>(r#"{"theme":"sepia"}"#).is_err());
-    }
-}
+mod tests;

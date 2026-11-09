@@ -3,7 +3,7 @@
 use std::io::IsTerminal;
 
 use clap::{Parser, ValueEnum};
-use rmenu_core::config::{InputFormat, MenuConfiguration, Theme};
+use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::Options;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -77,26 +77,48 @@ pub struct Launch {
     pub appearance: Appearance,
 }
 
-impl Cli {
-    /// Reads the configuration and checks what clap can't. `stdin_is_tty` is passed in so tests
-    /// don't depend on how they are run.
-    pub fn launch(self, stdin_is_tty: bool) -> Result<Launch, String> {
-        let mut configuration = match &self.config {
-            Some(path) => {
-                let bytes = std::fs::read(path).map_err(|e| format!("{path}: {e}"))?;
-                serde_json::from_slice::<MenuConfiguration>(&bytes).map_err(|e| format!("{path}: {e}"))?
+#[derive(Debug)]
+pub enum LaunchError {
+    Read { path: String, source: std::io::Error },
+    Configuration { path: Option<String>, source: ConfigurationError },
+    MissingInput,
+}
+
+impl std::fmt::Display for LaunchError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read { path, source } => write!(f, "{path}: {source}"),
+            Self::Configuration { path, source } => {
+                if let Some(path) = path { write!(f, "{path}: ")?; }
+                source.fmt(f)
             }
-            None => MenuConfiguration::default(),
+            Self::MissingInput => f.write_str("Pipe input into rmenu, or supply --config with command sources."),
+        }
+    }
+}
+
+impl std::error::Error for LaunchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Read { source, .. } => Some(source),
+            Self::Configuration { source, .. } => Some(source),
+            Self::MissingInput => None,
+        }
+    }
+}
+
+impl Cli {
+    pub fn launch(self, stdin_is_tty: bool) -> Result<Launch, LaunchError> {
+        let bytes = match &self.config {
+            Some(path) => std::fs::read(path).map_err(|source| LaunchError::Read { path: path.clone(), source })?,
+            None => b"{}".to_vec(),
         };
-        if let Some(preview) = self.preview {
-            configuration.preview = Some(vec!["/bin/sh".into(), "-c".into(), preview]);
-        }
-        configuration.validate().map_err(|e| e.0)?;
-        if configuration.root_source().is_none() && stdin_is_tty {
-            return Err("Pipe input into rmenu, or supply --config with command sources.".into());
-        }
-        let multi = self.multi || configuration.multi;
-        let prompt = self.prompt.or_else(|| configuration.prompt.clone()).unwrap_or_else(|| ">".into());
+        let preview = self.preview.map(|preview| vec!["/bin/sh".into(), "-c".into(), preview]);
+        let configuration = MenuConfiguration::parse(&bytes, preview)
+            .map_err(|source| LaunchError::Configuration { path: self.config, source })?;
+        if configuration.root_source().is_none() && stdin_is_tty { return Err(LaunchError::MissingInput); }
+        let multi = self.multi || configuration.multi();
+        let prompt = self.prompt.or_else(|| configuration.prompt().map(str::to_owned)).unwrap_or_else(|| ">".into());
         let input = match self.input {
             Input::Lines => InputFormat::Lines,
             Input::Jsonl => InputFormat::Jsonl,
@@ -129,7 +151,7 @@ fn warnings(configuration: &MenuConfiguration) -> Vec<String> {
 
 /// Parses the process's argv; prints help, version and usage errors and exits as clap does.
 /// Prints a warning on stderr for each cmd chord.
-pub fn parse() -> Result<Launch, String> {
+pub fn parse() -> Result<Launch, LaunchError> {
     let launch = Cli::parse().launch(std::io::stdin().is_terminal())?;
     for warning in warnings(&launch.options.configuration) { eprintln!("rmenu: {warning}"); }
     Ok(launch)
@@ -216,7 +238,14 @@ mod tests {
     #[test]
     fn a_tty_stdin_without_sources_is_refused() {
         let error = parse(&[]).unwrap().launch(true).unwrap_err();
-        assert_eq!(error, "Pipe input into rmenu, or supply --config with command sources.");
+        assert!(matches!(error, LaunchError::MissingInput));
+    }
+
+    #[test]
+    fn config_read_errors_keep_the_path_and_io_error() {
+        let error = parse(&["--config", ""]).unwrap().launch(false).unwrap_err();
+        assert!(matches!(error, LaunchError::Read { path, source }
+            if path.is_empty() && source.kind() == std::io::ErrorKind::NotFound));
     }
 
     #[test]
@@ -227,13 +256,19 @@ mod tests {
         std::fs::write(&path, r#"{"prompt":"Pick","multi":true,"sources":[{"id":"a","label":"A","command":["true"]}]}"#).unwrap();
         let launch = parse(&["--config", path.to_str().unwrap(), "--preview", "cat \"$MMENU_VALUE\""]).unwrap().launch(true).unwrap();
         let o = &launch.options;
-        assert_eq!(o.configuration.preview.as_deref(), Some(&["/bin/sh".to_owned(), "-c".into(), "cat \"$MMENU_VALUE\"".into()][..]));
+        assert_eq!(o.configuration.preview(), Some(&["/bin/sh".to_owned(), "-c".into(), "cat \"$MMENU_VALUE\"".into()][..]));
         assert_eq!((o.prompt.as_str(), o.multi), ("Pick", true));
         let flagged = parse(&["--config", path.to_str().unwrap(), "--prompt", "Mine"]).unwrap().launch(true).unwrap();
         assert_eq!(flagged.options.prompt, "Mine");
+        std::fs::write(&path, r#"{"preview":[]}"#).unwrap();
+        let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
+        assert!(matches!(error, LaunchError::Configuration { path: Some(ref file), source: ConfigurationError::MissingProgram { ref entry } }
+            if file == path.to_str().unwrap() && entry == "Preview command"));
+        let overridden = parse(&["--config", path.to_str().unwrap(), "--preview", "echo"]).unwrap().launch(false).unwrap();
+        assert_eq!(overridden.options.configuration.preview(), Some(["/bin/sh".into(), "-c".into(), "echo".into()].as_slice()));
         std::fs::write(&path, r#"{"theme":"sepia"}"#).unwrap();
         let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
-        assert!(error.contains("sepia"));
+        assert!(matches!(error, LaunchError::Configuration { source: ConfigurationError::Json(_), .. }));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -116,17 +116,17 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
 
 fn source_strip(menu: &Menu, c: &Palette) -> El {
     let model = &menu.model;
-    let sources: Vec<_> = model.options().configuration.sources.iter().filter(|s| !s.hidden).collect();
+    let sources: Vec<_> = model.options().configuration.sources().iter().filter(|s| !s.hidden).collect();
     if sources.len() < 2 || model.depth() > 0 { return el(); }
     let mut strip = row().h(32.0).px(8.0).gap(4.0).center_y();
     for source in sources {
-        let active = model.source_id() == Some(source.id.as_str());
+        let active = model.source_id() == Some(&source.id);
         let id = source.id.clone();
         let mut button = row().key(format!("source/{}", source.id)).h(24.0).px(8.0).gap(6.0).radius(9.0).center_y()
             .fill(if active { c.input } else { Color::TRANSPARENT })
             .on_press_tx(move |m: &mut Menu, tx: &mut Tx| m.handle(Event::SwitchSource(id.clone()), tx))
             .child(text(source.label.clone()).font(CHIP).color(if active { c.foreground } else { c.secondary }));
-        if let Some(chord) = source.key.as_deref().and_then(|k| KeyChord::parse(k).ok()) {
+        if let Some(chord) = source.key.as_ref() {
             button = button.child(text(chord.display()).font(CHIP).color(c.secondary.alpha(0.6)));
         }
         strip = strip.child(button);
@@ -237,9 +237,9 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
         .child(keycap_button(back, "Esc", true, c)
             .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Back), tx)))
         .child(text(status).font(SMALL).color(if failed { c.error } else { c.secondary }).truncate().grow(1.0).min_w(0.0));
-    let bindings: Vec<(usize, &str, String)> = model.options().configuration.bindings.iter().enumerate()
+    let bindings: Vec<(usize, &str, String)> = model.options().configuration.bindings().iter().enumerate()
         .filter(|(_, b)| b.applies(model.source_id()))
-        .filter_map(|(i, b)| Some((i, b.label.as_deref()?, KeyChord::parse(&b.key).map(|k| k.display()).unwrap_or_else(|_| b.key.clone()))))
+        .filter_map(|(i, b)| Some((i, b.label.as_deref()?, b.key.display())))
         .collect();
     // Esc, Choose and a readable status always fit: what's left goes to bindings, labelled
     // when they all fit that way, keycaps only when that's what fits, the rightmost dropped

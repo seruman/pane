@@ -7,12 +7,11 @@ use crate::items::Items;
 use std::time::Duration;
 
 use crate::command::{CommandResult, Limits};
-use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource};
+use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource, SourceId};
 use crate::item::{ActionContext, MenuItem, PathEntry};
 use crate::search::SearchIndex;
 use crate::selection::MenuSelection;
 
-/// What the command line decided; `MenuConfiguration` is already validated.
 #[derive(Clone, Debug)]
 pub struct Options {
     pub configuration: MenuConfiguration,
@@ -133,7 +132,7 @@ pub enum Event {
     ToggleRow(usize),
     /// Run the configuration's binding at this index (`configuration.bindings[i]`).
     Perform(usize),
-    SwitchSource(String),
+    SwitchSource(SourceId),
     StdinItems(Vec<MenuItem>),
     StdinDone,
     StdinFailed(String),
@@ -147,7 +146,7 @@ pub enum Event {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
     Perform(usize),
-    SwitchSource(String),
+    SwitchSource(SourceId),
 }
 
 /// How a nonzero exit is shown: `Command exited 3: <first 2 KiB of stderr, trimmed>`.
@@ -184,7 +183,7 @@ struct Shown {
 /// A level the user pushed away from, kept exactly as presented. Popping restores it
 /// without re-running its command.
 struct Level {
-    source_id: Option<String>,
+    source_id: Option<SourceId>,
     store: Store,
     shown: Shown,
     query: String,
@@ -230,7 +229,7 @@ struct Operation {
 /// Enter or a push pressed while the typed query's results were still being computed.
 enum Intent {
     Accept(String),
-    Push(MenuBinding),
+    Push(SourceId),
 }
 
 pub struct Model {
@@ -239,7 +238,7 @@ pub struct Model {
     next_token: Token,
 
     levels: Vec<Level>,
-    source_id: Option<String>,
+    source_id: Option<SourceId>,
     store: Store,
     shown: Shown,
     query: String,
@@ -303,7 +302,7 @@ impl Model {
             pending_intent: None,
             closing: false,
         };
-        match model.options.configuration.source(model.options.configuration.root_source()).cloned() {
+        match model.options.configuration.root_source().cloned() {
             Some(source) => {
                 model.source_id = Some(source.id.clone());
                 model.pending_selection_reset = true;
@@ -377,7 +376,7 @@ impl Model {
     pub fn shown_query(&self) -> &str { self.shown.query.as_deref().unwrap_or("") }
 
     /// The current level's source ID; None for piped stdin.
-    pub fn source_id(&self) -> Option<&str> { self.source_id.as_deref() }
+    pub fn source_id(&self) -> Option<&SourceId> { self.source_id.as_ref() }
 
     /// How many levels are pushed above the root.
     pub fn depth(&self) -> usize { self.levels.len() }
@@ -386,17 +385,15 @@ impl Model {
     pub fn target(&self, chord: &KeyChord) -> Option<Target> {
         let configuration = &self.options.configuration;
         if self.levels.is_empty() {
-            let source = configuration.sources.iter().filter(|s| !s.hidden).find(|s| {
-                s.key.as_deref().and_then(|k| KeyChord::parse(k).ok()).as_ref() == Some(chord)
-            });
+            let source = configuration.sources().iter().filter(|s| !s.hidden).find(|s| s.key.as_ref() == Some(chord));
             if let Some(source) = source {
                 return Some(Target::SwitchSource(source.id.clone()));
             }
         }
         configuration
-            .bindings
+            .bindings()
             .iter()
-            .position(|b| b.applies(self.source_id.as_deref()) && KeyChord::parse(&b.key).ok().as_ref() == Some(chord))
+            .position(|b| b.applies(self.source_id.as_ref()) && &b.key == chord)
             .map(Target::Perform)
     }
 
@@ -434,7 +431,7 @@ impl Model {
             Event::Highlight(row) => self.highlight(row),
             Event::ToggleRow(row) => self.toggle_row(row),
             Event::Perform(index) => {
-                if let Some(binding) = self.options.configuration.bindings.get(index).cloned() {
+                if let Some(binding) = self.options.configuration.bindings().get(index).cloned() {
                     self.perform(binding);
                 }
             }
@@ -509,10 +506,10 @@ impl Model {
         self.next_token
     }
 
-    fn source(&self) -> Option<&MenuSource> { self.options.configuration.source(self.source_id.as_deref()) }
+    fn source(&self) -> Option<&MenuSource> { self.source_id.as_ref().and_then(|id| self.options.configuration.source(id)) }
 
     fn preview_command(&self) -> Option<Vec<String>> {
-        self.source().and_then(|s| s.preview.clone()).or_else(|| self.options.configuration.preview.clone())
+        self.source().and_then(|s| s.preview.clone()).or_else(|| self.options.configuration.preview().map(<[String]>::to_vec))
     }
 
     fn preview_visible(&self) -> bool { self.preview_enabled && self.preview_command().is_some() }
@@ -576,10 +573,10 @@ impl Model {
     }
 
     fn perform(&mut self, binding: MenuBinding) {
-        if !binding.applies(self.source_id.as_deref()) {
+        if !binding.applies(self.source_id.as_ref()) {
             return;
         }
-        match binding.action {
+        match &binding.action {
             BindingAction::Accept => self.accept(binding.action_name().to_owned()),
             BindingAction::Copy => {
                 if !self.can_act() {
@@ -594,12 +591,8 @@ impl Model {
                 self.effects.push(Effect::Copy(values.join("\n")));
                 self.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
-            BindingAction::Source => {
-                if let Some(id) = &binding.source {
-                    self.switch_source(id);
-                }
-            }
-            BindingAction::Push => self.push(binding),
+            BindingAction::Source { source } => self.switch_source(source),
+            BindingAction::Push { source } => self.push(source.clone()),
             BindingAction::Reload => self.reload(),
             BindingAction::TogglePreview => {
                 if self.preview_command().is_none() {
@@ -610,34 +603,30 @@ impl Model {
                 self.preview_text.clear();
                 self.update_preview();
             }
-            BindingAction::Run => {
-                let Some(command) = binding.command.clone() else { return };
+            BindingAction::Run { command, reload } => {
                 if self.operation.is_some() || !self.can_act() || self.chosen().is_empty() {
                     self.effects.push(Effect::Beep);
                     return;
                 }
-                self.run_operation(command, binding.action_name().to_owned(), binding.reload);
+                self.run_operation(command.clone(), binding.action_name().to_owned(), *reload);
             }
         }
     }
 
     /// Sibling sources belong to the root; a pushed level's input is its parent's choice.
-    fn switch_source(&mut self, id: &str) {
-        if !self.levels.is_empty() || self.source_id.as_deref() == Some(id) {
+    fn switch_source(&mut self, id: &SourceId) {
+        if !self.levels.is_empty() || self.source_id.as_ref() == Some(id) {
             return;
         }
-        let Some(source) = self.options.configuration.source(Some(id)).filter(|s| !s.hidden).cloned() else {
-            return;
-        };
+        let Some(source) = self.options.configuration.source(id).filter(|s| !s.hidden).cloned() else { return };
         self.source_id = Some(source.id.clone());
         self.pending_selection_reset = true;
         self.load(&source);
     }
 
-    fn push(&mut self, binding: MenuBinding) {
-        let Some(target) = self.options.configuration.source(binding.source.as_deref()).cloned() else { return };
+    fn push(&mut self, source: SourceId) {
         if !self.can_act() && self.can_navigate() {
-            self.pending_intent = Some(Intent::Push(binding));
+            self.pending_intent = Some(Intent::Push(source));
             return;
         }
         if !self.can_act() {
@@ -662,7 +651,8 @@ impl Model {
             chosen: picked,
             stdin_changed,
         });
-        self.source_id = Some(target.id.clone());
+        let target = self.options.configuration.source(&source).expect("validated push source").clone();
+        self.source_id = Some(source);
         self.pending_selection_reset = true;
         self.load(&target);
     }
@@ -732,7 +722,7 @@ impl Model {
         let context = ActionContext {
             action: "source".into(),
             query: self.query.clone(),
-            source: Some(source.id.clone()),
+            source: Some(source.id.to_string()),
             items: self.levels.last().map(|l| l.chosen.clone()).unwrap_or_default(),
             path: self.ancestors(),
         };
@@ -834,9 +824,9 @@ impl Model {
                         return;
                     }
                 }
-                Intent::Push(binding) => {
+                Intent::Push(source) => {
                     let depth = self.levels.len();
-                    self.push(binding);
+                    self.push(source);
                     if self.levels.len() != depth {
                         return;
                     }
@@ -870,7 +860,7 @@ impl Model {
         let context = ActionContext {
             action: "preview".into(),
             query: self.query.clone(),
-            source: self.source_id.clone(),
+            source: self.source_id.as_ref().map(ToString::to_string),
             items: vec![item.clone()],
             path: self.path(vec![item]),
         };
@@ -903,7 +893,7 @@ impl Model {
         let context = ActionContext {
             action: action.clone(),
             query: self.query.clone(),
-            source: self.source_id.clone(),
+            source: self.source_id.as_ref().map(ToString::to_string),
             items: chosen.clone(),
             path: self.path(chosen),
         };
@@ -951,7 +941,7 @@ impl Model {
             self.effects.push(Effect::Beep);
             return;
         }
-        let items = match self.options.configuration.marks {
+        let items = match self.options.configuration.marks() {
             MarkScope::Level => picked.clone(),
             MarkScope::Global => {
                 let marked: Vec<MenuItem> = self
@@ -969,7 +959,7 @@ impl Model {
             let context = ActionContext {
                 action,
                 query: self.query.clone(),
-                source: self.source_id.clone(),
+                source: self.source_id.as_ref().map(ToString::to_string),
                 items,
                 path: self.path(picked),
             };
@@ -1005,14 +995,14 @@ impl Model {
     /// Root to the current level; each ancestor holds what was chosen when it was pushed.
     fn path(&self, current: Vec<MenuItem>) -> Vec<PathEntry> {
         let mut path = self.ancestors();
-        path.push(PathEntry { source: self.source_id.clone(), query: self.query.clone(), items: current });
+        path.push(PathEntry { source: self.source_id.as_ref().map(ToString::to_string), query: self.query.clone(), items: current });
         path
     }
 
     fn ancestors(&self) -> Vec<PathEntry> {
         self.levels
             .iter()
-            .map(|l| PathEntry { source: l.source_id.clone(), query: l.query.clone(), items: l.chosen.clone() })
+            .map(|l| PathEntry { source: l.source_id.as_ref().map(ToString::to_string), query: l.query.clone(), items: l.chosen.clone() })
             .collect()
     }
 }

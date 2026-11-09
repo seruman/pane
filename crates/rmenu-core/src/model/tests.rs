@@ -70,7 +70,10 @@ impl Harness {
     fn toggle(&mut self, row: usize) { self.send(Event::ToggleRow(row)); }
     fn highlight(&mut self, row: usize) { self.send(Event::Highlight(row)); }
     fn perform(&mut self, index: usize) { self.send(Event::Perform(index)); }
-    fn switch(&mut self, id: &str) { self.send(Event::SwitchSource(id.into())); }
+    fn switch(&mut self, id: &str) {
+        let id = self.model.options().configuration.sources().iter().find(|source| source.id.as_str() == id).unwrap().id.clone();
+        self.send(Event::SwitchSource(id));
+    }
 
     fn take(&mut self, kind: TaskKind) -> Task {
         self.tasks.remove(&kind).unwrap_or_else(|| panic!("no running {kind:?} task"))
@@ -286,7 +289,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
     h.switch("b");
     assert_eq!(h.model.preview(), Some(""), "the preview clears as the source switches");
     assert!(cancelled(&h, TaskKind::Preview));
-    assert_eq!(h.model.source_id(), Some("b"));
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("b"));
     assert!(!h.model.can_act());
     h.highlight(0);
     assert_eq!(h.model.highlighted_row(), Some(1));
@@ -376,7 +379,7 @@ fn superseded_source_cannot_publish() {
         assert!(!h.model.can_act(), "during_matching={during_matching}");
         h.load("charlie\n");
         assert_eq!(h.model.result_revision(), revision + 1, "during_matching={during_matching}");
-        assert_eq!(h.model.source_id(), Some("c"), "during_matching={during_matching}");
+        assert_eq!(h.model.source_id().map(SourceId::as_str), Some("c"), "during_matching={during_matching}");
         assert_eq!(h.values(), ["charlie"], "during_matching={during_matching}");
         assert!(h.settled(), "during_matching={during_matching}");
         assert!(!h.model.loading(), "during_matching={during_matching}");
@@ -542,7 +545,7 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     let mut o = options(json!({
         "sources": [src("a", json!({})), src("b", json!({}))],
         "preview": ["show"],
-        "bindings": [{"key": "ctrl+p", "action": "togglePreview"}],
+        "bindings": [{"key": "alt+p", "action": "togglePreview"}],
     }));
     o.query = "a".into();
     let mut h = Harness::new(o);
@@ -711,10 +714,10 @@ fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     let stale = h.source_event(&jsonl(&[("s", "stale")]));
     h.nav(Nav::Back);
     h.perform(1);
-    assert_eq!((h.model.depth(), h.model.source_id()), (1, Some("child")));
+    assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
     h.send(stale);
     h.load(&jsonl(&[("f", "fresh")]));
-    assert_eq!((h.model.depth(), h.model.source_id()), (1, Some("child")));
+    assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
     assert_eq!(h.titles(), ["fresh"]);
 
     // A second push while the child loads is refused, not queued onto stale rows.
@@ -724,7 +727,7 @@ fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     assert_eq!(h.beeps, 1);
     h.load(&jsonl(&[("f", "fresh")]));
     assert!(h.settled());
-    assert_eq!((h.model.depth(), h.model.source_id()), (1, Some("child")));
+    assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
     assert_eq!(h.titles(), ["fresh"]);
 }
 
@@ -797,7 +800,7 @@ fn push_with_no_results_is_a_no_op() {
     h.settle();
     assert_eq!(h.model.result_count(), 0);
     h.perform(0);
-    assert_eq!((h.model.depth(), h.model.source_id()), (0, Some("repos")));
+    assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (0, Some("repos")));
     assert_eq!(h.source_runs("child"), 0);
 }
 
@@ -866,7 +869,7 @@ fn level_restricted_bindings_fire_only_at_their_levels() {
     assert_eq!(h.model.depth(), 1);
     assert_eq!(h.model.target(&chord("ctrl+w")), None, "the repo-level binding is inert in the child");
     h.perform(0);
-    assert_eq!((h.model.depth(), h.model.source_id()), (1, Some("child")));
+    assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
     assert_eq!(h.model.target(&chord("ctrl+o")), Some(Target::Perform(1)));
     h.perform(1);
     assert_eq!(h.context().action, "open-child");
@@ -902,14 +905,14 @@ fn prompt_and_source_keys_follow_the_level() {
     }));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.prompt(), "Repos");
-    assert_eq!(h.model.target(&chord("ctrl+2")), Some(Target::SwitchSource("files".into())));
+    assert!(matches!(h.model.target(&chord("ctrl+2")), Some(Target::SwitchSource(id)) if id.as_str() == "files"));
     h.highlight(1);
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
     assert_eq!(h.model.prompt(), "beta › Worktrees");
     assert_eq!(h.model.target(&chord("ctrl+2")), None, "sibling sources cannot replace a pushed level");
     h.switch("files");
-    assert_eq!(h.model.source_id(), Some("child"));
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("child"));
     assert_eq!(h.model.target(&chord("ctrl+v")), Some(Target::Perform(1)));
     h.nav(Nav::Back);
     assert_eq!(h.model.prompt(), "Repos");
@@ -987,7 +990,7 @@ fn accept_waits_for_a_running_operation() {
 
 #[test]
 fn copy_puts_chosen_values_on_the_clipboard_and_stays_open() {
-    let mut h = operations(json!([{"key": "ctrl+shift+c", "action": "copy"}]));
+    let mut h = operations(json!([{"key": "ctrl+alt+c", "action": "copy"}]));
     h.load("one\ntwo\nthree\n");
     h.toggle(2);
     h.toggle(0);
@@ -1197,11 +1200,22 @@ fn tab_only_advances_in_single_mode() {
 }
 
 #[test]
+fn source_binding_switches_to_its_parsed_target() {
+    let mut h = start(json!({"sources": [src("a", json!({})), src("b", json!({}))],
+        "bindings": [{"key": "ctrl+w", "action": "source", "source": "b"}]}));
+    h.load("alpha\n");
+    h.perform(0);
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("b"));
+    h.load("beta\n");
+    assert_eq!(h.titles(), ["beta"]);
+}
+
+#[test]
 fn source_key_switches_source() {
     let mut h = keys(true);
     let Some(Target::SwitchSource(id)) = h.model.target(&chord("ctrl+2")) else { panic!("ctrl+2 is a source key") };
-    h.switch(&id);
-    assert_eq!(h.model.source_id(), Some("b"));
+    h.send(Event::SwitchSource(id));
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("b"));
 }
 
 #[test]
