@@ -186,10 +186,10 @@ fn sorted_and_unsorted_have_the_same_matches() {
 
 #[test]
 fn highlights_mark_the_matched_characters_as_byte_ranges() {
-    assert_eq!(super::highlights("rune", "github.com/seruman/rune"), vec![19..23]);
-    assert_eq!(super::highlights("", "anything"), vec![]);
-    assert_eq!(super::highlights("zzz", "abc"), vec![]);
-    let ranges = super::highlights("cafe", "Café/x");
+    assert_eq!(highlights("rune", "github.com/seruman/rune"), vec![19..23]);
+    assert_eq!(highlights("", "anything"), vec![]);
+    assert_eq!(highlights("zzz", "abc"), vec![]);
+    let ranges = highlights("cafe", "Café/x");
     assert_eq!(ranges, vec![0..5], "a folded multi-byte character is one whole range");
     assert_eq!(highlights("ser rune", "github.com/seruman/rune"), vec![11..14, 19..23]);
 }
@@ -212,7 +212,7 @@ fn highlights_cover_whole_graphemes() {
 #[test]
 fn item_highlights_follow_the_text_the_row_matched() {
     let marked = |query, item: &MenuItem| {
-        let (title, subtitle) = super::item_highlights(query, item);
+        let (title, subtitle) = item_highlights(query, item);
         let sub = item.subtitle.as_deref().unwrap_or("");
         (
             title.into_iter().map(|r| item.title()[r].to_owned()).collect::<Vec<_>>(),
