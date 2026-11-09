@@ -72,15 +72,6 @@ impl Harness {
         self.tasks.remove(&kind).unwrap_or_else(|| panic!("no running {kind:?} task"))
     }
 
-    fn token(&self, kind: TaskKind) -> Token {
-        match &self.tasks[&kind] {
-            Task::Source { token, .. }
-            | Task::Search { token, .. }
-            | Task::Preview { token, .. }
-            | Task::Operation { token, .. } => *token,
-        }
-    }
-
     /// Runs the live search to completion and returns its event, undelivered.
     fn run_search(&mut self) -> Event {
         let Task::Search { token, index, query, sorted } = self.take(TaskKind::Search) else { unreachable!() };
@@ -112,8 +103,7 @@ impl Harness {
     }
 
     fn fail_source(&mut self, message: &str) {
-        let token = self.token(TaskKind::Source);
-        self.tasks.remove(&TaskKind::Source);
+        let Task::Source { token, .. } = self.take(TaskKind::Source) else { unreachable!() };
         self.send(Event::SourceDone { token, result: Err(message.into()) });
         self.settle();
     }
@@ -124,8 +114,7 @@ impl Harness {
     }
 
     fn finish_operation(&mut self, status: i32, stderr: &str) {
-        let token = self.token(TaskKind::Operation);
-        self.tasks.remove(&TaskKind::Operation);
+        let Task::Operation { token, .. } = self.take(TaskKind::Operation) else { unreachable!() };
         let result = CommandResult { stdout: Vec::new(), stderr: stderr.into(), status };
         self.send(Event::OperationDone { token, result: Ok(result) });
     }
