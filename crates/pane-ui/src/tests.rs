@@ -1,6 +1,6 @@
 use rune::Color;
 
-use crate::{palette_matches, Palette, PaletteEntry, PaletteKey, Theme};
+use crate::{Palette, PaletteEntry, PaletteKey, Theme, palette_matches};
 
 const ENTRIES: &[PaletteEntry] = &[
     PaletteEntry::new("Dark Theme").section("Appearance"),
