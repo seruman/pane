@@ -22,7 +22,7 @@ impl Tone {
         match self {
             Tone::Neutral => theme.text_secondary,
             Tone::Accent => theme.accent_text,
-            Tone::Success => theme.working,
+            Tone::Success => theme.success,
             Tone::Warning => theme.warning,
             Tone::Danger => theme.danger,
         }
@@ -149,7 +149,7 @@ impl Status {
     pub fn color(self, theme: &Theme) -> Color {
         match self {
             Status::Idle => theme.idle,
-            Status::Working => theme.working,
+            Status::Working => theme.success,
             Status::Done => theme.done,
             Status::Blocked => theme.warning,
             Status::Error => theme.danger,

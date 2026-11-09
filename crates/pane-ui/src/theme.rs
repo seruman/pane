@@ -224,7 +224,7 @@ pub struct Theme {
     pub accent_soft_hover: Color,
     pub accent_text: Color,
     pub focus_ring: Color,
-    pub working: Color,
+    pub success: Color,
     pub done: Color,
     pub warning: Color,
     pub danger: Color,
@@ -315,7 +315,7 @@ impl Theme {
                 accent
             },
             focus_ring: accent.alpha(0.9),
-            working: kit.c.success.fg,
+            success: kit.c.success.fg,
             done: accent,
             warning: kit.c.warning.fg,
             danger: kit.c.danger.fg,

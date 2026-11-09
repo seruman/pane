@@ -203,7 +203,7 @@ fn the_theme_and_its_kit_agree_on_the_terminal_colours() {
     );
     assert_eq!(theme.danger, theme.kit.c.danger.fg, "one red");
     assert_eq!(theme.warning, theme.kit.c.warning.fg, "one yellow");
-    assert_eq!(theme.working, theme.kit.c.success.fg, "one green");
+    assert_eq!(theme.success, theme.kit.c.success.fg, "one green");
 }
 
 #[test]
