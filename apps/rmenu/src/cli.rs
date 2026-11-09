@@ -176,10 +176,15 @@ mod tests {
 
     #[test]
     fn informational_flags_exit_cleanly() {
-        for flag in ["--help", "-h", "--version"] {
+        for (flag, kind, expected) in [
+            ("--help", clap::error::ErrorKind::DisplayHelp, "--config"),
+            ("-h", clap::error::ErrorKind::DisplayHelp, "--config"),
+            ("--version", clap::error::ErrorKind::DisplayVersion, env!("CARGO_PKG_VERSION")),
+        ] {
             let error = parse(&[flag]).unwrap_err();
             assert_eq!(error.exit_code(), 0, "{flag}");
-            assert!(!error.to_string().is_empty());
+            assert_eq!(error.kind(), kind, "{flag}");
+            assert!(error.to_string().contains(expected), "{error}");
         }
     }
 
