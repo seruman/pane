@@ -126,6 +126,7 @@ struct Harness {
     /// The live task of each kind: starting one replaces the previous, Cancel removes it.
     tasks: HashMap<TaskKind, Task>,
     started: Vec<Task>,
+    cancelled: Vec<TaskKind>,
     finished: Option<Outcome>,
     copied: Vec<String>,
     beeps: usize,
@@ -141,6 +142,7 @@ impl Harness {
             model,
             tasks: HashMap::new(),
             started: Vec::new(),
+            cancelled: Vec::new(),
             finished: None,
             copied: Vec::new(),
             beeps: 0,
@@ -163,6 +165,7 @@ impl Harness {
                     self.tasks.insert(task.kind(), task);
                 }
                 Effect::Cancel(kind) => {
+                    self.cancelled.push(kind);
                     self.tasks.remove(&kind);
                 }
                 Effect::Copy(text) => self.copied.push(text),
@@ -176,6 +179,7 @@ impl Harness {
     }
 
     fn send(&mut self, event: Event) {
+        self.cancelled.clear();
         let effects = self.model.handle(event);
         self.apply(effects);
     }
@@ -363,10 +367,6 @@ fn chord(raw: &str) -> KeyChord {
     KeyChord::parse(raw).unwrap()
 }
 
-fn cancelled(h: &Harness, kind: TaskKind) -> bool {
-    !h.tasks.contains_key(&kind)
-}
-
 fn env<'a>(env: &'a [(String, String)], key: &str) -> &'a str {
     &env.iter().find(|(k, _)| k == key).unwrap().1
 }
@@ -411,11 +411,14 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
         assert!(!h.model.can_navigate());
     };
 
+    h.query("alp");
+    assert!(h.tasks.contains_key(&TaskKind::Search));
     h.switch("files");
-    assert_eq!(h.model.query(), "a");
+    assert!(h.cancelled.contains(&TaskKind::Search));
+    assert_eq!(h.model.query(), "alp");
     unchanged(&h);
     h.query("al");
-    assert!(cancelled(&h, TaskKind::Search), "no interim search over the empty replacement");
+    assert!(!h.tasks.contains_key(&TaskKind::Search), "no interim search over the empty replacement");
     unchanged(&h);
 
     let done = h.source_event("alpine\nomega\n");
@@ -449,7 +452,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
 
     h.switch("b");
     assert_eq!(h.model.preview(), Some(""), "the preview clears as the source switches");
-    assert!(cancelled(&h, TaskKind::Preview));
+    assert!(h.cancelled.contains(&TaskKind::Preview));
     assert_eq!(h.model.source_id().map(SourceId::as_str), Some("b"));
     assert!(!h.model.can_navigate());
     h.highlight(0);
@@ -729,7 +732,7 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
 
     h.query("al");
     assert_eq!(h.model.preview(), Some("a"), "the last preview stays while the next is fetched");
-    assert!(cancelled(&h, TaskKind::Preview));
+    assert!(h.cancelled.contains(&TaskKind::Preview));
     h.settle();
     assert_eq!(h.model.preview(), Some("a"));
     let (stale, vars) = h.preview_event("al");
@@ -742,7 +745,7 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
 
     h.perform(0);
     assert_eq!(h.model.preview(), None);
-    assert!(cancelled(&h, TaskKind::Preview));
+    assert!(h.cancelled.contains(&TaskKind::Preview));
     h.send(hidden);
     assert_eq!(h.model.preview(), None);
     h.perform(0);
@@ -750,7 +753,7 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
 
     h.switch("b");
     assert_eq!(h.model.preview(), Some(""));
-    assert!(cancelled(&h, TaskKind::Preview));
+    assert!(h.cancelled.contains(&TaskKind::Preview));
     h.load("");
     assert_eq!(h.model.preview(), Some(""));
     assert_eq!(h.model.result_count(), 0);
@@ -871,6 +874,8 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
             h.nav(Nav::Back);
             late
         };
+        assert!(h.cancelled.contains(&TaskKind::Source), "during_matching={during_matching}");
+        assert!(h.cancelled.contains(&TaskKind::Search), "during_matching={during_matching}");
         let revision = h.model.result_revision();
         h.send(late);
         h.settle();
@@ -1101,7 +1106,7 @@ fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
     assert_eq!(h.titles(), ["in alpha"]);
     h.stdin("beta\n");
     h.stdin_done();
-    assert!(cancelled(&h, TaskKind::Search), "root input never searches in the child");
+    assert!(!h.tasks.contains_key(&TaskKind::Search), "root input never searches in the child");
     assert_eq!(h.titles(), ["in alpha"]);
     h.nav(Nav::Back);
     h.settle();
