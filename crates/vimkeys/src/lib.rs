@@ -18,8 +18,8 @@ use rune::{Key, KeyEvent};
 
 use keymap::Lookup;
 pub use keymap::{
-    Command, Find, Hint, HintGroup, HintGroups, Keymap, Motion, NoAction, Object, Operator, Stroke,
-    Table, hint,
+    Command, Find, Hint, HintGroup, HintGroups, Keymap, Motion, NoAction, Object, Operator,
+    PendingCommand, Stroke, Table, hint,
 };
 
 /// The largest count Vim takes, as Vim caps its own. A motion repeats once per count, so a
@@ -45,7 +45,7 @@ pub enum HintsFor {
 
 /// What a key asked the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VimEffect<A> {
+pub enum VimEffect<A, O = A> {
     /// The cursor, selection or search changed, or a key was taken toward a command: repaint,
     /// and scroll the cursor into view.
     Moved,
@@ -60,7 +60,7 @@ pub enum VimEffect<A> {
     /// An app operator ([`Operator::App`]) over `range` of the text: what its motion or object
     /// covered, or the selection. `linewise` when it covers whole lines (`cc`, `cj`, `V…c`).
     Operator {
-        action: A,
+        action: O,
         range: Range<usize>,
         linewise: bool,
     },
@@ -110,8 +110,8 @@ enum Pending<A> {
 /// The state: mode, cursor, selection anchor and whatever keys are half typed, with the keymap
 /// that says what keys do. Positions are byte offsets into the text passed with each key.
 #[derive(Clone, Debug)]
-pub struct Vim<A = NoAction> {
-    keymap: Keymap<A>,
+pub struct Vim<A = NoAction, O = A> {
+    keymap: Keymap<A, O>,
     mode: VimMode,
     cursor: usize,
     anchor: usize,
@@ -120,7 +120,7 @@ pub struct Vim<A = NoAction> {
     count: Option<usize>,
     /// The count the last motion took, for `G`, which reads it as a line number.
     count_was: Option<usize>,
-    pending: Pending<A>,
+    pending: Pending<O>,
     last_find: Option<(Find, char)>,
     /// The character just typed after `f F t T`, for the motion to take.
     last_typed_find: Option<char>,
@@ -144,8 +144,8 @@ impl Default for Vim<NoAction> {
     }
 }
 
-impl<A: Clone> Vim<A> {
-    pub fn new(keymap: Keymap<A>) -> Vim<A> {
+impl<A: Clone, O: Clone> Vim<A, O> {
+    pub fn new(keymap: Keymap<A, O>) -> Vim<A, O> {
         Vim {
             keymap,
             mode: VimMode::Normal,
@@ -183,7 +183,7 @@ impl<A: Clone> Vim<A> {
         self
     }
 
-    pub fn keymap(&self) -> &Keymap<A> {
+    pub fn keymap(&self) -> &Keymap<A, O> {
         &self.keymap
     }
 
@@ -222,7 +222,7 @@ impl<A: Clone> Vim<A> {
     pub fn pending(&self) -> String {
         let count = |n: Option<usize>| n.map(|n| n.to_string()).unwrap_or_default();
         let r = |k: &[Stroke]| self.keymap.render(k);
-        let op_keys = |op: &Option<OpState<A>>| match op {
+        let op_keys = |op: &Option<OpState<O>>| match op {
             Some((_, keys, c)) => format!("{}{}", count(*c), r(keys)),
             None => String::new(),
         };
@@ -276,7 +276,7 @@ impl<A: Clone> Vim<A> {
                     };
                     groups.push((group, vec![hint(&self.keymap.render(keys), "The line")]));
                 }
-                groups.extend(self.keymap.next(Table::Pending, typed));
+                groups.extend(self.keymap.next_pending(typed));
                 Some((header, groups))
             }
             Pending::Object { typed, .. } => Some((
@@ -350,7 +350,7 @@ impl<A: Clone> Vim<A> {
     }
 
     /// Handles `ev` over `text`. `None` when the key means nothing here, so the app can use it.
-    pub fn key(&mut self, ev: &KeyEvent, text: &str) -> Option<VimEffect<A>> {
+    pub fn key(&mut self, ev: &KeyEvent, text: &str) -> Option<VimEffect<A, O>> {
         let b = Buf::new(text);
         if b.n() == 0 {
             return None;
@@ -420,13 +420,13 @@ impl<A: Clone> Vim<A> {
                     return Some(self.operate_lines(op, count, text, &b));
                 }
                 let line_prefix = keys.starts_with(&typed);
-                match self.keymap.lookup(Table::Pending, &typed) {
-                    Lookup::Exact(Command::Motion(m)) => {
+                match self.keymap.lookup_pending(&typed) {
+                    Lookup::Exact(PendingCommand::Motion(m)) => {
                         self.finish_motion(m, typed, Some((op, keys, count)), text, &b)
                     }
-                    Lookup::Exact(c @ (Command::Inner | Command::Around)) => {
+                    Lookup::Exact(c @ (PendingCommand::Inner | PendingCommand::Around)) => {
                         self.pending = Pending::Object {
-                            around: matches!(c, Command::Around),
+                            around: matches!(c, PendingCommand::Around),
                             op: Some((op, keys, count)),
                             opened: (self.count.take(), typed),
                             typed: Vec::new(),
@@ -488,7 +488,7 @@ impl<A: Clone> Vim<A> {
         mut typed: Vec<Stroke>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A>> {
+    ) -> Option<VimEffect<A, O>> {
         let first = typed.is_empty();
         typed.push(stroke);
         match self.keymap.lookup(self.table(), &typed) {
@@ -508,11 +508,11 @@ impl<A: Clone> Vim<A> {
 
     fn run(
         &mut self,
-        command: Command<A>,
+        command: Command<A, O>,
         keys: Vec<Stroke>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A>> {
+    ) -> Option<VimEffect<A, O>> {
         let visual = self.visual();
         match command {
             Command::Motion(m) => self.finish_motion(m, keys, None, text, b),
@@ -601,10 +601,10 @@ impl<A: Clone> Vim<A> {
         &mut self,
         m: Motion,
         keys: Vec<Stroke>,
-        op: Option<OpState<A>>,
+        op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A>> {
+    ) -> Option<VimEffect<A, O>> {
         let find = match m {
             Motion::Find(find) => match self.last_typed_find.take() {
                 Some(c) => Some((find, c)),
@@ -783,10 +783,10 @@ impl<A: Clone> Vim<A> {
         &mut self,
         target: usize,
         kind: Kind,
-        op: Option<OpState<A>>,
+        op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A>> {
+    ) -> Option<VimEffect<A, O>> {
         let cur = b.index(self.cursor);
         self.pending = Pending::None;
         if let Some((op, _, _)) = op {
@@ -820,10 +820,10 @@ impl<A: Clone> Vim<A> {
         &mut self,
         object: Object,
         around: bool,
-        op: Option<OpState<A>>,
+        op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A>> {
+    ) -> Option<VimEffect<A, O>> {
         let count =
             self.count.take().unwrap_or(1) * op.as_ref().and_then(|(_, _, c)| *c).unwrap_or(1);
         self.reset_pending();
@@ -848,11 +848,11 @@ impl<A: Clone> Vim<A> {
     /// typed after the operator (`2yy`, `y2y`).
     fn operate_lines(
         &mut self,
-        op: Operator<A>,
+        op: Operator<O>,
         count: Option<usize>,
         text: &str,
         b: &Buf,
-    ) -> VimEffect<A> {
+    ) -> VimEffect<A, O> {
         let n = (count.unwrap_or(1) * self.count.take().unwrap_or(1)).clamp(1, MAX_COUNT);
         self.reset_pending();
         let cur = b.index(self.cursor);
@@ -863,12 +863,12 @@ impl<A: Clone> Vim<A> {
 
     fn apply(
         &mut self,
-        op: Operator<A>,
+        op: Operator<O>,
         range: Range<usize>,
         lines: bool,
         text: &str,
         b: &Buf,
-    ) -> VimEffect<A> {
+    ) -> VimEffect<A, O> {
         self.reset_pending();
         self.mode = VimMode::Normal;
         self.cursor = b.byte(b.index(range.start));
@@ -907,7 +907,7 @@ impl<A: Clone> Vim<A> {
         }
     }
 
-    fn search_key(&mut self, ev: &KeyEvent, text: &str, b: &Buf) -> Option<VimEffect<A>> {
+    fn search_key(&mut self, ev: &KeyEvent, text: &str, b: &Buf) -> Option<VimEffect<A, O>> {
         match &ev.key {
             Key::Escape => {
                 self.mode = self.anchor_search;

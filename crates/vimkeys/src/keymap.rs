@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | [`Table::Normal`] | nothing half typed | motions, operators, mode switches, app actions |
 //! | [`Table::Visual`] | `v` or `V` | motions; operators act on the selection |
-//! | [`Table::Pending`] | after an operator | motions, and `i` `a` to start a text object |
+//! | pending ([`Keymap::bind_pending`]) | after an operator | motions and text-object prefixes |
 //! | objects ([`Keymap::object`]) | after `i` or `a` | text objects |
 //!
 //! [`Keymap::vim`] holds Vim's own keys; an app adds its actions and operators to it, or rebinds
@@ -222,13 +222,13 @@ pub enum Operator<A> {
 
 /// What a binding does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Command<A> {
+pub enum Command<A, O = A> {
     Motion(Motion),
     /// Waits for a motion or object in Normal mode (`yw`, `yiw`); its own keys again take the
     /// line (`yy`, `gyy`). In Visual mode it takes the selection.
-    Operator(Operator<A>),
+    Operator(Operator<O>),
     /// The operator on the cursor's line, or as many as the count says (`Y`).
-    Lines(Operator<A>),
+    Lines(Operator<O>),
     /// A text object comes next, inside it (`i`) or around it (`a`).
     Inner,
     Around,
@@ -245,7 +245,7 @@ pub enum Command<A> {
     App(A),
 }
 
-impl<A> Command<A> {
+impl<A, O> Command<A, O> {
     /// The variant's name, for a panic message.
     fn name(&self) -> &'static str {
         match self {
@@ -302,23 +302,26 @@ pub fn hint(keys: &str, what: &'static str) -> Hint {
 pub enum Table {
     Normal,
     Visual,
-    /// After an operator. It holds motions, [`Command::Inner`] and [`Command::Around`] only.
-    Pending,
 }
 
 impl Table {
     /// Whether `command` means anything here. [`Command::OtherEnd`] needs a selection, so it
     /// belongs to Visual. [`Command::Lines`] acts on the cursor's lines, which a selection
     /// replaces, so it belongs to Normal. After an operator only what it can act over counts.
-    fn takes<A>(self, command: &Command<A>) -> bool {
-        match (self, command) {
-            (Table::Pending, c) => {
-                matches!(c, Command::Motion(_) | Command::Inner | Command::Around)
-            }
-            (Table::Normal, Command::OtherEnd) | (Table::Visual, Command::Lines(_)) => false,
-            _ => true,
-        }
+    fn takes<A, O>(self, command: &Command<A, O>) -> bool {
+        !matches!(
+            (self, command),
+            (Table::Normal, Command::OtherEnd) | (Table::Visual, Command::Lines(_))
+        )
     }
+}
+
+/// What can follow an operator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingCommand {
+    Motion(Motion),
+    Inner,
+    Around,
 }
 
 #[derive(Clone, Debug)]
@@ -347,21 +350,19 @@ pub(crate) enum Lookup<T> {
 ///     .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit");
 /// ```
 #[derive(Clone, Debug)]
-pub struct Keymap<A> {
+pub struct Keymap<A, O = A> {
     leader: Stroke,
-    normal: Vec<Binding<Command<A>>>,
-    visual: Vec<Binding<Command<A>>>,
-    pending: Vec<Binding<Command<A>>>,
+    tables: [Vec<Binding<Command<A, O>>>; 2],
+    pending: Vec<Binding<PendingCommand>>,
     objects: Vec<Binding<Object>>,
 }
 
-impl<A: Clone> Keymap<A> {
+impl<A: Clone, O: Clone> Keymap<A, O> {
     /// No bindings, and `\` for the leader.
     pub fn empty() -> Self {
         Keymap {
             leader: Stroke::Char('\\'),
-            normal: Vec::new(),
-            visual: Vec::new(),
+            tables: [Vec::new(), Vec::new()],
             pending: Vec::new(),
             objects: Vec::new(),
         }
@@ -475,18 +476,8 @@ impl<A: Clone> Keymap<A> {
                 Command::Around,
                 "Select around an object…",
             )
-            .bind(
-                Table::Pending,
-                &[C('i')],
-                Command::Inner,
-                "Inside an object…",
-            )
-            .bind(
-                Table::Pending,
-                &[C('a')],
-                Command::Around,
-                "Around an object…",
-            )
+            .bind_pending(&[C('i')], PendingCommand::Inner, "Inside an object…")
+            .bind_pending(&[C('a')], PendingCommand::Around, "Around an object…")
             .bind(
                 Table::Normal,
                 &[C('/')],
@@ -518,13 +509,10 @@ impl<A: Clone> Keymap<A> {
     pub fn leader(mut self, key: Stroke) -> Self {
         assert!(key != Stroke::Leader, "the leader must be a real key");
         self.leader = key;
-        for (name, table) in [
-            ("Normal", &self.normal),
-            ("Visual", &self.visual),
-            ("Pending", &self.pending),
-        ] {
-            check(name, table, key);
+        for table in [Table::Normal, Table::Visual] {
+            check(&format!("{table:?}"), self.list(table), key);
         }
+        check("Pending", &self.pending, key);
         check("objects", &self.objects, key);
         self
     }
@@ -532,12 +520,12 @@ impl<A: Clone> Keymap<A> {
     /// Binds `keys` in `table`, replacing a binding of the same keys. `what` names it in hints;
     /// `None` keeps it out of them. Panics when `keys` would start another binding there or
     /// another would start it, when it starts with a digit (`1`–`9` start a count), or when
-    /// `table` is [`Table::Pending`] and `command` isn't a motion, `Inner` or `Around`.
+    /// `command` requires a different mode.
     pub fn bind(
         mut self,
         table: Table,
         keys: &[Stroke],
-        command: Command<A>,
+        command: Command<A, O>,
         what: impl Into<Option<&'static str>>,
     ) -> Self {
         assert!(
@@ -547,24 +535,51 @@ impl<A: Clone> Keymap<A> {
             command.name()
         );
         let leader = self.leader;
-        let (name, list) = match table {
-            Table::Normal => ("Normal", &mut self.normal),
-            Table::Visual => ("Visual", &mut self.visual),
-            Table::Pending => ("Pending", &mut self.pending),
-        };
-        insert(name, list, leader, keys, command, what.into());
+        insert(
+            &format!("{table:?}"),
+            self.list_mut(table),
+            leader,
+            keys,
+            command,
+            what.into(),
+        );
         self
     }
 
     /// Drops the binding of `keys` in `table`, if there is one.
     pub fn unbind(mut self, table: Table, keys: &[Stroke]) -> Self {
         let leader = self.leader;
-        let list = match table {
-            Table::Normal => &mut self.normal,
-            Table::Visual => &mut self.visual,
-            Table::Pending => &mut self.pending,
-        };
-        list.retain(|b| !same(&b.keys, keys, leader));
+        self.list_mut(table)
+            .retain(|b| !same(&b.keys, keys, leader));
+        self
+    }
+
+    /// Binds a motion or text-object prefix after an operator.
+    ///
+    /// ```compile_fail
+    /// use vimkeys::{Command, Keymap, NoAction, Stroke};
+    /// Keymap::<NoAction>::empty().bind_pending(&[Stroke::Char('v')], Command::Visual, None);
+    /// ```
+    pub fn bind_pending(
+        mut self,
+        keys: &[Stroke],
+        command: PendingCommand,
+        what: impl Into<Option<&'static str>>,
+    ) -> Self {
+        insert(
+            "Pending",
+            &mut self.pending,
+            self.leader,
+            keys,
+            command,
+            what.into(),
+        );
+        self
+    }
+
+    /// Drops a binding from the operator-pending table.
+    pub fn unbind_pending(mut self, keys: &[Stroke]) -> Self {
+        self.pending.retain(|b| !same(&b.keys, keys, self.leader));
         self
     }
 
@@ -578,7 +593,7 @@ impl<A: Clone> Keymap<A> {
         let what = what.into();
         self.bind(Table::Normal, keys, Command::Motion(motion), what)
             .bind(Table::Visual, keys, Command::Motion(motion), what)
-            .bind(Table::Pending, keys, Command::Motion(motion), what)
+            .bind_pending(keys, PendingCommand::Motion(motion), what)
     }
 
     /// Binds an operator in Normal mode, where it waits for a motion, and in Visual, where it
@@ -586,7 +601,7 @@ impl<A: Clone> Keymap<A> {
     pub fn operator(
         self,
         keys: &[Stroke],
-        operator: Operator<A>,
+        operator: Operator<O>,
         what: impl Into<Option<&'static str>>,
     ) -> Self {
         let what = what.into();
@@ -637,15 +652,19 @@ impl<A: Clone> Keymap<A> {
         render(keys, self.leader)
     }
 
-    fn list(&self, table: Table) -> &[Binding<Command<A>>] {
-        match table {
-            Table::Normal => &self.normal,
-            Table::Visual => &self.visual,
-            Table::Pending => &self.pending,
-        }
+    fn list(&self, table: Table) -> &[Binding<Command<A, O>>] {
+        &self.tables[table as usize]
     }
 
-    pub(crate) fn lookup(&self, table: Table, typed: &[Stroke]) -> Lookup<Command<A>> {
+    fn list_mut(&mut self, table: Table) -> &mut Vec<Binding<Command<A, O>>> {
+        &mut self.tables[table as usize]
+    }
+
+    pub(crate) fn lookup_pending(&self, typed: &[Stroke]) -> Lookup<PendingCommand> {
+        lookup(&self.pending, typed, self.leader)
+    }
+
+    pub(crate) fn lookup(&self, table: Table, typed: &[Stroke]) -> Lookup<Command<A, O>> {
         lookup(self.list(table), typed, self.leader)
     }
 
@@ -655,17 +674,13 @@ impl<A: Clone> Keymap<A> {
 
     pub(crate) fn next(&self, table: Table, typed: &[Stroke]) -> HintGroups {
         let (mut app, mut vim, mut motion) = (Vec::new(), Vec::new(), Vec::new());
-        for b in self.list(table) {
-            let Some(what) = b.what else { continue };
-            if !starts(&b.keys, typed, self.leader) {
-                continue;
-            }
-            let group = match b.command.group() {
+        for (command, hint) in self.next_in(self.list(table), typed) {
+            let group = match command.group() {
                 HintGroup::App => &mut app,
                 HintGroup::Vim => &mut vim,
                 HintGroup::Motion => &mut motion,
             };
-            group.push(hint(&self.render(&b.keys[typed.len()..]), what));
+            group.push(hint);
         }
         vec![
             (HintGroup::App, app),
@@ -677,12 +692,39 @@ impl<A: Clone> Keymap<A> {
         .collect()
     }
 
-    pub(crate) fn next_objects(&self, typed: &[Stroke]) -> Vec<Hint> {
-        self.objects
-            .iter()
-            .filter(|b| starts(&b.keys, typed, self.leader))
-            .filter_map(|b| Some(hint(&self.render(&b.keys[typed.len()..]), b.what?)))
+    pub(crate) fn next_pending(&self, typed: &[Stroke]) -> HintGroups {
+        let (mut vim, mut motions) = (Vec::new(), Vec::new());
+        for (command, hint) in self.next_in(&self.pending, typed) {
+            match command {
+                PendingCommand::Motion(_) => motions.push(hint),
+                PendingCommand::Inner | PendingCommand::Around => vim.push(hint),
+            }
+        }
+        vec![(HintGroup::Vim, vim), (HintGroup::Motion, motions)]
+            .into_iter()
+            .filter(|(_, hints)| !hints.is_empty())
             .collect()
+    }
+
+    pub(crate) fn next_objects(&self, typed: &[Stroke]) -> Vec<Hint> {
+        self.next_in(&self.objects, typed)
+            .map(|(_, hint)| hint)
+            .collect()
+    }
+
+    fn next_in<'a, C>(
+        &'a self,
+        list: &'a [Binding<C>],
+        typed: &'a [Stroke],
+    ) -> impl Iterator<Item = (&'a C, Hint)> {
+        list.iter()
+            .filter(|b| starts(&b.keys, typed, self.leader))
+            .filter_map(|b| {
+                Some((
+                    &b.command,
+                    hint(&self.render(&b.keys[typed.len()..]), b.what?),
+                ))
+            })
     }
 }
 

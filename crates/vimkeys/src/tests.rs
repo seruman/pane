@@ -40,6 +40,42 @@ fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
 }
 
 #[test]
+fn actions_and_operators_can_have_distinct_types() {
+    #[derive(Clone, Debug, PartialEq)]
+    enum Action {
+        Quit,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    enum Op {
+        Remove,
+    }
+    let keys = Keymap::vim()
+        .action(&[Stroke::Char('q')], Action::Quit, "Quit")
+        .operator(&[Stroke::Char('d')], Operator::App(Op::Remove), "Remove");
+    let mut v = Vim::new(keys);
+    let key = |c: char| KeyEvent {
+        key: Key::Text(c.to_string()),
+        mods: Mods::default(),
+    };
+    assert_eq!(
+        v.key(&key('q'), TEXT),
+        Some(VimEffect::Action {
+            action: Action::Quit,
+            count: None
+        })
+    );
+    v.key(&key('d'), TEXT);
+    assert_eq!(
+        v.key(&key('w'), TEXT),
+        Some(VimEffect::Operator {
+            action: Op::Remove,
+            range: 0..3,
+            linewise: false
+        })
+    );
+}
+
+#[test]
 fn buffer_lines_match_character_boundaries() {
     for text in ["", "one", "\n", "αβ\n\n🙂z\n", "a\nb\nc"] {
         let b = Buf::new(text);
@@ -545,7 +581,7 @@ fn app_actions_sequences_and_the_leader() {
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit")
         .unbind(Table::Normal, &comma)
         .unbind(Table::Visual, &comma)
-        .unbind(Table::Pending, &comma)
+        .unbind_pending(&comma)
         .leader(Stroke::Char(','));
     let mut v = Vim::new(keys);
     assert_eq!(
@@ -766,7 +802,7 @@ fn pending_shows_the_keys_typed_with_their_counts() {
     // Rebound keys show as typed, not as Vim's defaults.
     let keys = Keymap::<NoAction>::vim()
         .motion(&[Stroke::Char('x')], Motion::Find(Find::To), None)
-        .bind(Table::Pending, &[Stroke::Char('I')], Command::Inner, None);
+        .bind_pending(&[Stroke::Char('I')], PendingCommand::Inner, None);
     let mut v = Vim::new(keys);
     press(&mut v, "x");
     assert_eq!(v.pending(), "x");
