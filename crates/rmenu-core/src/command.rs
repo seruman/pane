@@ -1046,32 +1046,68 @@ printf '%s\n' "$$" > "$1/leader"
 
     #[test]
     fn concurrent_invocations_and_cancellation_races() {
-        let handles: Vec<_> = (0..30)
+        let dir = TempDir::new("concurrent-cancel");
+        let release = dir.0.join("release");
+        let tasks: Vec<_> = (0..12)
             .map(|i| {
-                std::thread::spawn(move || {
-                    let cancel = Cancel::default();
-                    if i % 2 == 0 {
-                        cancel.cancel();
-                    }
-                    let input = i.to_string();
-                    match run(
-                        &strings(&["/bin/cat"]),
-                        Some(input.as_bytes()),
+                let marker = dir.0.join(format!("leader-{i}"));
+                let script = if i % 3 == 0 {
+                    "echo $$ > \"$1\"; exec /bin/sleep 30"
+                } else {
+                    "echo $$ > \"$1\"; while [ ! -e \"$2\" ]; do /bin/sleep 0.01; done; exec /bin/cat"
+                };
+                let argv = strings(&[
+                    "/bin/sh",
+                    "-c",
+                    script,
+                    "runner",
+                    marker.to_str().unwrap(),
+                    release.to_str().unwrap(),
+                ]);
+                let cancel = Cancel::default();
+                let task_cancel = cancel.clone();
+                let handle = std::thread::spawn(move || {
+                    run(
+                        &argv,
+                        Some(i.to_string().as_bytes()),
                         &[],
-                        Limits { timeout: Duration::from_secs(10), output_bytes: 1 << 20 },
-                        &cancel,
-                    ) {
-                        Ok(result) => {
-                            assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0)));
-                        }
-                        Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
-                        Err(e) => panic!("{e}"),
-                    }
-                })
+                        Limits { timeout: Duration::from_secs(20), output_bytes: 1024 },
+                        &task_cancel,
+                    )
+                });
+                (marker, cancel, handle)
             })
             .collect();
-        for handle in handles {
-            handle.join().unwrap();
+        let leaders: Vec<_> = tasks.iter().flat_map(|(marker, _, _)| pids(marker, 1)).collect();
+        let start = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let cancels: Vec<_> = tasks.iter().map(|(_, cancel, _)| cancel.clone()).collect();
+            let start = &start;
+            scope.spawn(move || {
+                start.wait();
+                for (i, cancel) in cancels.iter().enumerate() {
+                    if i % 3 != 2 {
+                        cancel.cancel();
+                    }
+                }
+            });
+            start.wait();
+            std::fs::write(&release, b"go").unwrap();
+        });
+        let results: Vec<_> = tasks.into_iter().map(|(_, _, handle)| handle.join().unwrap()).collect();
+        assert_gone(&leaders);
+        let groups: Vec<_> = leaders.iter().map(|pid| -pid).collect();
+        assert_gone(&groups);
+        for (i, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(result) => {
+                    assert_ne!(i % 3, 0, "command {i} must be cancelled while running");
+                    assert_eq!(result.stdout, i.to_string().as_bytes(), "command {i}");
+                    assert_eq!(result.status, ExitStatus::Code(0), "command {i}");
+                }
+                Err(CommandError::Cancelled) => assert_ne!(i % 3, 2, "independent command {i}"),
+                Err(error) => panic!("command {i}: {error}"),
+            }
         }
     }
 
