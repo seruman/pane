@@ -133,7 +133,7 @@ impl Harness {
     fn query(&mut self, q: &str) { self.send(Event::SetQuery(q.into())); }
     fn toggle(&mut self, row: usize) { self.send(Event::ToggleRow(row)); }
     fn highlight(&mut self, row: usize) { self.send(Event::Highlight(row)); }
-    fn perform(&mut self, index: usize) { self.send(Event::Perform(index)); }
+    fn perform(&mut self, index: usize) { self.send(Event::Perform(BindingIndex(index))); }
     fn switch(&mut self, id: &str) {
         let id = self.model.options().configuration.sources().iter().find(|source| source.id.as_str() == id).unwrap().id.clone();
         self.send(Event::SwitchSource(id));
@@ -881,7 +881,7 @@ fn push_pressed_before_the_query_results_land_uses_those_results() {
 fn escape_and_empty_backspace_pop_then_escape_cancels_at_the_root() {
     let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
-    assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(0)));
+    assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(BindingIndex(0))));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
     assert_eq!(h.model.depth(), 1);
@@ -923,14 +923,14 @@ fn level_restricted_bindings_fire_only_at_their_levels() {
     assert_eq!(h.model.target(&chord("ctrl+o")), None);
     h.perform(1);
     assert!(h.is_open());
-    assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(0)));
+    assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(BindingIndex(0))));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
     assert_eq!(h.model.depth(), 1);
     assert_eq!(h.model.target(&chord("ctrl+w")), None, "the repo-level binding is inert in the child");
     h.perform(0);
     assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (1, Some("child")));
-    assert_eq!(h.model.target(&chord("ctrl+o")), Some(Target::Perform(1)));
+    assert_eq!(h.model.target(&chord("ctrl+o")), Some(Target::Perform(BindingIndex(1))));
     h.perform(1);
     assert_eq!(h.context().action, "open-child");
 }
@@ -973,7 +973,7 @@ fn prompt_and_source_keys_follow_the_level() {
     assert_eq!(h.model.target(&chord("ctrl+2")), None, "sibling sources cannot replace a pushed level");
     h.switch("files");
     assert_eq!(h.model.source_id().map(SourceId::as_str), Some("child"));
-    assert_eq!(h.model.target(&chord("ctrl+v")), Some(Target::Perform(1)));
+    assert_eq!(h.model.target(&chord("ctrl+v")), Some(Target::Perform(BindingIndex(1))));
     h.nav(Nav::Back);
     assert_eq!(h.model.prompt(), "Repos");
 }
@@ -1282,7 +1282,7 @@ fn control_and_option_bindings_report_their_id() {
     for (key, id) in [("ctrl+w", "worktrees"), ("alt+n", "memos")] {
         let mut h = keys(true);
         let Some(Target::Perform(index)) = h.model.target(&chord(key)) else { panic!("{key} is bound") };
-        h.perform(index);
+        h.send(Event::Perform(index));
         assert_eq!(h.context().action, id, "key={key}, id={id}");
     }
 }

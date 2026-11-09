@@ -144,6 +144,9 @@ pub enum Nav {
     Cancel,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BindingIndex(pub usize);
+
 #[derive(Clone, Debug)]
 pub enum Event {
     SetQuery(String),
@@ -153,7 +156,7 @@ pub enum Event {
     /// A modified click with `--multi`: mark or unmark this row.
     ToggleRow(usize),
     /// Run the configuration's binding at this index (`configuration.bindings[i]`).
-    Perform(usize),
+    Perform(BindingIndex),
     SwitchSource(SourceId),
     StdinItems(Vec<MenuItem>),
     StdinDone,
@@ -167,7 +170,7 @@ pub enum Event {
 /// What a key bound in the configuration does at the current level.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Target {
-    Perform(usize),
+    Perform(BindingIndex),
     SwitchSource(SourceId),
 }
 
@@ -421,7 +424,7 @@ impl Model {
             .bindings()
             .iter()
             .position(|b| b.applies(self.source_id.as_ref()) && &b.key == chord)
-            .map(Target::Perform)
+            .map(|index| Target::Perform(BindingIndex(index)))
     }
 
     /// The shown rows belong to the current source. Only the query may be ahead of them, so
@@ -458,7 +461,7 @@ impl Model {
             Event::Highlight(row) => self.highlight(row),
             Event::ToggleRow(row) => self.toggle_row(row),
             Event::Perform(index) => {
-                if let Some(binding) = self.options.configuration.bindings().get(index).cloned() {
+                if let Some(binding) = self.options.configuration.bindings().get(index.0).cloned() {
                     self.perform(binding);
                 }
             }

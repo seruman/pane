@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use rmenu_core::config::KeyChord;
-use rmenu_core::model::{Event, ListState, Nav, Target};
+use rmenu_core::model::{BindingIndex, Event, ListState, Nav, Target};
 use rune::tok;
 use rune::{Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, Span, TextStyle, Tx, col, el, rich, row, text, text_input};
 
@@ -253,7 +253,7 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     for (index, label, key) in &bindings[..shown] {
         let index = *index;
         bar = bar.child(keycap_button(if labelled { label } else { "" }, key, true, c)
-            .on_press_tx(move |m: &mut Menu, tx: &mut Tx| m.handle(Event::Perform(index), tx)));
+            .on_press_tx(move |m: &mut Menu, tx: &mut Tx| m.handle(Event::Perform(BindingIndex(index)), tx)));
     }
     bar = bar.child(keycap_button("Choose", "↩", can_act, c)
         .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Accept), tx)));
