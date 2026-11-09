@@ -1569,7 +1569,14 @@ fn going_back_drops_the_childs_preview() {
     let (done, _) = h.preview_event("CHILD xray");
     h.send(done);
     h.nav(Nav::Back);
-    assert_eq!(h.model.preview(), Some(""), "the parent's own preview comes, not the child's");
+    assert!(h.cancelled.contains(&TaskKind::Preview));
+    assert_eq!(h.model.preview(), Some(""));
+    let (done, vars) = h.preview_event("PARENT AGAIN");
+    assert_eq!(env(&vars, "MMENU_ID"), "a");
+    assert_eq!(env(&vars, "MMENU_VALUE"), "alpha");
+    assert_eq!(env(&vars, "MMENU_SOURCE"), "repos");
+    h.send(done);
+    assert_eq!(h.model.preview(), Some("PARENT AGAIN"));
 }
 
 #[test]
