@@ -194,7 +194,7 @@ const POLL_BUDGET: Duration = Duration::from_millis(8);
 const STDIN_CHUNK: usize = 64 * 1024;
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
 
-/// Streams stdin in batches: the first as soon as it decodes, then at most one per 16 ms.
+/// Emits the first decoded batch immediately, then batches at `STDIN_BATCH_INTERVAL`.
 fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     let mut decoder = RecordDecoder::new(format);
     let mut buffer = vec![0u8; STDIN_CHUNK];
@@ -211,7 +211,7 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
         if cancel.is_cancelled() { return; }
         let mut request = libc::pollfd { fd: libc::STDIN_FILENO, events: libc::POLLIN, revents: 0 };
         // SAFETY: one live pollfd, its count passed.
-        let ready = unsafe { libc::poll(&mut request, 1, 16) };
+        let ready = unsafe { libc::poll(&mut request, 1, STDIN_BATCH_INTERVAL.as_millis() as libc::c_int) };
         if ready < 0 {
             let error = std::io::Error::last_os_error();
             if error.kind() == std::io::ErrorKind::Interrupted { continue; }

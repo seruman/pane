@@ -67,8 +67,8 @@ impl Task {
 
 #[derive(Clone, Debug)]
 pub enum Effect {
-    /// Start reading piped stdin as `Options::input`, answering `StdinItems` batches (at most
-    /// one per 16 ms after the first), then `StdinDone` or `StdinFailed`. Issued at most once.
+    /// Read piped stdin as `Options::input` in `StdinItems` batches, then answer
+    /// `StdinDone` or `StdinFailed`. Issued at most once.
     ReadStdin,
     Start(Task),
     Cancel(TaskKind),
