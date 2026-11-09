@@ -1,5 +1,3 @@
-//! mmenu's command line: the same flags, defaults and ranges, parsed by clap.
-
 use clap::{Parser, ValueEnum};
 use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
 use rmenu_core::model::{Options, OutputFormat};
@@ -63,7 +61,6 @@ pub struct Cli {
     pub preview: Option<String>,
 }
 
-/// What the menu starts with.
 #[derive(Debug)]
 pub struct Launch {
     pub options: Options,

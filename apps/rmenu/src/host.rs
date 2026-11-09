@@ -1,6 +1,3 @@
-//! Runs the model's effects: stdin and tasks on threads whose results come back as events
-//! through a channel, drained on the UI thread in `poll`.
-
 #[cfg(test)]
 mod tests;
 
@@ -30,10 +27,8 @@ enum Message {
     Event(Event),
 }
 
-/// The window's state: the model, the query field mirroring it, and the work in flight.
 pub struct Menu {
-    /// Never freed: the menu lives until the process exits, and freeing millions of rows one
-    /// by one as Rune drops its runtime would only delay that exit.
+    // The process reclaims the rows at exit. Dropping each row would delay shutdown.
     pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
@@ -43,9 +38,7 @@ pub struct Menu {
     waker: Option<Waker>,
     tasks: HashMap<TaskKind, Running>,
     stdin: Option<Running>,
-    /// Cancelled tasks still finishing; joined before exit so their process groups are reaped.
     retired: Vec<Running>,
-    /// What the list last scrolled to, so it follows the highlight only when it moves.
     revealed: Option<(u64, usize)>,
 }
 
@@ -76,11 +69,8 @@ impl Menu {
         waker();
     }
 
-    /// Drains finished work into the model; true when anything arrived.
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
         let mut changed = false;
-        // A bounded slice of work per frame, so input queued behind a flood of stdin (Esc,
-        // a quit) gets its turn; consecutive stdin batches become one append and one search.
         let deadline = Instant::now() + POLL_BUDGET;
         let mut batch: Vec<MenuItem> = Vec::new();
         loop {
@@ -122,14 +112,12 @@ impl Menu {
         tx.settle();
         let effects = self.model.handle(event);
         self.apply(effects, tx);
-        // The model owns the query value. The field keeps selection, composition, and undo state.
         if self.field.text != self.model.query() {
             self.field.replace_text(self.model.query());
         }
         self.reveal(tx);
     }
 
-    /// Keeps the highlighted row in view when it or the results change.
     fn reveal(&mut self, tx: &mut Tx) {
         let Some(row) = self.model.highlighted_row() else { return };
         let at = (self.model.result_revision(), row);
@@ -178,7 +166,6 @@ impl Menu {
                 if flag.is_cancelled() {
                     return;
                 }
-                // The receiver only goes away as the process exits.
                 if sender.send(Message::Event(event)).is_ok() {
                     waker();
                 }
@@ -196,7 +183,6 @@ impl Menu {
         self.retired.retain(|r| !r.thread.is_finished());
     }
 
-    /// Cancels everything and waits for it, so no child process outlives the menu.
     pub fn stop(&mut self) {
         let all: Vec<Running> =
             self.tasks.drain().map(|(_, r)| r).chain(self.stdin.take()).chain(self.retired.drain(..)).collect();
@@ -208,8 +194,6 @@ impl Menu {
         }
     }
 
-    /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at
-    /// the root would, with no output.
     pub fn quit(&mut self, tx: &mut Tx) {
         if self.outcome.borrow().is_none() {
             self.handle(Event::Nav(rmenu_core::model::Nav::Cancel), tx);
@@ -225,7 +209,6 @@ const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const POLL_BUDGET: Duration = STDIN_BATCH_INTERVAL.checked_div(2).expect("nonzero divisor");
 const STDIN_CHUNK: usize = 64 * 1024;
 
-/// Emits the first decoded batch immediately, then batches at `STDIN_BATCH_INTERVAL`.
 fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     let mut decoder = RecordDecoder::new(format);
     let mut buffer = vec![0u8; STDIN_CHUNK];

@@ -1,6 +1,3 @@
-//! The palette: query row, source strip, result rows, footer and preview, filling the
-//! terminal. Modelled on mmenu's `PaletteView`.
-
 use std::borrow::Cow;
 
 use rmenu_core::config::KeyChord;
@@ -16,6 +13,7 @@ use crate::host::Menu;
 
 pub const ROWS_KEY: &str = "rows";
 
+const FALLBACK_WIDTH: f32 = 640.0;
 const QUERY_H: f32 = 30.0;
 const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
@@ -63,10 +61,8 @@ fn palette(menu: &Menu, system_dark: bool) -> Palette {
     let background = terminal.background.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.card);
     let foreground = terminal.foreground.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.text);
     let accent = terminal.cursor.or(terminal.palette[4]).unwrap_or_else(|| tok::accent(0, dark));
-    // Text on the accent reads best as whichever of black and white contrasts more.
     let selected_text = contrast_ink(accent);
     let error = terminal.palette[if dark { 9 } else { 1 }].unwrap_or(Color { r: 0.85, g: 0.25, b: 0.2, a: 1.0 });
-    // Alpha tints set visual hierarchy. They are style choices, not contrast guarantees.
     Palette {
         background,
         foreground,
@@ -83,8 +79,7 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
     cx.reduced_motion(true);
     let c = palette(menu, cx.system_dark());
     let model = &menu.model;
-    // The terminal's size in points; before the first layout, a typical floating layer.
-    let width = cx.layout_with("root", |r| r[2].round()).unwrap_or(640.0);
+    let width = cx.layout_with("root", |r| r[2].round()).unwrap_or(FALLBACK_WIDTH);
     let list = col()
         .key("list")
         .grow(1.0)
@@ -101,7 +96,6 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
             .min_h(0.0)
             .child(list)
             .child(el().w(1.0).h_full().fill(c.separator))
-            // The list keeps at least half the width, as in mmenu.
             .child(preview_pane(preview, &c, PREVIEW_W.min(width / 2.0))),
         None => row().grow(1.0).w_full().min_h(0.0).child(list),
     };
@@ -126,7 +120,6 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
         .on_input_key(key);
     let chip = match prompt.as_str() {
         "" => None,
-        // The default prompt is a quiet marker, any other is a chip, as in mmenu.
         crate::cli::DEFAULT_PROMPT => Some(text(crate::cli::DEFAULT_PROMPT).font(TITLE).color(c.secondary)),
         _ => Some(
             row()
@@ -256,7 +249,6 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
         .px(6.0)
         .py(1.0)
         .on_press_tx(move |m: &mut Menu, tx: &mut Tx| {
-            // Typing after a click goes to the query, as it does in mmenu.
             m.field.focused = true;
             let Some(r) = row_for(m) else { return };
             m.handle(Event::Highlight(r), tx);
@@ -268,8 +260,6 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
         .child(line)
 }
 
-/// One line of row text: the characters the query matched in bold accent, the middle elided
-/// when it doesn't fit, so both ends of a path stay readable.
 fn matched(content: &str, marks: Vec<std::ops::Range<usize>>, style: TextStyle, color: Color, mark: Color) -> El {
     let spans: Vec<Span> = marks.into_iter().map(|r| Span::new(r.start, r.end).color(mark).weight(650.0)).collect();
     let line = if spans.is_empty() { text(content.to_owned()) } else { rich(content.to_owned(), spans).single_line() };
@@ -303,7 +293,6 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
         s
     };
     let failed = model.input_failed() || model.message_is_error();
-    // Enter during a search is queued by the model, so Choose stays lit while one runs.
     let can_act = model.can_navigate() && !model.running_operation() && model.has_choice();
     let back = if model.depth() > 0 { "Back" } else { "" };
     let mut bar = row()
@@ -328,9 +317,6 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
         .filter(|(_, b)| b.applies(model.source_id()))
         .filter_map(|(i, b)| Some((i, b.label.as_deref()?, b.key.display())))
         .collect();
-    // Esc, Choose and a readable status always fit: what's left goes to bindings, labelled
-    // when they all fit that way, keycaps only when that's what fits, the rightmost dropped
-    // after that.
     let fixed =
         2.0 * FOOTER_PAD + keycap_width(back, "Esc") + keycap_width("Choose", "↩") + STATUS_MIN_W + 2.0 * FOOTER_GAP;
     let room = (width - fixed).max(0.0);
@@ -356,10 +342,8 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
     col().w_full().child(el().h(1.0).w_full().fill(c.separator)).child(bar)
 }
 
-/// The status line's narrowest useful width in the footer.
 const STATUS_MIN_W: f32 = 120.0;
 
-/// The width `keycap_button` lays out for `label` and `key`.
 fn keycap_width(label: &str, key: &str) -> f32 {
     let label_w = if label.is_empty() { 0.0 } else { rune::text::measure(label, &[], SMALL, None).0 + 6.0 };
     label_w + (rune::text::measure(key, &[], KEYCAP, None).0 + 10.0).max(18.0)
@@ -383,7 +367,7 @@ fn keycap_button(label: &str, key: &str, enabled: bool, c: &Palette) -> El {
     )
 }
 
-/// The terminal reports Ctrl as both `ctrl` and `cmd`; a chord sees only Control.
+// Rune reports Ctrl as both `ctrl` and `cmd`. Terminal chords use only Control.
 pub fn chord(event: &KeyEvent) -> Option<KeyChord> {
     let key = match &event.key {
         Key::Enter => "enter".to_owned(),
@@ -401,7 +385,6 @@ pub fn chord(event: &KeyEvent) -> Option<KeyChord> {
     Some(KeyChord { key, command: false, control: m.ctrl, option: m.alt, shift: m.shift })
 }
 
-/// Configured chords first, then the palette's own keys; true when the key was taken.
 pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
     if let Some(chord) = chord(event)
         && let Some(target) = menu.model.target(&chord)
