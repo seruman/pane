@@ -236,6 +236,28 @@ fn press_on(vim: &mut Vim, text: &str, keys: &str) {
 }
 
 #[test]
+fn digits_after_find_are_characters_not_counts() {
+    let text = "a12b2";
+    let mut vim = Vim::default();
+    press_on(&mut vim, text, "f2");
+    assert_eq!(vim.cursor(text), 2..3);
+    vim.set_cursor(0, text);
+    press_on(&mut vim, text, "2f2");
+    assert_eq!(vim.cursor(text), 4..5);
+    vim.set_cursor(0, text);
+    press_on(&mut vim, text, "f");
+    vim.key(
+        &KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        },
+        text,
+    );
+    assert!(!vim.is_pending());
+    assert_eq!(vim.cursor(text), 0..1);
+}
+
+#[test]
 fn skipping_blank_lines() {
     let mut v = Vim::default().skip_blank_lines(true);
     let at = |v: &Vim| &PAGE[v.cursor(PAGE).start..];

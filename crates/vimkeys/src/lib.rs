@@ -373,44 +373,45 @@ impl<A: Clone> Vim<A> {
         }
         let stroke = Stroke::from_event(ev)?;
 
-        // The character after `f F t T` is read, not looked up.
-        if matches!(self.pending, Pending::Find { .. })
-            && let Pending::Find {
-                find,
-                op,
-                opened: (count, _),
-            } = std::mem::replace(&mut self.pending, Pending::None)
-        {
-            self.count = count;
-            let Stroke::Char(c) = stroke else {
-                self.reset_pending();
-                return Some(VimEffect::Moved);
-            };
-            self.last_find = Some((find, c));
-            self.last_typed_find = Some(c);
-            return self.finish_motion(Motion::Find(find), Vec::new(), op, text, &b);
-        }
-
-        // Counts: 1–9 start one, 0 goes on one; not inside a key sequence or object.
-        if let Stroke::Char(c @ '0'..='9') = stroke {
-            let between = matches!(&self.pending, Pending::None)
-                || matches!(&self.pending, Pending::Operator { typed, .. } if typed.is_empty());
-            if between && (c != '0' || self.count.is_some()) {
+        match (std::mem::replace(&mut self.pending, Pending::None), stroke) {
+            (
+                Pending::Find {
+                    find,
+                    op,
+                    opened: (count, _),
+                },
+                stroke,
+            ) => {
+                self.count = count;
+                let Stroke::Char(c) = stroke else {
+                    self.reset_pending();
+                    return Some(VimEffect::Moved);
+                };
+                self.last_find = Some((find, c));
+                self.last_typed_find = Some(c);
+                self.finish_motion(Motion::Find(find), Vec::new(), op, text, &b)
+            }
+            (pending, Stroke::Char(c @ '0'..='9'))
+                if (c != '0' || self.count.is_some())
+                    && (matches!(&pending, Pending::None)
+                        || matches!(&pending, Pending::Operator { typed, .. } if typed.is_empty())) =>
+            {
                 let digit = c as usize - '0' as usize;
                 self.count = Some((self.count.unwrap_or(0) * 10 + digit).min(MAX_COUNT));
-                return Some(VimEffect::Moved);
+                self.pending = pending;
+                Some(VimEffect::Moved)
             }
-        }
-
-        match std::mem::replace(&mut self.pending, Pending::None) {
-            Pending::None => self.lookup(stroke, Vec::new(), text, &b),
-            Pending::Keys(typed) => self.lookup(stroke, typed, text, &b),
-            Pending::Operator {
-                op,
-                keys,
-                count,
-                mut typed,
-            } => {
+            (Pending::None, stroke) => self.lookup(stroke, Vec::new(), text, &b),
+            (Pending::Keys(typed), stroke) => self.lookup(stroke, typed, text, &b),
+            (
+                Pending::Operator {
+                    op,
+                    keys,
+                    count,
+                    mut typed,
+                },
+                stroke,
+            ) => {
                 typed.push(stroke);
                 // The operator's keys again, or its last key, take the line (`yy`, `cc`, `gyy`
                 // and `gygy`), as Vim's `gUU` and `gUgU` do.
@@ -447,12 +448,15 @@ impl<A: Clone> Vim<A> {
                     }
                 }
             }
-            Pending::Object {
-                around,
-                op,
-                opened,
-                mut typed,
-            } => {
+            (
+                Pending::Object {
+                    around,
+                    op,
+                    opened,
+                    mut typed,
+                },
+                stroke,
+            ) => {
                 typed.push(stroke);
                 match self.keymap.lookup_object(&typed) {
                     Lookup::Exact(object) => {
@@ -474,7 +478,6 @@ impl<A: Clone> Vim<A> {
                     }
                 }
             }
-            Pending::Find { .. } => unreachable!("handled above"),
         }
     }
 
