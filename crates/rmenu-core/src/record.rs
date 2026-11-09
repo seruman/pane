@@ -36,8 +36,13 @@ pub struct RecordDecoder {
     seen_ids: HashSet<String>,
     records: usize,
     next_id: usize,
-    finished: bool,
-    failure: Option<RecordError>,
+    state: State,
+}
+
+enum State {
+    Open,
+    Finished,
+    Failed(RecordError),
 }
 
 impl RecordDecoder {
@@ -46,12 +51,15 @@ impl RecordDecoder {
 
     pub fn new(format: InputFormat) -> Self {
         RecordDecoder { format, pending: Vec::new(), seen_ids: HashSet::new(), records: 0, next_id: 0,
-                        finished: false, failure: None }
+                        state: State::Open }
     }
 
     pub fn append(&mut self, bytes: &[u8]) -> Result<Vec<MenuItem>, RecordError> {
-        if let Some(failure) = &self.failure { return Err(failure.clone()); }
-        if self.finished { return Err(RecordError::AlreadyFinished); }
+        match &self.state {
+            State::Open => {}
+            State::Finished => return Err(RecordError::AlreadyFinished),
+            State::Failed(error) => return Err(error.clone()),
+        }
         let delimiter = if self.format == InputFormat::Nul { 0 } else { b'\n' };
         let mut items = Vec::new();
         let mut rest = bytes;
@@ -74,18 +82,19 @@ impl RecordDecoder {
 
     /// Flushes an unterminated final record. A trailing delimiter makes no extra empty row.
     pub fn finish(&mut self) -> Result<Vec<MenuItem>, RecordError> {
-        if let Some(failure) = &self.failure { return Err(failure.clone()); }
-        if self.finished || self.pending.is_empty() {
-            self.finished = true;
-            return Ok(Vec::new());
+        match &self.state {
+            State::Open => {}
+            State::Finished => return Ok(Vec::new()),
+            State::Failed(error) => return Err(error.clone()),
         }
-        self.finished = true;
+        self.state = State::Finished;
+        if self.pending.is_empty() { return Ok(Vec::new()); }
         self.consume(false).map(|item| item.into_iter().collect()).map_err(|error| self.fail(error))
     }
 
     fn fail(&mut self, error: RecordError) -> RecordError {
         self.pending.clear();
-        self.failure = Some(error.clone());
+        self.state = State::Failed(error.clone());
         error
     }
 
