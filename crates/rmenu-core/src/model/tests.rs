@@ -1148,6 +1148,28 @@ fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
 }
 
 #[test]
+fn switch_source_cannot_open_a_hidden_source_at_root() {
+    let mut h = start(json!({
+        "sources": [repos(json!({})), hidden("child", json!({"key": "ctrl+2"}))],
+        "bindings": [push_binding()]
+    }));
+    h.load(&jsonl(&REPOS));
+    let revision = h.model.result_revision();
+    assert_eq!(h.model.target(&chord("ctrl+2")), None);
+    h.switch("child");
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("repos"));
+    assert_eq!(h.model.depth(), 0);
+    assert_eq!(h.source_runs("child"), 0);
+    assert_eq!(h.model.result_revision(), revision);
+    assert_eq!(h.titles(), ["alpha", "beta", "gamma", "delta"]);
+    assert!(h.model.can_navigate());
+    h.perform(0);
+    assert_eq!(h.model.source_id().map(SourceId::as_str), Some("child"));
+    assert_eq!(h.model.depth(), 1);
+    assert_eq!(h.source_runs("child"), 1);
+}
+
+#[test]
 fn prompt_and_source_keys_follow_the_level() {
     let root_only =
         json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
