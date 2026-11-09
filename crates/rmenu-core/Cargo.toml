@@ -1,6 +1,6 @@
 [package]
 name = "rmenu-core"
-description = "rmenu's data, matching, commands and menu state: everything but drawing."
+description = "Data, matching, commands, and menu state for rmenu."
 edition.workspace = true
 version.workspace = true
 
