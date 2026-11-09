@@ -22,9 +22,11 @@ The runner accepts unittest filters, for example
 
 The tests cover line and NUL selection, JSON input and output, malformed input,
 cancellation, caller environment preservation, and refusal to run without a
-controlling terminal. Escape, Ctrl-C, SIGTERM, SIGHUP and SIGINT interrupt a
-streaming source while it is still loading. Each test checks that the source
-was reaped and that the exit status and output match the expected outcome.
+controlling terminal. Repeated empty selections must redraw without closing the
+picker or writing selection output. Escape, Ctrl-C, SIGTERM, SIGHUP and SIGINT
+interrupt a streaming source while it is still loading. Each interruption test
+checks that the source was reaped and that the exit status and output match the
+expected outcome.
 
 The terminal answers startup and Kitty graphics queries. It checks payload
 sizes and keeps only frame metadata and SHA-256 digests. Typing must change a

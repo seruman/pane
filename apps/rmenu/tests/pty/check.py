@@ -64,6 +64,19 @@ class PickerTests(unittest.TestCase):
                     self.assertEqual(output, expected_output)
                 self.assertEqual(bool(error), label == "malformed", error)
 
+    def test_refusal_keeps_picker_open_and_output_empty(self):
+        with self.terminal() as terminal:
+            self.ready(terminal)
+            for _ in range(2):
+                before = len(terminal.frames)
+                terminal.send(b"\r")
+                terminal.wait(lambda: len(terminal.frames) > before, "refusal did not redraw")
+                terminal.settle()
+                self.assertIsNone(terminal.poll())
+                self.assertEqual((self.root / "output").read_bytes(), b"")
+            terminal.send(b"\x1b")
+            self.assertEqual(terminal.finish(), (130, b"", b""))
+
     def test_caller_environment(self):
         config = self.root / "config.json"
         config.write_text(json.dumps({"sources": [{"id": "env", "label": "Environment", "command": [

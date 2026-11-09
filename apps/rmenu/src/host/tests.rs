@@ -248,6 +248,92 @@ fn query_sync_preserves_edit_state_until_the_model_changes_the_value() {
     menu.stop();
 }
 
+fn query_border(rt: &rune::Runtime<Menu>) -> ([f32; 4], f32, [f32; 4]) {
+    let elements = rt.elements();
+    let query = elements.iter().find(|e| e.key.as_deref() == Some("query")).unwrap();
+    let line = &elements[query.parent.unwrap()];
+    let instance = rt.instances.iter().find(|i| i.rect == line.rect).unwrap();
+    (instance.rect, instance.params[0], instance.border)
+}
+
+#[test]
+fn refusal_paints_query_border_without_changing_menu() {
+    for appearance in [crate::cli::Appearance::Light, crate::cli::Appearance::Dark] {
+        let mut menu = menu_without_stdin();
+        menu.appearance = appearance;
+        menu.handle(Event::StdinDone, &mut Tx::default());
+        menu.handle(Event::SetQuery("absent".into()), &mut Tx::default());
+        poll_until(&mut menu, |m| !m.model.is_searching());
+        let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+        rt.frame(0.0);
+        let (rect, width, _) = query_border(&rt);
+        assert_eq!(width, 0.0);
+        rt.update(|menu, tx| {
+            assert!(crate::view::key(menu, &rune::KeyEvent { key: rune::Key::Enter, mods: rune::Mods::default() }, tx));
+        });
+        rt.frame(1.0 / 120.0);
+        let (flashed_rect, width, color) = query_border(&rt);
+        assert!(width > 0.0 && color[3] > 0.0, "refusal must paint a visible border");
+        assert_eq!(flashed_rect, rect);
+        assert!(rt.reduced_motion && rt.settled);
+        assert!(rt.wake_deadline().is_some(), "the flash must schedule its own expiry");
+        assert_eq!(rt.state.model.query(), "absent");
+        assert_eq!(rt.state.field.text, "absent");
+        assert_eq!(rt.state.model.highlighted_row(), None);
+        assert!(rt.state.outcome.borrow().is_none());
+        assert!(rt.shell_request.is_none());
+    }
+}
+
+#[test]
+fn refusal_expiry_redraws_without_queued_messages() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| !m.model.is_searching());
+    let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+    rt.frame(0.0);
+    let before = query_border(&rt);
+    rt.update(|menu, tx| menu.handle(Event::Nav(rmenu_core::model::Nav::Accept), tx));
+    rt.frame(1.0 / 120.0);
+    assert!(query_border(&rt).1 > 0.0);
+    rt.state.refusal_until = Some(Instant::now());
+    assert!(rt.state.events.try_recv().is_err());
+    assert!(rt.update_if(Menu::poll), "expiry must invalidate the view even with no messages");
+    rt.frame(1.0 / 120.0);
+    assert_eq!(query_border(&rt), before, "expiry removes the border without a fade or layout shift");
+    assert!(rt.reduced_motion && rt.settled);
+    assert!(!rt.update_if(Menu::poll));
+}
+
+#[test]
+fn repeated_refusal_reschedules_an_early_wake_until_the_latest_deadline() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| !m.model.is_searching());
+    let mut rt = rune::Runtime::new(menu, |_, _| rune::el(), (100.0, 50.0), rune::Env::default());
+    rt.frame(0.0);
+    assert_eq!(rt.wake_deadline(), None);
+    rt.update(|menu, tx| menu.handle(Event::Nav(rmenu_core::model::Nav::Accept), tx));
+    rt.frame(0.0);
+    let first = rt.state.refusal_until.unwrap();
+    assert_eq!(rt.wake_deadline(), Some(rt.clock + REFUSAL_FLASH.as_secs_f64()));
+    rt.update(|menu, tx| menu.handle(Event::Nav(rmenu_core::model::Nav::Accept), tx));
+    rt.frame(0.0);
+    let latest = rt.state.refusal_until.unwrap();
+    assert!(latest > first, "a repeated refusal extends the flash");
+    rt.frame(REFUSAL_FLASH.as_secs_f64());
+    assert_eq!(rt.wake_deadline(), None);
+    assert!(!rt.update_if(|menu, tx| menu.poll_refusal(first, tx)));
+    rt.frame(0.0);
+    let remaining = (latest - first).as_secs_f64();
+    assert_eq!(rt.wake_deadline(), Some(rt.clock + remaining));
+    assert_eq!(rt.state.refusal_until, Some(latest));
+    assert!(rt.update_if(|menu, tx| menu.poll_refusal(latest, tx)));
+    rt.frame(remaining);
+    assert_eq!(rt.state.refusal_until, None);
+    assert_eq!(rt.wake_deadline(), None);
+}
+
 #[test]
 fn settle_lands_highlight_color_that_reduced_motion_fades() {
     fn runtime() -> rune::Runtime<Menu> {

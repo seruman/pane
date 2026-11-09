@@ -134,6 +134,9 @@ fn query_row(menu: &Menu, c: &Palette) -> El {
         ),
     };
     let mut line = row().h(QUERY_H).pl(5.0).pr(9.0).gap(6.0).center_y().radius(9.0).fill(c.input);
+    if menu.refusal_until.is_some() {
+        line = line.border(2.0, c.error);
+    }
     if let Some(chip) = chip {
         line = line.child(chip);
     } else {

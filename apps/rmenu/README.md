@@ -41,6 +41,7 @@ Both exit with status 2.
 - `--theme` and the configuration's `theme` field accept the compatibility values `rex` and `native` but do not change the colours.
 - rmenu accepts `cmd+<key>` bindings but warns that it cannot dispatch them. Use Ctrl chords instead.
 - Copy writes an OSC 52 clipboard request. The terminal must support and allow clipboard writes.
+- Refused actions briefly outline the query field instead of ringing the terminal bell.
 
 ## Examples
 

@@ -31,6 +31,7 @@ pub struct Menu {
     pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
+    pub refusal_until: Option<Instant>,
     outcome: Rc<RefCell<Option<Outcome>>>,
     events: Receiver<Message>,
     sender: Sender<Message>,
@@ -52,6 +53,7 @@ impl Menu {
             model: std::mem::ManuallyDrop::new(model),
             field,
             appearance: launch.appearance,
+            refusal_until: None,
             outcome,
             events,
             sender,
@@ -69,8 +71,9 @@ impl Menu {
     }
 
     pub fn poll(&mut self, tx: &mut Tx) -> bool {
-        let mut changed = false;
-        let deadline = Instant::now() + POLL_BUDGET;
+        let now = Instant::now();
+        let mut changed = self.poll_refusal(now, tx);
+        let deadline = now + POLL_BUDGET;
         let mut batch: Vec<MenuItem> = Vec::new();
         loop {
             let next = loop {
@@ -104,6 +107,17 @@ impl Menu {
             }
         }
         changed
+    }
+
+    fn poll_refusal(&mut self, now: Instant, tx: &mut Tx) -> bool {
+        let Some(until) = self.refusal_until else { return false };
+        if now < until {
+            tx.wake_after(until - now);
+            return false;
+        }
+        self.refusal_until = None;
+        tx.settle();
+        true
     }
 
     pub fn handle(&mut self, event: Event, tx: &mut Tx) {
@@ -142,7 +156,10 @@ impl Menu {
                 }
                 Effect::Cancel(kind) => self.retire(kind),
                 Effect::Copy(text) => tx.copy(text),
-                Effect::Beep => {}
+                Effect::Beep => {
+                    self.refusal_until = Some(Instant::now() + REFUSAL_FLASH);
+                    tx.wake_after(REFUSAL_FLASH);
+                }
                 Effect::Finish(result) => {
                     self.stop();
                     let mut outcome = self.outcome.borrow_mut();
@@ -203,6 +220,7 @@ impl Menu {
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
 const POLL_BUDGET: Duration = STDIN_BATCH_INTERVAL.checked_div(2).expect("nonzero divisor");
 const STDIN_CHUNK: usize = 64 * 1024;
+const REFUSAL_FLASH: Duration = Duration::from_millis(150);
 
 fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     let mut decoder = RecordDecoder::new(format);
