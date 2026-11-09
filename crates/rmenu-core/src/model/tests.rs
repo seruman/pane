@@ -534,10 +534,6 @@ fn push_binding() -> Value {
 
 const REPOS: [(&str, &str); 4] = [("a", "alpha"), ("b", "beta"), ("c", "gamma"), ("d", "delta")];
 
-fn stack(sources: Vec<Value>, bindings: Vec<Value>) -> Harness {
-    start(json!({"sources": sources, "bindings": bindings}))
-}
-
 fn repos(extra: Value) -> Value {
     let mut extra = extra;
     extra.as_object_mut().unwrap().insert("format".into(), "jsonl".into());
@@ -554,7 +550,7 @@ fn hidden(id: &str, extra: Value) -> Value {
 
 #[test]
 fn push_then_pop_restores_the_parent_without_rerunning_it() {
-    let mut h = stack(vec![repos(json!({"prompt": "Repos"})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({"prompt": "Repos"})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.query("a");
     h.settle();
@@ -593,7 +589,7 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
 #[test]
 fn child_command_receives_the_parent_selection_as_data() {
     let hostile = "odd $(touch INJECTED) `touch INJECTED`; touch INJECTED";
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&format!("{}\n{}", json!({"id": "o", "title": "odd", "value": hostile}), jsonl(&[("b", "beta")])));
     h.query("be");
     h.settle();
@@ -619,7 +615,7 @@ fn child_command_receives_the_parent_selection_as_data() {
 #[test]
 fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
     for during_matching in [false, true] {
-        let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+        let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
         h.load(&jsonl(&REPOS));
         h.toggle(1);
         let (items, marks) = (h.all_items(), h.marked());
@@ -647,7 +643,7 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
 #[test]
 fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     let slow = json!({"key": "ctrl+e", "id": "slow", "action": "push", "source": "slow"});
-    let mut h = stack(vec![repos(json!({})), hidden("slow", json!({})), hidden("child", json!({}))], vec![slow, push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("slow", json!({})), hidden("child", json!({}))], "bindings": [slow, push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.perform(0);
     let stale = h.source_event(&jsonl(&[("s", "stale")]));
@@ -728,7 +724,7 @@ fn level_marks_plain_output_is_the_current_level() {
 
 #[test]
 fn push_with_no_results_is_a_no_op() {
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.query("does-not-match");
     h.perform(0); // queued until the query's results land, then refused
@@ -741,7 +737,7 @@ fn push_with_no_results_is_a_no_op() {
 
 #[test]
 fn push_pressed_before_the_query_results_land_uses_those_results() {
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.query("gam");
     h.perform(0);
@@ -754,7 +750,7 @@ fn push_pressed_before_the_query_results_land_uses_those_results() {
 
 #[test]
 fn escape_and_empty_backspace_pop_then_escape_cancels_at_the_root() {
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(0)));
     h.perform(0);
@@ -781,7 +777,7 @@ fn escape_and_empty_backspace_pop_then_escape_cancels_at_the_root() {
 
 #[test]
 fn cancel_at_depth_exits_130() {
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
@@ -793,7 +789,7 @@ fn cancel_at_depth_exits_130() {
 fn level_restricted_bindings_fire_only_at_their_levels() {
     let root_only = json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
     let child_only = json!({"key": "ctrl+o", "id": "open-child", "action": "accept", "sources": ["child"]});
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![root_only, child_only]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [root_only, child_only]}));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.target(&chord("ctrl+o")), None);
     h.perform(1);
@@ -812,7 +808,7 @@ fn level_restricted_bindings_fire_only_at_their_levels() {
 
 #[test]
 fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
-    let mut h = stack(vec![hidden("child", json!({"format": "lines"}))], vec![push_binding()]);
+    let mut h = start(json!({"sources": [hidden("child", json!({"format": "lines"}))], "bindings": [push_binding()]}));
     assert!(h.reads_stdin);
     h.stdin("alpha\n");
     h.settle();
@@ -834,10 +830,10 @@ fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
 fn prompt_and_source_keys_follow_the_level() {
     let root_only = json!({"key": "ctrl+w", "id": "worktrees", "action": "push", "source": "child", "sources": ["repos"]});
     let everywhere = json!({"key": "ctrl+v", "id": "split", "action": "accept"});
-    let mut h = stack(
-        vec![repos(json!({"prompt": "Repos"})), src("files", json!({"key": "ctrl+2"})), hidden("child", json!({"prompt": "Worktrees"}))],
-        vec![root_only, everywhere],
-    );
+    let mut h = start(json!({
+        "sources": [repos(json!({"prompt": "Repos"})), src("files", json!({"key": "ctrl+2"})), hidden("child", json!({"prompt": "Worktrees"}))],
+        "bindings": [root_only, everywhere],
+    }));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.prompt(), "Repos");
     assert_eq!(h.model.target(&chord("ctrl+2")), Some(Target::SwitchSource("files".into())));
@@ -856,7 +852,7 @@ fn prompt_and_source_keys_follow_the_level() {
 #[test]
 fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
     let star = json!({"key": "ctrl+d", "id": "star", "action": "run", "command": ["star"], "reload": true});
-    let mut h = stack(vec![repos(json!({})), hidden("child", json!({}))], vec![push_binding(), star]);
+    let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding(), star]}));
     h.load(&jsonl(&REPOS));
     h.perform(0);
     h.load(&jsonl(&[("x", "xray")]));
