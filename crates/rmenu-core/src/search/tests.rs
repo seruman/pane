@@ -199,15 +199,15 @@ fn highlights_mark_the_matched_characters_as_byte_ranges() {
 #[test]
 fn highlights_cover_whole_graphemes() {
     for (query, text, expected) in [
-        ("a", "a\u{301}bc", vec![0..3]),
-        ("b", "a\u{301}bc", vec![3..4]),
-        ("x", "e\u{301}e\u{301}x", vec![6..7]),
-        ("rune", "🧑\u{200d}💻 rune", vec![12..16]),
-        ("🧑\u{200d}💻", "🧑\u{200d}💻 rune", vec![0..11]),
-        ("e", "e\u{301}x", vec![0..3]),
-        ("b", "a\r\nb", vec![3..4]),
+        ("a", "a\u{301}bc", 0..3),
+        ("b", "a\u{301}bc", 3..4),
+        ("x", "e\u{301}e\u{301}x", 6..7),
+        ("rune", "🧑\u{200d}💻 rune", 12..16),
+        ("🧑\u{200d}💻", "🧑\u{200d}💻 rune", 0..11),
+        ("e", "e\u{301}x", 0..3),
+        ("b", "a\r\nb", 3..4),
     ] {
-        assert_eq!(highlights(query, text), expected, "{query:?} in {text:?}");
+        assert_eq!(highlights(query, text), [expected], "{query:?} in {text:?}");
     }
 }
 
