@@ -6,6 +6,22 @@ use std::fmt;
 use crate::config::InputFormat;
 use crate::item::MenuItem;
 
+impl InputFormat {
+    fn delimiter(self) -> u8 {
+        match self {
+            Self::Lines | Self::Jsonl => b'\n',
+            Self::Nul => 0,
+        }
+    }
+
+    fn strips_cr(self) -> bool {
+        match self {
+            Self::Lines | Self::Jsonl => true,
+            Self::Nul => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecordError {
     RecordTooLarge { record: usize },
@@ -60,7 +76,7 @@ impl RecordDecoder {
             State::Finished => return Err(RecordError::AlreadyFinished),
             State::Failed(error) => return Err(error.clone()),
         }
-        let delimiter = if self.format == InputFormat::Nul { 0 } else { b'\n' };
+        let delimiter = self.format.delimiter();
         let mut items = Vec::new();
         let mut rest = bytes;
         while !rest.is_empty() {
@@ -102,20 +118,24 @@ impl RecordDecoder {
         self.records += 1;
         let record = self.records;
         let mut bytes = std::mem::take(&mut self.pending);
-        if terminated && self.format != InputFormat::Nul && bytes.last() == Some(&b'\r') { bytes.pop(); }
+        if terminated && self.format.strips_cr() && bytes.last() == Some(&b'\r') { bytes.pop(); }
         let text = String::from_utf8(bytes).map_err(|_| RecordError::InvalidUtf8 { record })?;
-        if self.format == InputFormat::Jsonl {
-            if text.chars().all(char::is_whitespace) { return Ok(None); }
-            let item: MenuItem = serde_json::from_str(&text)
-                .map_err(|e| RecordError::MalformedJson { record, reason: e.to_string() })?;
-            if !self.seen_ids.insert(item.id.clone()) {
-                return Err(RecordError::DuplicateId { record, id: item.id });
+        match self.format {
+            InputFormat::Jsonl => {
+                if text.chars().all(char::is_whitespace) { return Ok(None); }
+                let item: MenuItem = serde_json::from_str(&text)
+                    .map_err(|e| RecordError::MalformedJson { record, reason: e.to_string() })?;
+                if !self.seen_ids.insert(item.id.clone()) {
+                    return Err(RecordError::DuplicateId { record, id: item.id });
+                }
+                Ok(Some(item))
             }
-            return Ok(Some(item));
+            InputFormat::Lines | InputFormat::Nul => {
+                let item = MenuItem::new(self.next_id.to_string(), text);
+                self.next_id += 1;
+                Ok(Some(item))
+            }
         }
-        let item = MenuItem::new(self.next_id.to_string(), text);
-        self.next_id += 1;
-        Ok(Some(item))
     }
 }
 
