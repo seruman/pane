@@ -491,7 +491,7 @@ fn menu(s: &State, theme: &Theme) -> El {
                 .icon(glyph)
                 .selected(s.menu_selected == i)
                 .on_hover(move |s: &mut State| s.menu_selected = i)
-                .on_press(move |s: &mut State| s.toast = Some(MENU[i].0.to_owned()));
+                .on_press(move |s: &mut State| s.toast = Some(label.to_owned()));
             if let Some(keys) = keys {
                 item = item.shortcut(keys);
             }
@@ -527,23 +527,19 @@ fn checklist(s: &State, theme: &Theme) -> El {
 }
 
 fn statuses(s: &State, theme: &Theme) -> El {
-    let mut r = cluster(14.0);
-    for (i, status) in [s.status, Status::Done, Status::Blocked, Status::Error]
-        .into_iter()
-        .enumerate()
-    {
-        let label = if i == 0 {
-            format!("This program: {}", status.label())
-        } else {
-            status.label().to_owned()
-        };
-        r = r.child(
-            row()
-                .gap(6.0)
-                .center_y()
-                .child(status.mark(theme))
-                .child(text(label).font(theme.ty.body).color(theme.text)),
-        );
+    let chip = |status: Status, label: String| {
+        row()
+            .gap(6.0)
+            .center_y()
+            .child(status.mark(theme))
+            .child(text(label).font(theme.ty.body).color(theme.text))
+    };
+    let mut r = cluster(14.0).child(chip(
+        s.status,
+        format!("This program: {}", s.status.label()),
+    ));
+    for status in [Status::Done, Status::Blocked, Status::Error] {
+        r = r.child(chip(status, status.label().to_owned()));
     }
     r
 }
