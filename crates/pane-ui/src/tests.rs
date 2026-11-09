@@ -50,6 +50,10 @@ fn the_kit_is_rune_kits_terminal_kit() {
         let theme = Theme::new(palette.clone());
         let terminal = Kit::from_terminal_colors(palette.terminal_colors()).unwrap();
         assert_eq!(theme.kit.c.page, terminal.c.page, "{}", palette.name);
+        assert_eq!(theme.accent, terminal.c.bg_accent);
+        assert_eq!(theme.success, terminal.c.success.fg);
+        assert_eq!(theme.warning, terminal.c.warning.fg);
+        assert_eq!(theme.danger, terminal.c.danger.fg);
         assert_eq!(
             theme.kit.c.bg_accent, palette.cursor,
             "{}: the cursor is the accent",

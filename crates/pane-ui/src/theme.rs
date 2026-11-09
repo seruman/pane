@@ -267,7 +267,7 @@ impl Theme {
     fn with_kit(palette: Palette, mut kit: Kit) -> Theme {
         let (bg, fg, dark) = (palette.background, palette.foreground, palette.dark);
         let (black, white) = (Color::BLACK, Color::WHITE);
-        let accent = palette.cursor;
+        let accent = kit.c.bg_accent;
         let on_accent = on_fill(accent, &palette);
         let pick = |d: f32, l: f32| if dark { d } else { l };
         let gray = |d: f32, l: f32| mix(fg, bg, pick(d, l));
