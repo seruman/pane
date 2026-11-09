@@ -4,19 +4,21 @@ use super::*;
 
 const TEXT: &str = "fn main() {\n    let s = \"hello world\";\n    print(s);\n}\n\nsecond paragraph here\nand more";
 
-fn press(vim: &mut Vim, keys: &str) -> Option<VimEffect<NoAction>> {
-    let mut last = None;
-    for c in keys.chars() {
-        let ev = KeyEvent {
-            key: Key::Text(c.to_string()),
+fn key<A: Clone, O: Clone>(vim: &mut Vim<A, O>, text: &str, key: Key) -> Option<VimEffect<A, O>> {
+    vim.key(
+        &KeyEvent {
+            key,
             mods: Mods::default(),
-        };
-        last = vim.key(&ev, TEXT);
-    }
-    last
+        },
+        text,
+    )
 }
 
-fn ctrl(vim: &mut Vim, c: char) {
+fn press<A: Clone, O: Clone>(vim: &mut Vim<A, O>, keys: &str) -> Option<VimEffect<A, O>> {
+    press_on(vim, TEXT, keys)
+}
+
+fn ctrl(vim: &mut Vim, text: &str, c: char) {
     let ev = KeyEvent {
         key: Key::Command(c),
         mods: Mods {
@@ -25,14 +27,14 @@ fn ctrl(vim: &mut Vim, c: char) {
             ..Mods::default()
         },
     };
-    vim.key(&ev, TEXT);
+    vim.key(&ev, text);
 }
 
 fn at(vim: &Vim) -> &'static str {
     &TEXT[vim.cursor(TEXT).start..]
 }
 
-fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
+fn yanked<A: std::fmt::Debug, O: std::fmt::Debug>(effect: Option<VimEffect<A, O>>) -> String {
     match effect {
         Some(VimEffect::Copy(s)) => s,
         other => panic!("no yank: {other:?}"),
@@ -52,16 +54,7 @@ fn empty_text_still_dispatches_app_actions() {
         ("ZZ", Act::Quit, None),
         ("2C", Act::Comment, Some(2)),
     ] {
-        let mut effect = None;
-        for c in keys.chars() {
-            effect = v.key(
-                &KeyEvent {
-                    key: Key::Text(c.to_string()),
-                    mods: Mods::default(),
-                },
-                "",
-            );
-        }
+        let effect = press_on(&mut v, "", keys);
         assert_eq!(effect, Some(VimEffect::Action { action, count }), "{keys}");
         assert_eq!(v.cursor(""), 0..0);
         assert_eq!(v.selection(""), None);
@@ -79,13 +72,7 @@ fn empty_text_drops_text_commands_without_range_effects() {
             let mut v = Vim::default();
             press(&mut v, pending);
             for c in keys.chars() {
-                let effect = v.key(
-                    &KeyEvent {
-                        key: Key::Text(c.to_string()),
-                        mods: Mods::default(),
-                    },
-                    "",
-                );
+                let effect = key(&mut v, "", Key::Text(c.to_string()));
                 assert!(
                     matches!(effect, None | Some(VimEffect::Consumed)),
                     "{pending} then {keys}: {effect:?}"
@@ -133,13 +120,7 @@ fn named_and_control_leaders_resolve_and_render() {
         let mut v = Vim::new(keys);
         v.key(&event, TEXT);
         assert_eq!(
-            v.key(
-                &KeyEvent {
-                    key: Key::Text("q".into()),
-                    mods: Mods::default()
-                },
-                TEXT
-            ),
+            press(&mut v, "q"),
             Some(VimEffect::Action {
                 action: true,
                 count: None
@@ -162,20 +143,16 @@ fn actions_and_operators_can_have_distinct_types() {
         .action(&[Stroke::Char('q')], Action::Quit, "Quit")
         .operator(&[Stroke::Char('d')], Operator::App(Op::Remove), "Remove");
     let mut v = Vim::new(keys);
-    let key = |c: char| KeyEvent {
-        key: Key::Text(c.to_string()),
-        mods: Mods::default(),
-    };
     assert_eq!(
-        v.key(&key('q'), TEXT),
+        press(&mut v, "q"),
         Some(VimEffect::Action {
             action: Action::Quit,
             count: None
         })
     );
-    v.key(&key('d'), TEXT);
+    press(&mut v, "d");
     assert_eq!(
-        v.key(&key('w'), TEXT),
+        press(&mut v, "w"),
         Some(VimEffect::Operator {
             action: Op::Remove,
             range: 0..3,
@@ -224,7 +201,7 @@ fn word_motions() {
     press(&mut v, "w");
     assert!(at(&v).starts_with("()"));
     press(&mut v, "W");
-    assert!(at(&v).starts_with("{"));
+    assert!(at(&v).starts_with('{'));
     press(&mut v, "b");
     assert!(at(&v).starts_with("()"));
     press(&mut v, "e");
@@ -267,15 +244,7 @@ fn vertical_moves_keep_the_requested_column() {
     for keys in ["jj", "yjjj"] {
         let mut v = Vim::default();
         v.set_cursor(4, text);
-        for c in keys.chars() {
-            v.key(
-                &KeyEvent {
-                    key: Key::Text(c.to_string()),
-                    mods: Mods::default(),
-                },
-                text,
-            );
-        }
+        press_on(&mut v, text, keys);
         assert_eq!(v.cursor(text), 13..14, "{keys}");
     }
 }
@@ -425,13 +394,7 @@ fn visual_selections() {
     );
     press(&mut v, "jfhviw");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "hello");
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     assert_eq!(v.mode(), VimMode::Normal);
     assert_eq!(v.status(), "NORMAL");
     assert_eq!(v.selection(TEXT), None);
@@ -439,15 +402,6 @@ fn visual_selections() {
 
 #[test]
 fn search_entry_restores_the_mode_and_discards_only_the_draft() {
-    let key = |v: &mut Vim, key| {
-        v.key(
-            &KeyEvent {
-                key,
-                mods: Mods::default(),
-            },
-            TEXT,
-        )
-    };
     for (prefix, mode) in [
         ("", VimMode::Normal),
         ("v", VimMode::Visual),
@@ -455,7 +409,7 @@ fn search_entry_restores_the_mode_and_discards_only_the_draft() {
     ] {
         let mut v = Vim::default();
         press(&mut v, "/world");
-        key(&mut v, Key::Enter);
+        key(&mut v, TEXT, Key::Enter);
         let committed = v.matches(TEXT);
         press(&mut v, prefix);
         let selection = v.selection(TEXT);
@@ -463,23 +417,23 @@ fn search_entry_restores_the_mode_and_discards_only_the_draft() {
         press(&mut v, "/hello");
         assert_eq!(v.mode(), VimMode::Search);
         assert_eq!(v.status(), "/hello");
-        assert_eq!(key(&mut v, Key::Up), None);
+        assert_eq!(key(&mut v, TEXT, Key::Up), None);
         assert_eq!(v.status(), "/hello");
-        key(&mut v, Key::Escape);
+        key(&mut v, TEXT, Key::Escape);
         assert_eq!(v.mode(), mode);
         assert_eq!(v.cursor(TEXT), cursor);
         assert_eq!(v.selection(TEXT), selection);
         assert_eq!(v.matches(TEXT), committed);
 
         press(&mut v, "/x");
-        key(&mut v, Key::Backspace);
+        key(&mut v, TEXT, Key::Backspace);
         assert_eq!(v.status(), "/");
-        key(&mut v, Key::Backspace);
+        key(&mut v, TEXT, Key::Backspace);
         assert_eq!(v.mode(), mode);
         assert_eq!(v.selection(TEXT), selection);
 
         press(&mut v, "/hello");
-        key(&mut v, Key::Enter);
+        key(&mut v, TEXT, Key::Enter);
         assert_eq!(v.mode(), mode);
         assert_eq!(v.cursor(TEXT).start, TEXT.find("hello").unwrap());
         assert_eq!(
@@ -494,13 +448,7 @@ fn search_smart_case_and_star() {
     let mut v = Vim::default();
     press(&mut v, "/s");
     assert_eq!(v.status(), "/s");
-    v.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Enter);
     assert!(at(&v).starts_with("s = "));
     press(&mut v, "n");
     assert!(at(&v).starts_with("s);"));
@@ -511,58 +459,40 @@ fn search_smart_case_and_star() {
     press(&mut v, "gg*");
     assert_eq!(v.message(), Some("[1/1]"));
     press(&mut v, "/zzz");
-    v.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Enter);
     assert_eq!(v.message(), Some("Pattern not found: zzz"));
 }
 
 #[test]
 fn half_pages_and_escape() {
     let mut v = Vim::default();
-    ctrl(&mut v, 'd');
+    ctrl(&mut v, TEXT, 'd');
     assert!(at(&v).starts_with("and more"));
-    ctrl(&mut v, 'u');
+    ctrl(&mut v, TEXT, 'u');
     assert!(at(&v).starts_with("fn"));
     press(&mut v, "y");
     assert_eq!(v.pending(), "y");
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     assert_eq!(v.pending(), "");
-    // Nothing to do with Escape in normal mode, so the app may use it.
-    assert!(
-        v.key(
-            &KeyEvent {
-                key: Key::Escape,
-                mods: Mods::default()
-            },
-            TEXT
-        )
-        .is_none()
+    assert_eq!(
+        key(&mut v, TEXT, Key::Escape),
+        None,
+        "Escape without pending input is available to the app"
     );
 }
 
 const PAGE: &str = "Title\n\nFirst paragraph\n\none\ntwo\n\nlast";
 
-fn press_on(vim: &mut Vim, text: &str, keys: &str) {
+fn press_on<A: Clone, O: Clone>(
+    vim: &mut Vim<A, O>,
+    text: &str,
+    keys: &str,
+) -> Option<VimEffect<A, O>> {
+    let mut last = None;
     for c in keys.chars() {
-        vim.key(
-            &KeyEvent {
-                key: Key::Text(c.to_string()),
-                mods: Mods::default(),
-            },
-            text,
-        );
+        last = key(vim, text, Key::Text(c.to_string()));
     }
+    last
 }
 
 #[test]
@@ -576,13 +506,7 @@ fn digits_after_find_are_characters_not_counts() {
     assert_eq!(vim.cursor(text), 4..5);
     vim.set_cursor(0, text);
     press_on(&mut vim, text, "f");
-    vim.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        text,
-    );
+    key(&mut vim, text, Key::Enter);
     assert!(!vim.is_pending());
     assert_eq!(vim.cursor(text), 0..1);
 }
@@ -613,27 +537,13 @@ fn skipping_blank_lines() {
 fn escape_hides_search_matches() {
     let mut v = Vim::default();
     press(&mut v, "/s");
-    v.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
-    assert!(!v.matches(TEXT).is_empty());
-    assert_eq!(
-        v.key(
-            &KeyEvent {
-                key: Key::Escape,
-                mods: Mods::default()
-            },
-            TEXT
-        ),
-        Some(VimEffect::Consumed)
-    );
-    assert!(v.matches(TEXT).is_empty());
+    key(&mut v, TEXT, Key::Enter);
+    let expected = vec![20..21, 49..50, 56..57];
+    assert_eq!(v.matches(TEXT), expected);
+    assert_eq!(key(&mut v, TEXT, Key::Escape), Some(VimEffect::Consumed));
+    assert_eq!(v.matches(TEXT), Vec::<std::ops::Range<usize>>::new());
     press(&mut v, "n");
-    assert!(!v.matches(TEXT).is_empty());
+    assert_eq!(v.matches(TEXT), expected);
 }
 
 fn source(effect: Option<VimEffect<NoAction>>) -> (std::ops::Range<usize>, bool) {
@@ -662,8 +572,11 @@ fn gy_asks_for_the_source() {
         (&TEXT[range], linewise),
         ("fn main() {\n    let s = \"hello world\";", true)
     );
-    // Plain `y` afterwards copies text again.
-    assert_eq!(yanked(press(&mut v, "yw")), "fn ");
+    assert_eq!(
+        yanked(press(&mut v, "yw")),
+        "fn ",
+        "plain y still copies text after a source yank"
+    );
     assert_eq!(press(&mut v, "g"), Some(VimEffect::Consumed));
     assert_eq!(v.pending(), "g");
     press(&mut v, "y");
@@ -703,13 +616,7 @@ fn hints_follow_what_is_typed() {
     );
     press(&mut v, "i");
     assert_eq!(v.hints().unwrap().0, HintsFor::Typed("yi".into()));
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     press(&mut v, "g");
     assert_eq!(v.hints().unwrap().0, HintsFor::Typed("g".into()));
     press(&mut v, "y");
@@ -762,20 +669,6 @@ fn app_vim() -> Vim<Act> {
     )
 }
 
-fn press_app(vim: &mut Vim<Act>, keys: &str) -> Option<VimEffect<Act>> {
-    let mut last = None;
-    for c in keys.chars() {
-        last = vim.key(
-            &KeyEvent {
-                key: Key::Text(c.to_string()),
-                mods: Mods::default(),
-            },
-            TEXT,
-        );
-    }
-    last
-}
-
 fn operated(effect: Option<VimEffect<Act>>) -> (&'static str, bool) {
     match effect {
         Some(VimEffect::Operator {
@@ -790,76 +683,75 @@ fn operated(effect: Option<VimEffect<Act>>) -> (&'static str, bool) {
 #[test]
 fn an_app_operator_takes_motions_objects_lines_and_selections() {
     let mut v = app_vim();
-    assert_eq!(operated(press_app(&mut v, "cw")), ("fn ", false));
-    assert_eq!(operated(press_app(&mut v, "c$")), ("fn main() {", false));
-    assert_eq!(operated(press_app(&mut v, "cc")), ("fn main() {", true));
+    assert_eq!(operated(press(&mut v, "cw")), ("fn ", false));
+    assert_eq!(operated(press(&mut v, "c$")), ("fn main() {", false));
+    assert_eq!(operated(press(&mut v, "cc")), ("fn main() {", true));
     assert_eq!(
-        operated(press_app(&mut v, "2cc")),
+        operated(press(&mut v, "2cc")),
         ("fn main() {\n    let s = \"hello world\";", true)
     );
     assert_eq!(
-        operated(press_app(&mut v, "cj")),
+        operated(press(&mut v, "cj")),
         ("fn main() {\n    let s = \"hello world\";", true)
     );
-    press_app(&mut v, "jfh");
-    assert_eq!(operated(press_app(&mut v, "ciw")), ("hello", false));
-    assert_eq!(operated(press_app(&mut v, "ci\"")), ("hello world", false));
-    assert_eq!(operated(press_app(&mut v, "vec")), ("hello", false));
+    press(&mut v, "jfh");
+    assert_eq!(operated(press(&mut v, "ciw")), ("hello", false));
+    assert_eq!(operated(press(&mut v, "ci\"")), ("hello world", false));
+    assert_eq!(operated(press(&mut v, "vec")), ("hello", false));
     assert_eq!(v.mode(), VimMode::Normal, "an operator ends the selection");
-    press_app(&mut v, "G");
+    press(&mut v, "G");
     assert_eq!(
-        operated(press_app(&mut v, "cip")),
+        operated(press(&mut v, "cip")),
         ("second paragraph here\nand more", false)
     );
-    // The cursor went to the paragraph's start, as an operator leaves it; yank works beside it.
     assert_eq!(
-        yanked_app(press_app(&mut v, "yy")),
-        "second paragraph here\n"
+        yanked(press(&mut v, "yy")),
+        "second paragraph here\n",
+        "operators leave the cursor at the start of their range"
     );
-}
-
-fn yanked_app(effect: Option<VimEffect<Act>>) -> String {
-    match effect {
-        Some(VimEffect::Copy(s)) => s,
-        other => panic!("no yank: {other:?}"),
-    }
 }
 
 #[test]
 fn app_actions_sequences_and_the_leader() {
     let mut v = app_vim();
-    assert_eq!(press_app(&mut v, "]"), Some(VimEffect::Consumed));
+    assert_eq!(press(&mut v, "]"), Some(VimEffect::Consumed));
     assert_eq!(v.pending(), "]");
     assert_eq!(
-        press_app(&mut v, "c"),
+        press(&mut v, "c"),
         Some(VimEffect::Action {
             action: Act::Next,
             count: None
         })
     );
     assert_eq!(
-        press_app(&mut v, "3]c"),
+        press(&mut v, "3]c"),
         Some(VimEffect::Action {
             action: Act::Next,
             count: Some(3)
         })
     );
-    // The leader is `\` by default.
     assert_eq!(
-        press_app(&mut v, "\\q"),
+        press(&mut v, "\\q"),
         Some(VimEffect::Action {
             action: Act::Quit,
             count: None
-        })
+        }),
+        "the default leader is a backslash"
     );
-    // A sequence that goes nowhere is dropped; an unbound key is the app's.
-    assert_eq!(press_app(&mut v, "]x"), Some(VimEffect::Consumed));
+    assert_eq!(
+        press(&mut v, "]x"),
+        Some(VimEffect::Consumed),
+        "invalid sequences are consumed"
+    );
     assert!(!v.is_pending());
-    assert_eq!(press_app(&mut v, "Q"), None);
+    assert_eq!(
+        press(&mut v, "Q"),
+        None,
+        "unbound keys remain available to the app"
+    );
 
-    // Another leader. `,` is Vim's (find back), so it's unbound first.
     let comma = [Stroke::Char(',')];
-    let keys = Keymap::vim()
+    let keys = Keymap::<Act>::vim()
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit")
         .unbind(Table::Normal, &comma)
         .unbind(Table::Visual, &comma)
@@ -867,7 +759,7 @@ fn app_actions_sequences_and_the_leader() {
         .leader(KeyStroke::Char(','));
     let mut v = Vim::new(keys);
     assert_eq!(
-        press_app(&mut v, ",q"),
+        press(&mut v, ",q"),
         Some(VimEffect::Action {
             action: Act::Quit,
             count: None
@@ -896,7 +788,7 @@ fn hint_groups_keep_their_kind_when_other_groups_are_empty() {
 #[test]
 fn hints_come_from_the_keymap() {
     let mut v = app_vim();
-    press_app(&mut v, "]");
+    press(&mut v, "]");
     assert_eq!(
         v.hints().unwrap(),
         (
@@ -904,16 +796,14 @@ fn hints_come_from_the_keymap() {
             vec![(HintGroup::App, vec![hint("c", "Next comment")])]
         )
     );
-    press_app(&mut v, "x");
-    press_app(&mut v, "\\");
+    press(&mut v, "x");
+    press(&mut v, "\\");
     assert_eq!(
         v.hints().unwrap().1,
         vec![(HintGroup::App, vec![hint("q", "Quit")])]
     );
-    press_app(&mut v, "x");
-
-    // In Visual mode the app's operator comes first, then Vim's.
-    press_app(&mut v, "v");
+    press(&mut v, "x");
+    press(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Mode(VimMode::Visual));
     assert_eq!(
@@ -932,10 +822,8 @@ fn hints_come_from_the_keymap() {
             ),
         ]
     );
-    press_app(&mut v, "v");
-
-    // After an operator: the line, then text objects and motions.
-    press_app(&mut v, "c");
+    press(&mut v, "v");
+    press(&mut v, "c");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Typed("c".into()));
     assert_eq!(
@@ -963,7 +851,7 @@ fn hints_come_from_the_keymap() {
             hint("t", "Up to a character"),
         ]
     );
-    press_app(&mut v, "i");
+    press(&mut v, "i");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Typed("ci".into()));
     assert_eq!(
@@ -985,15 +873,14 @@ fn hints_come_from_the_keymap() {
 
 #[test]
 fn objects_are_their_own_table() {
-    // An app can add a text object, and it's offered after `i` and `a` only.
     let mut v = Vim::new(Keymap::<Act>::vim().object(
         &[Stroke::Char('q')],
         Object::Quotes('"'),
         "Any quotes",
     ));
-    press_app(&mut v, "jfh");
-    assert_eq!(yanked_app(press_app(&mut v, "yiq")), "hello world");
-    assert_eq!(press_app(&mut v, "q"), None, "q alone is still unbound");
+    press(&mut v, "jfh");
+    assert_eq!(yanked(press(&mut v, "yiq")), "hello world");
+    assert_eq!(press(&mut v, "q"), None, "q alone is still unbound");
 }
 
 #[test]
@@ -1017,13 +904,13 @@ fn rebinding_replaces_and_unbinding_drops() {
         .unbind(Table::Normal, &[Stroke::Char('N')]);
     let mut v = Vim::new(keys);
     assert_eq!(
-        press_app(&mut v, "n"),
+        press(&mut v, "n"),
         Some(VimEffect::Action {
             action: Act::Next,
             count: None
         })
     );
-    assert_eq!(press_app(&mut v, "N"), None);
+    assert_eq!(press(&mut v, "N"), None);
 }
 
 #[test]
@@ -1064,19 +951,12 @@ fn a_huge_count_neither_panics_nor_hangs() {
 fn search_matches(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
     let mut vim = Vim::default();
     press_on(&mut vim, text, &format!("/{query}"));
-    vim.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        text,
-    );
+    key(&mut vim, text, Key::Enter);
     vim.matches(text)
 }
 
 #[test]
 fn search_survives_characters_whose_lowercase_changes_length() {
-    // `İ` lowercases to two characters, three bytes where it had two.
     let text = "İstanbul Hello hello";
     assert_eq!(search_matches(text, "hello"), vec![10..15, 16..21]);
     assert_eq!(search_matches(text, "i̇stanbul"), vec![0..9]);
@@ -1092,37 +972,18 @@ fn pending_shows_the_keys_typed_with_their_counts() {
         "y2i",
         "the count between the operator and the object"
     );
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     press(&mut v, "3y2f");
     assert_eq!(v.pending(), "3y2f");
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
 
-    // Rebound keys show as typed, not as Vim's defaults.
     let keys = Keymap::<NoAction>::vim()
         .motion(&[Stroke::Char('x')], Motion::Find(Find::To), None)
         .bind_pending(&[Stroke::Char('I')], PendingCommand::Inner, None);
     let mut v = Vim::new(keys);
     press(&mut v, "x");
-    assert_eq!(v.pending(), "x");
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    assert_eq!(v.pending(), "x", "pending text uses the rebound find key");
+    key(&mut v, TEXT, Key::Escape);
     press(&mut v, "yI");
     assert_eq!(v.pending(), "yI");
 }
@@ -1144,13 +1005,7 @@ fn a_count_on_a_text_object_takes_that_many() {
     assert_eq!(yanked(press(&mut v, "y2aw")), "fn main");
     press(&mut v, "v3iw");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "fn main");
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     assert_eq!(
         yanked(press(&mut v, "gg0y3ip")),
         TEXT,
@@ -1160,19 +1015,7 @@ fn a_count_on_a_text_object_takes_that_many() {
     let text = "f(a, (b), c)";
     let mut v = Vim::default();
     press_on(&mut v, text, "fb");
-    let yank = |v: &mut Vim, keys: &str| {
-        let mut last = None;
-        for c in keys.chars() {
-            last = v.key(
-                &KeyEvent {
-                    key: Key::Text(c.to_string()),
-                    mods: Mods::default(),
-                },
-                text,
-            );
-        }
-        yanked(last)
-    };
+    let yank = |v: &mut Vim, keys: &str| yanked(press_on(v, text, keys));
     assert_eq!(yank(&mut v, "yi("), "b");
     press_on(&mut v, text, "fb");
     assert_eq!(yank(&mut v, "y2i("), "a, (b), c", "the second pair out");
@@ -1185,13 +1028,7 @@ fn a_typed_backslash_b_is_searched_as_typed() {
     let text = r"foobar barfoo \bfoo";
     let mut v = Vim::default();
     press_on(&mut v, text, r"/\bfoo");
-    v.key(
-        &KeyEvent {
-            key: Key::Enter,
-            mods: Mods::default(),
-        },
-        text,
-    );
+    key(&mut v, text, Key::Enter);
     let found: Vec<&str> = v.matches(text).iter().map(|r| &text[r.clone()]).collect();
     assert_eq!(
         found,
@@ -1199,7 +1036,6 @@ fn a_typed_backslash_b_is_searched_as_typed() {
         "a backslash the user typed is part of the query"
     );
 
-    // `*` searches whole words.
     let mut v = Vim::default();
     press_on(&mut v, text, "*");
     let found: Vec<usize> = v.matches(text).iter().map(|r| r.start).collect();
@@ -1233,13 +1069,7 @@ fn hints_show_what_a_count_can_take() {
             .any(|h| h.keys == "y"),
         "so do operators"
     );
-    v.key(
-        &KeyEvent {
-            key: Key::Escape,
-            mods: Mods::default(),
-        },
-        TEXT,
-    );
+    key(&mut v, TEXT, Key::Escape);
     press(&mut v, "v3");
     assert_eq!(
         v.hints().expect("in visual mode too").0,
@@ -1251,24 +1081,11 @@ fn hints_show_what_a_count_can_take() {
 fn half_a_page_is_the_page_the_app_sets() {
     let text: String = (0..100).map(|i| format!("line {i}\n")).collect();
     let line = |v: &Vim| text[..v.cursor(&text).start].matches('\n').count();
-    let ctrl_d = |v: &mut Vim| {
-        v.key(
-            &KeyEvent {
-                key: Key::Command('d'),
-                mods: Mods {
-                    ctrl: true,
-                    cmd: true,
-                    ..Mods::default()
-                },
-            },
-            &text,
-        );
-    };
     let mut v = Vim::default();
-    ctrl_d(&mut v);
+    ctrl(&mut v, &text, 'd');
     assert_eq!(line(&v), 15, "without a page height, 15 lines as before");
     let mut v = Vim::default().page_lines(40);
-    ctrl_d(&mut v);
+    ctrl(&mut v, &text, 'd');
     assert_eq!(line(&v), 20, "half of 40");
 }
 
