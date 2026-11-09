@@ -156,10 +156,22 @@ pub enum Event {
     StdinItems(Vec<MenuItem>),
     StdinDone,
     StdinFailed(String),
-    SourceDone { token: Token, result: Result<Vec<MenuItem>, String> },
-    SearchDone { token: Token, results: Vec<RowOffset> },
-    PreviewDone { token: Token, result: Result<CommandResult, String> },
-    OperationDone { token: Token, result: Result<CommandResult, String> },
+    SourceDone {
+        token: Token,
+        result: Result<Vec<MenuItem>, String>,
+    },
+    SearchDone {
+        token: Token,
+        results: Vec<RowOffset>,
+    },
+    PreviewDone {
+        token: Token,
+        result: Result<CommandResult, String>,
+    },
+    OperationDone {
+        token: Token,
+        result: Result<CommandResult, String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
