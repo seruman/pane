@@ -155,7 +155,7 @@ fn cancellation_mid_scan_stops_early() {
         assert_eq!(result, Err(Cancelled), "{size} rows");
         let scored = observed.load(Ordering::Relaxed).max(SCORED_ROWS.get());
         assert!(scored > 0, "{size} rows cancelled before matching started");
-        assert!(scored <= 256, "{size} rows scored {scored} rows on one thread before stopping");
+        assert!(scored < CHUNK, "{size} rows scored {scored} rows on one thread before stopping");
     }
 }
 
