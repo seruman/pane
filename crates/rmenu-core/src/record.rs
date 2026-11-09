@@ -43,7 +43,8 @@ impl fmt::Display for RecordError {
 
 impl std::error::Error for RecordError {}
 
-/// One input generation. Errors are terminal; a failed append returns no partial rows.
+/// Decodes one input stream into rows. Errors are terminal.
+/// A failed append returns no partial rows.
 pub struct RecordDecoder {
     format: InputFormat,
     pending: Vec<u8>,
@@ -60,7 +61,8 @@ enum State {
 }
 
 impl RecordDecoder {
-    /// Per record, excluding its delimiter (including any CR).
+    /// Limits the bytes in one record, excluding its delimiter.
+    /// A CR before a newline counts toward the limit.
     pub const MAXIMUM_RECORD_BYTES: usize = 1_048_576;
 
     pub fn new(format: InputFormat) -> Self {

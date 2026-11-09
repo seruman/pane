@@ -65,8 +65,9 @@ impl std::error::Error for CommandError {
     }
 }
 
-/// Cancels a running command from another thread; the command's whole process group is killed
-/// and reaped before `run` returns. Cancelling before `run` starts means nothing is spawned.
+/// Requests cancellation from another thread.
+/// On cancellation, `run` kills the command's process group and reaps its leader before returning.
+/// If cancellation precedes `run`, it spawns nothing.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel {
     cancelled: Arc<AtomicBool>,
@@ -279,9 +280,10 @@ pub struct Limits {
     pub output_bytes: usize,
 }
 
-/// Runs `argv` without a shell, `env` overlaid on ours, PATH resolved from the overlay.
-/// `input: None` connects stdin to /dev/null: tools such as glow or bat prefer a piped stdin
-/// over their file arguments. The limit is shared by stdout and stderr. Blocks the calling thread.
+/// Runs `argv` without a shell and blocks the calling thread until completion.
+/// Values in `env` override the inherited environment, including PATH for command lookup.
+/// With `input: None`, stdin connects to `/dev/null` rather than a pipe.
+/// The output limit counts stdout and stderr together.
 pub fn run(
     argv: &[String],
     input: Option<&[u8]>,
@@ -336,7 +338,7 @@ impl Group {
             tv_sec: limit.as_secs().try_into().expect("bounded exit wait fits time_t"),
             tv_nsec: limit.subsec_nanos().into(),
         };
-        // SAFETY: one change and room for one event, both live locals; the timeout is a live local.
+        // SAFETY: change, event, and timeout point to live locals. There is room for one event.
         let ready =
             unsafe { libc::kevent(queue.as_raw_fd(), &raw const change, 1, &raw mut event, 1, &raw const timeout) };
         let error = if ready < 0 {
