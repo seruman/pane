@@ -110,11 +110,12 @@ impl Review {
         self.comments.iter().find(|(i, _)| *i == id).map(|(_, c)| c)
     }
 
-    pub fn get_mut(&mut self, id: CommentId) -> Option<&mut Comment> {
-        self.comments
-            .iter_mut()
-            .find(|(i, _)| *i == id)
-            .map(|(_, c)| c)
+    pub fn set_body(&mut self, id: CommentId, body: String) -> bool {
+        let Some((_, comment)) = self.comments.iter_mut().find(|(i, _)| *i == id) else {
+            return false;
+        };
+        comment.body = body;
+        true
     }
 
     /// Where comment `id` is in the order, counted from 0, as the `#n` cards show it.

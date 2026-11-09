@@ -254,13 +254,12 @@ impl App_ {
                 self.note = Some(format!("Comment #{} saved", self.number(id)));
             }
             Target::Edit(id) => {
-                let Some(c) = self.review.get_mut(id) else {
+                let Some(c) = self.review.get(id) else {
                     return;
                 };
                 if c.kind == Kind::Comment && body.is_empty() {
                     self.delete(id);
-                } else {
-                    c.body = body;
+                } else if self.review.set_body(id, body) {
                     self.note = Some(format!("Comment #{} saved", self.number(id)));
                 }
             }

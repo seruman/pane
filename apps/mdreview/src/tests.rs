@@ -81,6 +81,28 @@ fn the_page_text_is_the_whole_documents() {
 }
 
 #[test]
+fn editing_comment_bodies_preserves_document_order() {
+    let mut review = Review::default();
+    let later = review.add(Comment::on(20..25, "later"));
+    let general = review.add(Comment::general("general"));
+    let earlier = review.add(Comment::on(2..5, "earlier"));
+    assert!(review.set_body(later, "edited".into()));
+    assert_eq!(
+        review.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        [general, earlier, later]
+    );
+    let comment = review.get(later).unwrap();
+    assert_eq!(comment.body, "edited");
+    assert_eq!(comment.range, Some(20..25));
+    assert!(review.remove(earlier));
+    assert!(!review.set_body(earlier, "deleted".into()));
+    assert_eq!(
+        review.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+        [general, later]
+    );
+}
+
+#[test]
 fn feedback_quotes_and_numbers_in_document_order() {
     let s = app(SRC);
     let mut review = Review::default();
