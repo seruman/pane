@@ -1253,6 +1253,35 @@ fn copy_puts_chosen_values_on_the_clipboard_and_stays_open() {
 }
 
 #[test]
+fn copy_refuses_stale_source_and_query_snapshots() {
+    for replace_source in [false, true] {
+        let mut h = start(json!({
+            "sources": [src("a", json!({})), src("b", json!({}))],
+            "bindings": [{"key": "ctrl+y", "action": "copy"}]
+        }));
+        h.load("alpha\nbeta\n");
+        if replace_source {
+            h.switch("b");
+        } else {
+            h.query("beta");
+        }
+        h.perform(0);
+        assert_eq!(h.beeps, 1, "replace_source={replace_source}");
+        assert!(h.copied.is_empty(), "replace_source={replace_source}");
+        assert!(h.is_open(), "replace_source={replace_source}");
+        if replace_source {
+            h.load("bravo\n");
+        } else {
+            h.settle();
+        }
+        assert!(h.copied.is_empty(), "the refused copy must not replay, replace_source={replace_source}");
+        h.perform(0);
+        assert_eq!(h.copied, [if replace_source { "bravo" } else { "beta" }], "replace_source={replace_source}");
+        assert_eq!(h.beeps, 1, "replace_source={replace_source}");
+    }
+}
+
+#[test]
 fn command_failure_trims_and_bounds_stderr() {
     let result = |stderr: Vec<u8>| CommandResult { stdout: Vec::new(), stderr, status: ExitStatus::Code(3) };
     assert_eq!(command_failure(&result(b"  \n".to_vec())), "Command exited 3");
