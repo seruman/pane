@@ -272,6 +272,7 @@ impl Theme {
         let pick = |d: f32, l: f32| if dark { d } else { l };
         let gray = |d: f32, l: f32| mix(fg, bg, pick(d, l));
         let ink = |d: f32, l: f32| fg.alpha(pick(d, l));
+        let text_tertiary = gray(0.6, 0.66);
         let radius = Radius {
             field: 10.0,
             row: 8.0,
@@ -295,7 +296,7 @@ impl Theme {
             scrim: black.alpha(pick(0.35, 0.15)),
             text: fg,
             text_secondary: gray(0.42, 0.48),
-            text_tertiary: gray(0.6, 0.66),
+            text_tertiary,
             separator: gray(0.84, 0.895),
             border: ink(0.12, 0.14),
             hover: ink(0.07, 0.05),
@@ -319,7 +320,7 @@ impl Theme {
             done: accent,
             warning: kit.c.warning.fg,
             danger: kit.c.danger.fg,
-            idle: gray(0.6, 0.66),
+            idle: text_tertiary,
             shadow: black.alpha(pick(0.35, 0.08)),
             shadow_strong: black.alpha(pick(0.5, 0.18)),
             radius,
