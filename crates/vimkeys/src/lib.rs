@@ -1,14 +1,13 @@
-//! Vim's keys for reading text: a cursor and visual selections moved with Vim's motions,
-//! text objects, operators and search. It knows nothing about what draws the text: the app keeps
-//! a [`Vim`] beside the text it shows (a page's `rune_kit::markdown::RenderedText`,
-//! a log, a file), feeds it keys, and paints [`Vim::cursor`], [`Vim::selection`] and
-//! [`Vim::matches`] back onto the page.
+//! Vim motions, text objects, operators and search for reading text.
 //!
-//! What each key does is a [`Keymap`]: [`Keymap::vim`] has Vim's own keys, as bindings like any
-//! other, and an app adds its actions and operators to it (or rebinds Vim's). An app operator
-//! takes a motion, an object or the selection as `y` does (`cw`, `cip`, `cc`, `v…c`) and comes
-//! back as [`VimEffect::Operator`] with the range; an app action as [`VimEffect::Action`].
-//! [`Vim::hints`] lists what can follow the keys typed so far, from the same keymap.
+//! The app owns the text and a [`Vim`] state. It passes key events to [`Vim::key`] and draws
+//! [`Vim::cursor`], [`Vim::selection`] and [`Vim::matches`] on the text. Positions and ranges
+//! use byte offsets in the supplied text, including rendered Markdown, logs and files.
+//!
+//! A [`Keymap`] assigns commands to key sequences. [`Keymap::vim`] provides the default Vim
+//! bindings, which apps can replace or extend. App operators consume a motion, text object
+//! or selection and return [`VimEffect::Operator`] with its range. App actions return
+//! [`VimEffect::Action`]. [`Vim::hints`] lists available continuations from the same keymap.
 
 mod keymap;
 
@@ -69,19 +68,18 @@ pub enum HintsFor {
 /// What a key asked the app to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VimEffect<A, O = A> {
-    /// The cursor, selection or search changed, or a key was taken toward a command: repaint,
-    /// and scroll the cursor into view.
+    /// A key changed the cursor, selection, search or pending command. Repaint and scroll
+    /// the cursor into view.
     Consumed,
     /// Copy this text (a yank).
     Copy(String),
-    /// Copy the source behind this range of the text (a `gy` yank), which only the app can
-    /// find: for a rendered page, the Markdown it was drawn from. `linewise` yanks take whole
-    /// lines.
+    /// Copy the source behind this text range (a `gy` yank). The app maps the range to its
+    /// source, such as Markdown behind a rendered page. `linewise` yanks take whole lines.
     CopySource { range: Range<usize>, linewise: bool },
     /// An app action ([`Command::App`]), with the count typed before it, if any.
     Action { action: A, count: Option<usize> },
-    /// An app operator ([`Operator::App`]) over `range` of the text: what its motion or object
-    /// covered, or the selection. `linewise` when it covers whole lines (`cc`, `cj`, `V…c`).
+    /// An app operator ([`Operator::App`]) over the range covered by a motion, text object or
+    /// selection. `linewise` marks whole lines (`cc`, `cj`, `V…c`).
     Operator {
         action: O,
         range: Range<usize>,
@@ -105,22 +103,20 @@ enum Pending<A> {
     None,
     /// Strokes toward a binding in the mode's table.
     Keys(Vec<Stroke>),
-    /// An operator, waiting for a motion or object: its keys (`yy`, `gyy` take the line), its
-    /// count, and the strokes toward the motion so far.
+    /// An operator prefix and the strokes toward its motion or object.
     Operator {
         op: OpState<A>,
         typed: Vec<Stroke>,
     },
-    /// `i` or `a`, waiting for an object; after an operator, or in Visual mode. `opened` is
-    /// the count and keys that asked for it (`2i`), `typed` the strokes toward the object.
+    /// `i` or `a`, waiting for an object after an operator or in Visual mode.
+    /// `opened` holds the prefix count and keys (`2i`). `typed` holds the object's keys.
     Object {
         around: bool,
         op: Option<OpState<A>>,
         opened: (Option<usize>, Vec<Stroke>),
         typed: Vec<Stroke>,
     },
-    /// `f F t T`, waiting for the character; after an operator, its keys and count too.
-    /// `opened` is the count and keys that asked for it.
+    /// `f F t T`, waiting for a character. `opened` holds the count and keys that started it.
     Find {
         find: Find,
         op: Option<OpState<A>>,
@@ -128,8 +124,8 @@ enum Pending<A> {
     },
 }
 
-/// The state: mode, cursor, selection anchor and whatever keys are half typed, with the keymap
-/// that says what keys do. Positions are byte offsets into the text passed with each key.
+/// Cursor, selection and pending input interpreted through a keymap.
+/// Positions are byte offsets into the text passed with each key.
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct Vim<A = NoAction, O = A> {
@@ -173,16 +169,15 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
     }
 
-    /// Never rest the cursor on an empty line: `j`, `k` and the other motions step over them,
-    /// and `{` `}` go to the start of the previous and next paragraph. For text whose blank
-    /// lines only separate blocks and draw nothing, such as a rendered page.
+    /// Skip empty lines during movement. `{` and `}` go to paragraph starts.
+    /// Use this for text whose empty lines separate blocks but draw nothing.
     pub fn skip_blank_lines(mut self, on: bool) -> Self {
         self.skip_blank_lines = on;
         self
     }
 
-    /// The page Ctrl-D and Ctrl-U move half of, in lines: the app's view of the text. Without
-    /// one they move 15 lines.
+    /// Sets the page height in lines. Ctrl-D and Ctrl-U move half this many lines.
+    /// Without a page height, they move 15 lines.
     pub fn page_lines(mut self, lines: usize) -> Self {
         self.half_page_lines = (lines / 2).max(1);
         self
@@ -269,10 +264,9 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         }
     }
 
-    /// What can follow the keys typed so far, for a which-key panel: what's been typed (`y`,
-    /// `gy`, `yi`, `]`, the leader) or the visual mode, and the bound keys that can come next,
-    /// grouped: the app's, then Vim's commands, then motions. `None` in Normal mode with
-    /// nothing half typed, and while a search is being typed.
+    /// Available keys for a which-key panel. The header identifies pending input or visual mode.
+    /// Groups list app commands first, then Vim commands, then motions.
+    /// Returns `None` in Normal mode without pending input and while typing a search.
     pub fn hints(&self) -> Option<(HintsFor, HintGroups)> {
         let header = HintsFor::Typed(self.pending());
         match &self.pending {
@@ -590,15 +584,12 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         VimEffect::Consumed
     }
 
-    /// The count for a motion, times the operator's: `2y3w` moves six words.
     fn motion_count(&mut self, op_count: Option<usize>) -> (usize, Option<usize>) {
         let raw = self.count.take();
         let n = (raw.unwrap_or(1) * op_count.unwrap_or(1)).min(MAX_COUNT);
         (n, raw)
     }
 
-    /// Runs motion `m`, typed as `keys`: moves the cursor, or after an operator, applies it over
-    /// what the motion covers. `f F t T` wait for their character first.
     fn finish_motion(
         &mut self,
         m: Motion,
@@ -801,7 +792,6 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         self.cancel()
     }
 
-    /// A text object at the cursor: selected in Visual mode, or what an operator acts on.
     fn finish_object(
         &mut self,
         object: Object,
@@ -832,8 +822,6 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         self.cancel()
     }
 
-    /// The operator over whole lines from the cursor's: as many as `count` times the count
-    /// typed after the operator (`2yy`, `y2y`).
     fn operate_lines(
         &mut self,
         op: Operator<O>,
@@ -937,8 +925,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         effect
     }
 
-    /// The byte where the search's next (or previous) match starts, wrapping round, with a note
-    /// of which match it is; `None`, and a note, when there's none.
+    /// Finds the next match, wrapping at the text boundary, and updates the status message.
     fn next_match(&mut self, text: &str, backward: bool) -> Option<usize> {
         self.search.hidden = false;
         let found = find_all(text, &self.search.query);
@@ -1058,7 +1045,6 @@ fn class(c: char, big: bool) -> CharClass {
     }
 }
 
-/// A search: the text to find, and whether it must start a word (`*` and `#` search whole words).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct Query {
     text: String,
@@ -1091,9 +1077,9 @@ fn find_all(text: &str, query: &Query) -> Vec<Range<usize>> {
         .collect()
 }
 
-/// The byte ranges of `text` where `query` occurs, without overlaps. With `fold`, both are
-/// compared lowercased, a character at a time, and the ranges are still `text`'s own: a
-/// character whose lowercase is longer (`İ`, `ẞ`) doesn't shift them.
+/// Non-overlapping byte ranges where `query` occurs in `text`.
+/// With `fold`, matching compares lowercase characters. Ranges refer to the original text
+/// even when lowercasing a character changes its length (`İ`, `ẞ`).
 pub fn find_folded(text: &str, query: &str, fold: bool) -> Vec<Range<usize>> {
     let lower = |c: char| -> Vec<char> {
         if fold {
@@ -1352,7 +1338,6 @@ fn counted_object(
         Object::Pair(..) => {
             let mut range = first;
             for _ in 1..count {
-                // The pair around this one: start looking from just outside its opening bracket.
                 let outer_at = if around { range.start } else { range.start - 1 };
                 let Some(outer) = outer_at
                     .checked_sub(1)

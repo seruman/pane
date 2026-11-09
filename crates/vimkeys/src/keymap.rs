@@ -4,17 +4,17 @@
 //! | Table | When | Holds |
 //! |---|---|---|
 //! | [`Table::Normal`] | nothing half typed | motions, operators, mode switches, app actions |
-//! | [`Table::Visual`] | `v` or `V` | motions; operators act on the selection |
+//! | [`Table::Visual`] | `v` or `V` | motions and operators on the selection |
 //! | pending ([`Keymap::bind_pending`]) | after an operator | motions and text-object prefixes |
 //! | objects ([`Keymap::object`]) | after `i` or `a` | text objects |
 //!
-//! [`Keymap::vim`] holds Vim's own keys; an app adds its actions and operators to it, or rebinds
-//! and drops Vim's. Counts (`3w`, `2y3w`), the character after `f` `t` and a typed search are
+//! [`Keymap::vim`] holds Vim's own keys. An app can add actions and operators, replace bindings,
+//! or remove them. Counts (`3w`, `2y3w`), the character after `f` `t` and a typed search are
 //! read by [`Vim`](crate::Vim) itself, not looked up.
 //!
-//! There's no timeout: a sequence can't also start a longer one in the same table (`]c` and
-//! `]cc` can't both be bound), so every key either finishes a binding or waits for the next.
-//! Binding one that breaks this panics, naming both.
+//! Key sequences have no timeout. A sequence cannot start another binding in the same table.
+//! For example, `]c` and `]cc` cannot both be bound. Each key either finishes a binding or waits
+//! for the next key. Conflicting bindings panic with both sequences in the message.
 
 use rune::{Key, KeyEvent};
 
@@ -65,8 +65,8 @@ pub enum KeyStroke {
 }
 
 impl Stroke {
-    /// The stroke a key event is; `None` for one no binding can name (Escape, which cancels,
-    /// a Cmd chord, a modifier on its own).
+    /// Converts a key event to a binding stroke. Returns `None` for Escape, Cmd chords and
+    /// standalone modifiers.
     pub fn from_event(ev: &KeyEvent) -> Option<Stroke> {
         let m = ev.mods;
         Some(match &ev.key {
@@ -144,8 +144,7 @@ impl Stroke {
     }
 }
 
-/// `keys` as a hint shows them: `gy`, `]c`, `\e`; spaced when a key's name is a word
-/// (`g enter`).
+/// Renders keys such as `gy`, `]c` and `\e` for hints. Word-like names use spaces (`g enter`).
 pub(crate) fn render(keys: &[Stroke], leader: KeyStroke) -> String {
     let labels: Vec<String> = keys.iter().map(|k| k.label(leader)).collect();
     let spaced = keys
@@ -260,8 +259,8 @@ pub enum Operator<A> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command<A, O = A> {
     Motion(Motion),
-    /// Waits for a motion or object in Normal mode (`yw`, `yiw`); its own keys again take the
-    /// line (`yy`, `gyy`). In Visual mode it takes the selection.
+    /// Waits for a motion or object in Normal mode (`yw`, `yiw`). Repeating the operator or its
+    /// last key takes the line (`yy`, `gyy`, `gygy`). In Visual mode it takes the selection.
     Operator(Operator<O>),
     /// The operator on the cursor's line, or as many as the count says (`Y`).
     Lines(Operator<O>),
@@ -364,7 +363,7 @@ pub enum PendingCommand {
 struct Binding<C> {
     keys: Vec<Stroke>,
     command: C,
-    /// What a hint calls it; `None` keeps it out of the hints.
+    /// The hint label. `None` hides this binding from hints.
     what: Option<&'static str>,
 }
 
@@ -372,18 +371,24 @@ struct Binding<C> {
 pub(crate) enum Lookup<T> {
     /// No binding starts with it.
     None,
-    /// Bindings start with it; another key comes.
+    /// A binding starts with these keys and needs another key.
     Prefix,
     Exact(T),
 }
 
 /// Key bindings. Build one from [`Keymap::vim`] and add to it:
 ///
-/// ```ignore
+/// ```
+/// use vimkeys::{Keymap, Operator, Stroke, Vim};
+///
+/// #[derive(Clone)]
+/// enum Act { Comment, NextComment, Quit }
+///
 /// let keys = Keymap::vim()
 ///     .operator(&[Stroke::Char('c')], Operator::App(Act::Comment), "Comment")
 ///     .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::NextComment, "Next comment")
 ///     .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, "Quit");
+/// let vim = Vim::new(keys);
 /// ```
 #[derive(Clone, Debug)]
 #[must_use]
@@ -407,7 +412,7 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
 
     /// Vim's keys for reading: motions (`h j k l`, `w b e W B E`, `0 ^ $`, `gg G`, `{ }`, `%`,
     /// `f F t T ; ,`, `n N * #`, Ctrl-D and Ctrl-U, the arrows), `y` and `gy` (yank as source),
-    /// `Y`, `v` `V` `o`, `/` `?`, and the text objects `w W p " ' ` ( ) b [ ] { } B < >`.
+    /// `Y`, `v` `V` `o`, `/` `?`, and the text objects ``w W p " ' ` ( ) b [ ] { } B < >``.
     pub fn vim() -> Self {
         use Motion as M;
         use Stroke::Char as C;
@@ -542,6 +547,9 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
     }
 
     /// The concrete key [`Stroke::Leader`] stands for.
+    ///
+    /// # Panics
+    ///
     /// Panics when the new leader makes one binding start another.
     ///
     /// ```compile_fail
@@ -558,10 +566,13 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
         self
     }
 
-    /// Binds `keys` in `table`, replacing a binding of the same keys. `what` names it in hints;
-    /// `None` keeps it out of them. Panics when `keys` would start another binding there or
-    /// another would start it, when it starts with a digit (`1`–`9` start a count), or when
-    /// `command` requires a different mode.
+    /// Binds `keys` in `table`, replacing a binding of the same keys. `what` names it in hints.
+    /// `None` hides the binding from hints.
+    ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a prefix conflict, a leading digit from 1 to 9, or a command that
+    /// requires a different mode. Digits from 1 to 9 start a count.
     pub fn bind(
         mut self,
         table: Table,
@@ -597,6 +608,10 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
 
     /// Binds a motion or text-object prefix after an operator.
     ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a prefix conflict, or a leading digit from 1 to 9.
+    ///
     /// ```compile_fail
     /// use vimkeys::{Command, Keymap, NoAction, Stroke};
     /// Keymap::<NoAction>::empty().bind_pending(&[Stroke::Char('v')], Command::Visual, None);
@@ -624,7 +639,11 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
         self
     }
 
-    /// Binds a motion where motions go: Normal, Visual and after an operator.
+    /// Binds a motion in Normal, Visual and operator-pending tables.
+    ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a leading digit from 1 to 9, or a prefix conflict in any table.
     pub fn motion(
         self,
         keys: &[Stroke],
@@ -639,6 +658,10 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
 
     /// Binds an operator in Normal mode, where it waits for a motion, and in Visual, where it
     /// takes the selection.
+    ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a leading digit from 1 to 9, or a prefix conflict in either table.
     pub fn operator(
         self,
         keys: &[Stroke],
@@ -656,11 +679,19 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
     }
 
     /// Binds an app action in Normal mode.
+    ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a prefix conflict, or a leading digit from 1 to 9.
     pub fn action(self, keys: &[Stroke], action: A, what: impl Into<Option<&'static str>>) -> Self {
         self.bind(Table::Normal, keys, Command::App(action), what)
     }
 
     /// Binds a text object, for after `i` or `a`.
+    ///
+    /// # Panics
+    ///
+    /// Panics for empty keys, a prefix conflict, or a leading digit from 1 to 9.
     pub fn object(
         mut self,
         keys: &[Stroke],
@@ -679,9 +710,9 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
         self
     }
 
-    /// Every described binding in `table`, grouped as [`Vim::hints`](crate::Vim::hints) groups
-    /// them: the app's, then Vim's commands. Motions are left out; they'd crowd a list of
-    /// everything.
+    /// Every described binding in `table`, grouped as in [`Vim::hints`](crate::Vim::hints).
+    /// App bindings come first, followed by Vim commands. Motions are omitted to keep the
+    /// complete binding list short.
     pub fn hints(&self, table: Table) -> HintGroups {
         self.next(table, &[])
             .into_iter()
@@ -822,8 +853,8 @@ fn insert<C>(
     check(name, list, leader);
 }
 
-/// Panics when one binding's keys start another's: with no timeout, the shorter would always
-/// win and the longer could never be typed.
+/// Rejects prefix conflicts. Without a timeout, the shorter binding would make the longer
+/// binding impossible to type.
 fn check<C>(name: &str, list: &[Binding<C>], leader: KeyStroke) {
     for (i, a) in list.iter().enumerate() {
         for b in &list[i + 1..] {
