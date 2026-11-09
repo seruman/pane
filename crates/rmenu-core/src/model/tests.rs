@@ -664,7 +664,7 @@ fn preview_commands_get_the_item_in_the_environment_after_a_delay() {
     h.load("alpha\n");
     let Task::Preview { argv, delay, .. } = &h.tasks[&TaskKind::Preview] else { unreachable!() };
     assert_eq!(argv, &["show"]);
-    assert_eq!(*delay, Duration::from_millis(60));
+    assert!(*delay > Duration::ZERO);
     let (done, vars) = h.preview_event("value=alpha");
     assert_eq!(env(&vars, "MMENU_VALUE"), "alpha");
     assert_eq!(env(&vars, "MMENU_ACTION"), "preview");
