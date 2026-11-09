@@ -473,6 +473,10 @@ fn an_app_can_build_its_own_palette() {
 }
 
 #[test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Keep the five control fixtures beside the same enabled, disabled, pointer, and keyboard assertions"
+)]
 fn disabled_controls_ignore_pointer_and_keyboard_actions() {
     #[derive(Clone, Copy, Debug)]
     enum Control {
