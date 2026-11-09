@@ -153,7 +153,9 @@ mod tests {
         );
         let back: ActionContext = serde_json::from_slice(&context.json()).unwrap();
         assert_eq!(back.items, vec![item]);
-        assert_eq!(context.environment()[3], ("MMENU_VALUE".into(), "'; echo bad\n$(whoami) /path".into()));
+        let environment = context.environment();
+        let value = environment.iter().find(|(key, _)| key == "MMENU_VALUE").map(|(_, value)| value.as_str());
+        assert_eq!(value, Some("'; echo bad\n$(whoami) /path"));
     }
 
     #[test]
