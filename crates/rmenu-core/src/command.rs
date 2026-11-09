@@ -587,11 +587,11 @@ mod tests {
 
     #[test]
     fn commands_get_only_stdio() {
+        const LEAK_FD: RawFd = 200;
         if run_in_child("commands_get_only_stdio", &[]) {
             return;
         }
         let file = std::fs::File::open("/dev/null").unwrap();
-        const LEAK_FD: RawFd = 200;
         let fd = unsafe { libc::dup2(file.as_raw_fd(), LEAK_FD) };
         assert_eq!(fd, LEAK_FD);
         let result = quick(&["/bin/ls", "/dev/fd"]).unwrap();
@@ -602,13 +602,13 @@ mod tests {
 
     #[test]
     fn a_descriptor_another_thread_opens_during_spawn_never_leaks() {
+        const LEAK_FD: RawFd = 250;
         if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks", &[]) {
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
         let null = std::fs::File::open("/dev/null").unwrap();
         let raw = null.as_raw_fd();
-        const LEAK_FD: RawFd = 250;
         let churn = {
             let stop = stop.clone();
             std::thread::spawn(move || {
