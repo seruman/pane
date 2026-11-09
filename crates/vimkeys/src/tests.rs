@@ -356,7 +356,7 @@ fn hints_follow_what_is_typed() {
         groups
             .iter()
             .flatten()
-            .any(|h| *h == hint("gy", "Yank as Markdown"))
+            .any(|h| *h == hint("gy", "Yank as source"))
     );
 }
 
@@ -511,7 +511,7 @@ fn hints_come_from_the_keymap() {
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "visual");
     assert_eq!(groups[0], vec![hint("c", "Comment")]);
-    assert!(groups[1].contains(&hint("gy", "Yank as Markdown")));
+    assert!(groups[1].contains(&hint("gy", "Yank as source")));
     assert!(groups[1].contains(&hint("o", "Go to the other end")));
     press_app(&mut v, "v");
 

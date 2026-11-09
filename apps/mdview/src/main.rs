@@ -19,7 +19,7 @@ use pane_ui::{Badge, Button, Theme, icons, kbd};
 use rune::{AppSpec, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text};
 use rune_kit::markdown::{Highlight, RenderedText};
 use rune_kit::{CodeFrame, Markdown, MarkdownStyle};
-use vimkeys::{Keymap, Stroke, Vim, VimEffect, VimMode};
+use vimkeys::{Keymap, Operator, Stroke, Vim, VimEffect, VimMode};
 
 const SAMPLE: &str = include_str!("sample.md");
 const COPIED_FOR: Duration = Duration::from_millis(1500);
@@ -72,8 +72,16 @@ impl Doc {
         Doc {
             path,
             source,
-            vim: Vim::new(Keymap::vim().action(&[Stroke::Char(' ')], Act::Tick, "Tick the task"))
-                .skip_blank_lines(true),
+            vim: Vim::new(
+                Keymap::vim()
+                    .operator(
+                        &[Stroke::Char('g'), Stroke::Char('y')],
+                        Operator::YankSource,
+                        "Yank as Markdown",
+                    )
+                    .action(&[Stroke::Char(' ')], Act::Tick, "Tick the task"),
+            )
+            .skip_blank_lines(true),
             copied: None,
             note: None,
         }

@@ -432,7 +432,7 @@ impl<A: Clone> Keymap<A> {
             k = k.object(keys, object, what);
         }
         k.operator(&[C('y')], Operator::Yank, "Yank")
-            .operator(&[C('g'), C('y')], Operator::YankSource, "Yank as Markdown")
+            .operator(&[C('g'), C('y')], Operator::YankSource, "Yank as source")
             .bind(
                 Table::Normal,
                 &[C('Y')],

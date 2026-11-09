@@ -97,6 +97,7 @@ enum Act {
 fn keymap() -> Keymap<Act> {
     use Stroke::{Char as C, Leader};
     Keymap::vim()
+        .operator(&[C('g'), C('y')], Operator::YankSource, "Yank as Markdown")
         .operator(&[C('c')], Operator::App(Act::Comment), "Comment")
         .operator(&[C('d')], Operator::App(Act::Remove), "Remove this")
         .action(&[C('C')], Act::General, "General comment")
