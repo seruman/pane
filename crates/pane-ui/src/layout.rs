@@ -31,6 +31,7 @@ impl Width {
 ///     .build(&theme)
 /// # }
 /// ```
+#[must_use]
 pub struct Page {
     children: Vec<El>,
     overlays: Vec<El>,
@@ -123,6 +124,7 @@ pub fn heading(title: impl Into<String>, theme: &Theme) -> El {
 
 /// Columns side by side while each has at least `min_width`, stacked one above the other when
 /// the pane is narrower. Columns share the extra width equally.
+#[must_use]
 pub struct Columns {
     children: Vec<(El, f32)>,
     min_width: f32,

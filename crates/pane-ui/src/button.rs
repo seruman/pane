@@ -57,6 +57,14 @@ impl ControlSize {
 
 /// Rex's capsule button.
 ///
+/// Keep the builder result until you build the element.
+///
+/// ```compile_fail
+/// #![deny(unused_must_use)]
+/// use pane_ui::Button;
+/// Button::new("Run").small();
+/// ```
+///
 /// ```no_run
 /// # use pane_ui::{Button, Theme, icons};
 /// # struct App;
@@ -66,6 +74,7 @@ impl ControlSize {
 /// Button::icon_only(&icons::REFRESH_CW, "Refresh").plain().build("refresh", &theme)
 /// # }
 /// ```
+#[must_use]
 pub struct Button {
     label: Option<String>,
     name: Option<String>,

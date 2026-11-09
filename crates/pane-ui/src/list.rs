@@ -6,6 +6,7 @@ use rune::{El, col, row, text};
 use crate::{Theme, Transform, hairline, with_separator};
 
 /// A row of a [`List`].
+#[must_use]
 pub struct ListRow {
     title: String,
     detail: Option<String>,
@@ -101,6 +102,7 @@ impl ListRow {
 
 /// An inset group of [`ListRow`]s with hairlines between them.
 #[derive(Default)]
+#[must_use]
 pub struct List {
     rows: Vec<ListRow>,
     empty: Option<El>,

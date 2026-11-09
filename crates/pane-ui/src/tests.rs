@@ -277,7 +277,7 @@ fn select_overlays_show_choices_apply_them_and_dismiss() {
 #[test]
 #[should_panic(expected = "highlight must be a byte range within the label")]
 fn menu_highlights_reject_split_unicode_characters() {
-    crate::MenuItem::new("éclair").highlight(Some(1..2));
+    let _item = crate::MenuItem::new("éclair").highlight(Some(1..2));
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn invalid_empty_and_reversed_menu_highlights_are_rejected() {
     for range in [1..1, 99..99, std::ops::Range { start: 2, end: 0 }] {
         assert!(
             std::panic::catch_unwind(|| {
-                crate::MenuItem::new("éclair").highlight(Some(range.clone()));
+                crate::MenuItem::new("éclair").highlight(Some(range.clone()))
             })
             .is_err(),
             "invalid range {range:?}"

@@ -9,6 +9,7 @@ use crate::{MenuItem, MenuTrailing, TextField, Theme, kbd, menu_section, popover
 
 /// One command in the palette.
 #[derive(Clone, Copy, Debug, Default)]
+#[must_use]
 pub struct PaletteEntry {
     pub title: &'static str,
     /// Entries without a section come first, then each section in order of first appearance.
@@ -120,6 +121,7 @@ impl PaletteKey {
 ///     .build("palette", &theme)
 /// # }
 /// ```
+#[must_use]
 pub struct CommandPalette<'a> {
     query: &'a TextEdit,
     field: TextField<'a>,

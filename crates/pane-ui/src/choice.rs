@@ -17,6 +17,7 @@ use crate::{ControlSize, MenuItem, Theme, Transform, icons, popover};
 ///     .on_select(|s: &mut App, i| s.tab = i).build("tabs", &theme)
 /// # }
 /// ```
+#[must_use]
 pub struct SegmentedControl {
     options: Vec<String>,
     selected: usize,
@@ -137,6 +138,7 @@ impl SegmentedControl {
 /// Page::new().child(select).overlays(layer).build(&theme)
 /// # }
 /// ```
+#[must_use]
 pub struct Select {
     options: Vec<String>,
     current: Option<usize>,

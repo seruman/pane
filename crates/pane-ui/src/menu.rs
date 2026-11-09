@@ -20,6 +20,7 @@ pub enum MenuTrailing {
 
 /// A menu or palette row. The selected row fills with the accent; `highlight` marks the part of
 /// the label a search matched.
+#[must_use]
 pub struct MenuItem {
     label: String,
     leading: Option<&'static Icon>,
@@ -222,6 +223,7 @@ pub fn popover(key: &str, theme: &Theme) -> El {
 ///     .build("menu", &theme)
 /// # }
 /// ```
+#[must_use]
 pub struct Menu {
     entries: Vec<Entry>,
     width: f32,

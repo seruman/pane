@@ -19,6 +19,7 @@ use crate::{ControlSize, Theme, Transform, hex_code, icons};
 /// TextField::search(&s.filter, |s: &mut App| &mut s.filter).placeholder("Filter files").fill().build("filter", &theme)
 /// # }
 /// ```
+#[must_use]
 pub struct TextField<'a> {
     edit: &'a TextEdit,
     bind: Transform,
@@ -125,6 +126,7 @@ impl<'a> TextField<'a> {
 
 /// Rex's toggle switch. `name` is read by screen readers; it isn't drawn, since a toggle sits
 /// beside its row's title.
+#[must_use]
 pub struct Toggle {
     on: bool,
     name: String,
@@ -166,6 +168,7 @@ impl Toggle {
 }
 
 /// A checkbox with an optional label; the whole row toggles it.
+#[must_use]
 pub struct Checkbox {
     checked: bool,
     label: Option<String>,
@@ -256,6 +259,7 @@ impl Checkbox {
 
 /// A slider from 0 to 1 with a gradient track, as Volume or Hue: an optional label and value
 /// over the track. The arrow keys step it by 0.01.
+#[must_use]
 pub struct Slider {
     value: f32,
     label: Option<String>,
@@ -441,6 +445,7 @@ fn gradient_index(value: f32, count: usize) -> usize {
 
 /// A colour to pick: the colour over its hex code, ringed in the accent while selected.
 /// `.compact()` drops the hex code for a small round swatch.
+#[must_use]
 pub struct Swatch {
     color: Color,
     selected: bool,

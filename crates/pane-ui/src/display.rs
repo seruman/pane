@@ -30,6 +30,7 @@ impl Tone {
 }
 
 /// A small label in a rounded box, as "beta" or "3 errors".
+#[must_use]
 pub struct Badge {
     label: String,
     tone: Tone,
@@ -63,6 +64,7 @@ impl Badge {
 }
 
 /// A capsule label with an optional icon, as a tag or a filter.
+#[must_use]
 pub struct Chip {
     label: String,
     glyph: Option<&'static Icon>,
@@ -184,6 +186,7 @@ pub fn spinner(theme: &Theme) -> El {
 
 /// A capsule notice: a leading mark, bold text and an optional action, as "Run finished" with
 /// a Dismiss button. Place it with [`crate::toast_region`].
+#[must_use]
 pub struct Toast {
     message: String,
     leading: Option<El>,
@@ -241,6 +244,7 @@ impl Toast {
 }
 
 /// A faint icon, a title, a line of text and optional actions, for an empty list or pane.
+#[must_use]
 pub struct EmptyState {
     glyph: &'static Icon,
     title: String,

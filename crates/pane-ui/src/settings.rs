@@ -6,6 +6,7 @@ use crate::{Theme, hairline, with_separator};
 
 /// A row of a [`SettingsGroup`]: title and description on the left, the control on the right.
 /// When the row is too narrow for both, the control moves under the title.
+#[must_use]
 pub struct SettingsRow {
     title: String,
     description: Option<String>,
@@ -60,6 +61,7 @@ impl SettingsRow {
 /// An inset group a shade off the pane, holding [`SettingsRow`]s with hairlines between them.
 /// `.child(..)` adds anything else, such as a heading or a note.
 #[derive(Default)]
+#[must_use]
 pub struct SettingsGroup {
     items: Vec<Item>,
 }

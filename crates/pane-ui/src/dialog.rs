@@ -18,6 +18,7 @@ use crate::{Theme, Tone};
 /// page.overlay(modal_layer("confirm-layer", dialog, |s: &mut App| s.confirm = false, &theme))
 /// # }
 /// ```
+#[must_use]
 pub struct Dialog {
     title: String,
     message: Option<String>,
