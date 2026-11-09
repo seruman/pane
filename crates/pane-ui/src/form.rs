@@ -129,7 +129,7 @@ pub struct Toggle {
     on: bool,
     name: String,
     disabled: bool,
-    toggle: Option<Transform<rune_kit::Switch>>,
+    handler: Option<Transform<rune_kit::Switch>>,
 }
 
 impl Toggle {
@@ -138,7 +138,7 @@ impl Toggle {
             on,
             name: name.into(),
             disabled: false,
-            toggle: None,
+            handler: None,
         }
     }
 
@@ -148,7 +148,7 @@ impl Toggle {
     }
 
     pub fn on_toggle<S: 'static>(mut self, f: impl Fn(&mut S) + 'static) -> Self {
-        self.toggle = Some(Box::new(move |s: rune_kit::Switch| s.on_toggle(f)));
+        self.handler = Some(Box::new(move |s: rune_kit::Switch| s.on_toggle(f)));
         self
     }
 
@@ -158,8 +158,8 @@ impl Toggle {
             .hide_label()
             .control_size(rune_kit::ControlSize::Small)
             .disabled(self.disabled);
-        if let Some(toggle) = self.toggle {
-            switch = toggle(switch);
+        if let Some(handler) = self.handler {
+            switch = handler(switch);
         }
         switch.build(&theme.kit)
     }

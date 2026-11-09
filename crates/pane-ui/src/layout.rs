@@ -153,8 +153,6 @@ impl Columns {
     }
 
     pub fn build(self) -> El {
-        // Each column's flex basis is its minimum, so a line holds as many as fit and the rest
-        // wrap below; growing shares out what is left.
         row()
             .w_full()
             .flex_wrap()

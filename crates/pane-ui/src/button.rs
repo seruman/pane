@@ -182,11 +182,7 @@ impl Button {
         };
         let h = self.size.height();
         let glyph_size = self.size.text_size() + 1.0;
-        let name = self
-            .name
-            .clone()
-            .or_else(|| self.label.clone())
-            .unwrap_or_default();
+        let name = self.name.or_else(|| self.label.clone()).unwrap_or_default();
         let mut b = row()
             .key(key)
             .role("button")

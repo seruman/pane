@@ -3,7 +3,7 @@
 
 use rune::color::{srgb_decode, srgb_encode};
 use rune::{Color, TerminalColors, TextStyle};
-use rune_kit::Kit;
+use rune_kit::{Kit, PaletteSeed};
 
 /// The background, foreground, cursor, and ANSI colours of a terminal theme.
 #[derive(Clone, Debug, PartialEq)]
@@ -102,8 +102,8 @@ impl Palette {
     /// colours the terminal left out come from Merino. A missing cursor falls back to ANSI blue,
     /// the bright one on a dark background.
     pub fn from_terminal_colors(colors: TerminalColors) -> Option<Palette> {
+        let dark = Kit::from_terminal_colors(colors)?.dark;
         let (background, foreground) = (colors.background?, colors.foreground?);
-        let dark = foreground.luminance() > background.luminance();
         let base = if dark {
             Palette::merino_dark()
         } else {
@@ -134,7 +134,12 @@ impl Palette {
         cursor: Color,
         ansi: [Color; 16],
     ) -> Palette {
-        let dark = foreground.luminance() > background.luminance();
+        let dark = Kit::from_palette(PaletteSeed {
+            bg: background,
+            fg: foreground,
+            accent: cursor,
+        })
+        .dark;
         Palette {
             name,
             background,
@@ -259,9 +264,13 @@ impl Theme {
     }
 
     /// `palette`'s theme, with the kit rune-kit derives from a terminal in those colours.
+    #[allow(
+        clippy::expect_used,
+        reason = "Palette always supplies background and foreground"
+    )]
     pub fn new(palette: Palette) -> Theme {
         let kit = Kit::from_terminal_colors(palette.terminal_colors())
-            .unwrap_or_else(|| Kit::neutral(palette.dark));
+            .expect("Palette always supplies background and foreground");
         Theme::with_kit(palette, kit)
     }
 
@@ -280,7 +289,6 @@ impl Theme {
             group: 14.0,
             popover: 14.0,
         };
-        // Rex's switches have a white knob in either appearance.
         kit.c.knob = white;
         kit.c.knob_on = white;
         kit.radius.xs = 4.0;

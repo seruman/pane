@@ -106,7 +106,6 @@ impl MenuItem {
         } else {
             (theme.text, theme.text_secondary)
         };
-        // The keyboard and the pointer share one highlight, as in a native menu.
         let mut item = row()
             .key(key)
             .role("menuitem")
