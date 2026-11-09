@@ -226,6 +226,12 @@ enum Status {
     StdinFailed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoadKind {
+    Replace,
+    Reload,
+}
+
 struct SearchRun {
     query: String,
     items: Items,
@@ -315,11 +321,7 @@ impl Model {
             closing: false,
         };
         match model.options.configuration.root_source().cloned() {
-            Some(source) => {
-                model.source_id = Some(source.id.clone());
-                model.pending_selection_reset = true;
-                model.load(&source);
-            }
+            Some(source) => model.load(&source, LoadKind::Replace),
             None => model.effects.push(Effect::ReadStdin),
         }
         let effects = mem::take(&mut model.effects);
@@ -648,9 +650,7 @@ impl Model {
             return;
         }
         let Some(source) = self.options.configuration.source(id).filter(|s| !s.hidden).cloned() else { return };
-        self.source_id = Some(source.id.clone());
-        self.pending_selection_reset = true;
-        self.load(&source);
+        self.load(&source, LoadKind::Replace);
     }
 
     fn push(&mut self, source: SourceId) {
@@ -681,9 +681,7 @@ impl Model {
             stdin_changed,
         });
         let target = self.options.configuration.source(&source).expect("validated push source").clone();
-        self.source_id = Some(source);
-        self.pending_selection_reset = true;
-        self.load(&target);
+        self.load(&target, LoadKind::Replace);
     }
 
     fn pop(&mut self) {
@@ -719,7 +717,7 @@ impl Model {
 
     fn reload(&mut self) {
         match self.source().cloned() {
-            Some(source) => self.load(&source),
+            Some(source) => self.load(&source, LoadKind::Reload),
             None => {
                 self.message = Some(Status::Error("Piped input cannot be re-run".into()));
                 self.effects.push(Effect::Beep);
@@ -727,7 +725,8 @@ impl Model {
         }
     }
 
-    fn load(&mut self, source: &MenuSource) {
+    fn load(&mut self, source: &MenuSource, kind: LoadKind) {
+        self.source_id = Some(source.id.clone());
         self.pending_intent = None;
         self.effects.push(Effect::Cancel(TaskKind::Search));
         self.source_generation = self.fresh();
@@ -740,13 +739,10 @@ impl Model {
         self.awaiting_source_data = true;
         self.input_failed = false;
         self.message = None;
-        // Switching or pushing replaces the rows with another source's; a reload keeps them.
-        if self.pending_selection_reset {
+        if kind == LoadKind::Replace {
             self.preview_text.clear();
         }
-        // Keep the presented selection until the replacement commits. Plain ordinal IDs
-        // cannot carry checks across reloads; JSONL IDs can.
-        self.pending_selection_reset |= source.format != InputFormat::Jsonl;
+        self.pending_selection_reset |= kind == LoadKind::Replace || source.format != InputFormat::Jsonl;
         self.update_preview();
         let context = ActionContext {
             action: "source".into(),
