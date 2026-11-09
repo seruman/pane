@@ -12,13 +12,15 @@ use crate::item::{ActionContext, MenuItem, PathEntry};
 use crate::search::{Order, RowOffset, SearchIndex};
 use crate::selection::{Marks, MenuSelection};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputFormat { Lines, Nul, Json }
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub configuration: MenuConfiguration,
     pub input: InputFormat,
     pub multi: bool,
-    pub json: bool,
-    pub print0: bool,
+    pub output: OutputFormat,
     pub sorted: bool,
     pub prompt: String,
     pub query: String,
@@ -942,7 +944,7 @@ impl Model {
                 if marked.is_empty() { picked.clone() } else { marked }
             }
         };
-        let output = if self.options.json {
+        let output = if self.options.output == OutputFormat::Json {
             let context = ActionContext {
                 action,
                 query: self.query.clone(),
@@ -954,10 +956,10 @@ impl Model {
             output.push(b'\n');
             output
         } else {
-            let delimiter = if self.options.print0 { '\0' } else { '\n' };
+            let delimiter = if self.options.output == OutputFormat::Nul { '\0' } else { '\n' };
             // A delimiter inside a value would split it into extra records downstream.
             if items.iter().any(|i| i.value().contains(delimiter)) {
-                let hint = if self.options.print0 { "" } else { " or --print0" };
+                let hint = if self.options.output == OutputFormat::Nul { "" } else { " or --print0" };
                 self.message = Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
                 self.effects.push(Effect::Beep);
                 return;

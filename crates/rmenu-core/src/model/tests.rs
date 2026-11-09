@@ -188,8 +188,7 @@ fn options(config: Value) -> Options {
         configuration: serde_json::from_value(config).unwrap(),
         input: InputFormat::Lines,
         multi: true,
-        json: true,
-        print0: false,
+        output: OutputFormat::Json,
         sorted: false,
         prompt: "Root".into(),
         query: String::new(),
@@ -505,8 +504,7 @@ fn values_containing_the_output_delimiter_are_never_written() {
     for print0 in [true, false] {
         let unsafe_value = if print0 { "a\0b" } else { "a\nb" };
         let mut o = options(json!({"sources": [src("s", json!({"format": "jsonl"}))]}));
-        o.json = false;
-        o.print0 = print0;
+        o.output = if print0 { OutputFormat::Nul } else { OutputFormat::Lines };
         let mut h = Harness::new(o);
         let rows = format!("{}\n{}\n", json!({"id": "1", "title": "bad", "value": unsafe_value}), json!({"id": "2", "title": "good", "value": "ok"}));
         h.load(&rows);
@@ -737,7 +735,7 @@ fn two_levels(marks: MarkScope, json_output: bool) -> Harness {
         "bindings": [push_binding(), grand, split],
         "marks": match marks { MarkScope::Level => "level", MarkScope::Global => "global" },
     }));
-    o.json = json_output;
+    o.output = if json_output { OutputFormat::Json } else { OutputFormat::Lines };
     let mut h = Harness::new(o);
     h.load(&jsonl(&REPOS));
     h.toggle(1);
@@ -1010,8 +1008,7 @@ fn command_failure_trims_and_bounds_stderr() {
 
 fn piped(json_output: bool, print0: bool) -> Harness {
     let mut o = options(json!({}));
-    o.json = json_output;
-    o.print0 = print0;
+    o.output = if json_output { OutputFormat::Json } else if print0 { OutputFormat::Nul } else { OutputFormat::Lines };
     Harness::new(o)
 }
 
@@ -1121,7 +1118,7 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
 #[test]
 fn reload_of_piped_input_says_it_cannot_be_rerun() {
     let mut o = options(json!({"bindings": [{"key": "ctrl+r", "action": "reload"}]}));
-    o.json = false;
+    o.output = OutputFormat::Lines;
     let mut h = Harness::new(o);
     h.stdin("one\n");
     h.settle();

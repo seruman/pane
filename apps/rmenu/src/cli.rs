@@ -2,7 +2,7 @@
 
 use clap::{Parser, ValueEnum};
 use rmenu_core::config::{ConfigurationError, InputFormat, MenuConfiguration, Theme};
-use rmenu_core::model::Options;
+use rmenu_core::model::{Options, OutputFormat};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum Appearance {
@@ -115,8 +115,7 @@ impl Cli {
                 configuration,
                 input: self.input,
                 multi,
-                json: self.json,
-                print0: self.print0,
+                output: if self.json { OutputFormat::Json } else if self.print0 { OutputFormat::Nul } else { OutputFormat::Lines },
                 sorted: !self.no_sort,
                 prompt,
                 query: self.query,
@@ -186,6 +185,13 @@ mod tests {
             let launch = parse(&["--theme", theme]).unwrap().launch(false).unwrap();
             assert_eq!(format!("{:?}", launch.options), format!("{:?}", default.options));
             assert_eq!(launch.appearance, default.appearance);
+        }
+    }
+
+    #[test]
+    fn output_flags_choose_one_format() {
+        for (args, expected) in [(&[][..], OutputFormat::Lines), (&["--json"][..], OutputFormat::Json), (&["--print0"][..], OutputFormat::Nul)] {
+            assert_eq!(parse(args).unwrap().launch(false).unwrap().options.output, expected);
         }
     }
 
