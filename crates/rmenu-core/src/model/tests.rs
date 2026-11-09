@@ -977,7 +977,7 @@ fn push_pressed_before_the_query_results_land_uses_those_results() {
 }
 
 #[test]
-fn escape_and_empty_backspace_pop_then_escape_cancels_at_the_root() {
+fn back_and_pop_if_empty_restore_the_parent_then_back_cancels_at_root() {
     let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     assert_eq!(h.model.target(&chord("ctrl+w")), Some(Target::Perform(BindingIndex(0))));
@@ -1375,7 +1375,7 @@ fn keys(multi: bool) -> Harness {
 }
 
 #[test]
-fn navigation_keys_move_the_highlight() {
+fn navigation_events_move_the_highlight() {
     let mut h = keys(true);
     assert_eq!(h.model.highlighted_row(), Some(0));
     h.nav(Nav::Down);
@@ -1423,7 +1423,7 @@ fn source_binding_switches_to_its_parsed_target() {
 }
 
 #[test]
-fn source_key_switches_source() {
+fn source_chord_target_switches_source() {
     let mut h = keys(true);
     let Some(Target::SwitchSource(id)) = h.model.target(&chord("ctrl+2")) else { panic!("ctrl+2 is a source key") };
     h.send(Event::SwitchSource(id));
@@ -1431,7 +1431,7 @@ fn source_key_switches_source() {
 }
 
 #[test]
-fn control_and_option_bindings_report_their_id() {
+fn chord_targets_perform_bindings_with_their_action_id() {
     for (key, id) in [("ctrl+w", "worktrees"), ("alt+n", "memos")] {
         let mut h = keys(true);
         let Some(Target::Perform(index)) = h.model.target(&chord(key)) else { panic!("{key} is bound") };
@@ -1450,7 +1450,7 @@ fn extra_modifier_or_no_modifier_does_not_match_a_binding() {
 }
 
 #[test]
-fn escape_and_control_c_cancel() {
+fn back_and_cancel_at_root_exit_130() {
     for nav in [Nav::Back, Nav::Cancel] {
         let mut h = keys(true);
         h.nav(nav);
@@ -1459,7 +1459,7 @@ fn escape_and_control_c_cancel() {
 }
 
 #[test]
-fn return_accepts() {
+fn accept_event_returns_the_highlighted_item() {
     let mut h = keys(true);
     h.nav(Nav::Accept);
     let context = h.context();
