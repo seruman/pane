@@ -70,6 +70,13 @@ impl RecordDecoder {
                         state: State::Open }
     }
 
+    pub fn decode_all(format: InputFormat, bytes: &[u8]) -> Result<Vec<MenuItem>, RecordError> {
+        let mut decoder = Self::new(format);
+        let mut items = decoder.append(bytes)?;
+        items.extend(decoder.finish()?);
+        Ok(items)
+    }
+
     pub fn append(&mut self, bytes: &[u8]) -> Result<Vec<MenuItem>, RecordError> {
         match &self.state {
             State::Open => {}
@@ -154,6 +161,21 @@ mod tests {
     }
 
     fn titles(items: &[MenuItem]) -> Vec<&str> { items.iter().map(|i| i.title()).collect() }
+
+    #[test]
+    fn whole_input_matches_streamed_input() {
+        for (format, bytes) in [
+            (Lines, b"one\r\ntwo\nlast".as_slice()),
+            (Nul, b"one\0two\n\0last\r".as_slice()),
+            (Jsonl, b"{\"id\":\"1\",\"title\":\"one\"}\n{\"id\":\"2\",\"title\":\"two\"}".as_slice()),
+            (Lines, b"one\n\xff".as_slice()),
+            (Jsonl, b"{\"id\":\"1\",\"title\":\"one\"}\ninvalid".as_slice()),
+        ] {
+            for chunk in 1..=bytes.len() {
+                assert_eq!(RecordDecoder::decode_all(format, bytes), decode(bytes, format, chunk), "{format:?}, chunk {chunk}");
+            }
+        }
+    }
 
     #[test]
     fn plain_streaming_at_every_chunk_size() {

@@ -274,8 +274,5 @@ fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
 }
 
 fn decode(format: InputFormat, done: &CommandResult) -> Result<Vec<MenuItem>, String> {
-    let mut decoder = RecordDecoder::new(format);
-    let mut items = decoder.append(&done.stdout).map_err(|e| e.to_string())?;
-    items.extend(decoder.finish().map_err(|e| e.to_string())?);
-    Ok(items)
+    RecordDecoder::decode_all(format, &done.stdout).map_err(|e| e.to_string())
 }
