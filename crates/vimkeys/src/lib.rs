@@ -1044,14 +1044,14 @@ fn class(c: char, big: bool) -> CharClass {
 
 /// A search: the text to find, and whether it must start a word (`*` and `#` search whole words).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Query {
-    pub text: String,
-    pub whole_word: bool,
+struct Query {
+    text: String,
+    whole_word: bool,
 }
 
 impl Query {
     /// A search as typed after `/` or `?`.
-    pub fn typed(text: &str) -> Query {
+    fn typed(text: &str) -> Query {
         Query {
             text: text.to_owned(),
             whole_word: false,
@@ -1060,7 +1060,7 @@ impl Query {
 }
 
 /// Every place `query` occurs, case-insensitive unless it has a capital (Vim's smartcase).
-pub fn find_all(text: &str, query: &Query) -> Vec<Range<usize>> {
+fn find_all(text: &str, query: &Query) -> Vec<Range<usize>> {
     let sensitive = query.text.chars().any(char::is_uppercase);
     let starts_word = |i: usize| {
         i == 0

@@ -176,8 +176,8 @@ fn search_smart_case_and_star() {
     assert!(at(&v).starts_with("s);"));
     press(&mut v, "N");
     assert!(at(&v).starts_with("s = "));
-    assert_eq!(find_all("Hello hello", &Query::typed("hello")).len(), 2);
-    assert_eq!(find_all("Hello hello", &Query::typed("Hello")).len(), 1);
+    assert_eq!(search_matches("Hello hello", "hello").len(), 2);
+    assert_eq!(search_matches("Hello hello", "Hello").len(), 1);
     press(&mut v, "gg*");
     assert_eq!(v.message(), Some("[1/1]"));
     press(&mut v, "/zzz");
@@ -606,15 +606,28 @@ fn a_huge_count_neither_panics_nor_hangs() {
     );
 }
 
+fn search_matches(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    let mut vim = Vim::default();
+    press_on(&mut vim, text, &format!("/{query}"));
+    vim.key(
+        &KeyEvent {
+            key: Key::Enter,
+            mods: Mods::default(),
+        },
+        text,
+    );
+    vim.matches(text)
+}
+
 #[test]
 fn search_survives_characters_whose_lowercase_changes_length() {
     // `İ` lowercases to two characters, three bytes where it had two.
     let text = "İstanbul Hello hello";
-    let found = find_all(text, &Query::typed("hello"));
+    let found = search_matches(text, "hello");
     let quoted: Vec<&str> = found.iter().map(|r| &text[r.clone()]).collect();
     assert_eq!(quoted, ["Hello", "hello"]);
     assert_eq!(
-        find_all(text, &Query::typed("i̇stanbul"))
+        search_matches(text, "i̇stanbul")
             .iter()
             .map(|r| &text[r.clone()])
             .collect::<Vec<_>>(),
@@ -622,7 +635,7 @@ fn search_survives_characters_whose_lowercase_changes_length() {
     );
     let text = "ẞtraße STRASSE";
     assert_eq!(
-        find_all(text, &Query::typed("sse"))
+        search_matches(text, "sse")
             .iter()
             .map(|r| &text[r.clone()])
             .collect::<Vec<_>>(),
