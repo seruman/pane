@@ -142,7 +142,7 @@ pub fn command_failure(result: &CommandResult) -> String {
 }
 
 /// Rows of one source generation. Append-only; a reload gets a new store.
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct Store {
     items: Items,
     index: SearchIndex,
@@ -338,7 +338,6 @@ impl Model {
     pub fn has_choice(&self) -> bool { self.marked_count() > 0 || self.highlighted().is_some() }
 
     /// Rows are shown but not actionable: a source is loading or its search is running.
-    pub fn is_stale(&self) -> bool { !self.can_act() }
 
     pub fn loading(&self) -> bool { self.loading }
 
@@ -392,7 +391,7 @@ impl Model {
     }
 
     /// The shown rows are the current query's results: actions may run.
-    pub fn can_act(&self) -> bool { self.can_navigate() && self.shown.query.as_deref() == Some(self.query.as_str()) }
+    fn can_act(&self) -> bool { self.can_navigate() && self.shown.query.as_deref() == Some(self.query.as_str()) }
 
     pub fn is_searching(&self) -> bool { self.search.is_some() }
 
@@ -401,7 +400,7 @@ impl Model {
     pub fn running_operation(&self) -> bool { self.operation.is_some() }
 
     /// Marked rows in input order, else the highlighted row: what an action would act on.
-    pub fn chosen(&self) -> Vec<MenuItem> {
+    fn chosen(&self) -> Vec<MenuItem> {
         if self.shown.selection.checked.is_empty() {
             self.highlighted().into_iter().cloned().collect()
         } else {
