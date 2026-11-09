@@ -545,7 +545,7 @@ mod tests {
         }
     }
 
-    fn run_in_child(test: &str) -> bool {
+    fn run_in_child(test: &str, env: &[(&str, &str)]) -> bool {
         const CHILD_TEST: &str = "RMENU_COMMAND_CHILD_TEST";
         if std::env::var(CHILD_TEST).as_deref() == Ok(test) {
             return false;
@@ -553,6 +553,7 @@ mod tests {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &format!("command::tests::{test}"), "--nocapture", "--test-threads=1"])
             .env(CHILD_TEST, test)
+            .envs(env.iter().copied())
             .output()
             .unwrap();
         assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
@@ -601,7 +602,7 @@ mod tests {
 
     #[test]
     fn commands_get_only_stdio() {
-        if run_in_child("commands_get_only_stdio") {
+        if run_in_child("commands_get_only_stdio", &[]) {
             return;
         }
         let file = std::fs::File::open("/dev/null").unwrap();
@@ -617,7 +618,7 @@ mod tests {
 
     #[test]
     fn a_descriptor_another_thread_opens_during_spawn_never_leaks() {
-        if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks") {
+        if run_in_child("a_descriptor_another_thread_opens_during_spawn_never_leaks", &[]) {
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -730,6 +731,10 @@ mod tests {
 
     #[test]
     fn directory_and_environment_are_inherited() {
+        const HOME: &str = "/rmenu test home with spaces";
+        if run_in_child("directory_and_environment_are_inherited", &[("HOME", HOME), ("RUNNER_OVERLAY", "parent")]) {
+            return;
+        }
         let result = quick(&["/bin/pwd"]).unwrap();
         let actual = Path::new(text(&result.stdout).trim_end()).canonicalize().unwrap();
         assert_eq!(actual, std::env::current_dir().unwrap().canonicalize().unwrap());
@@ -738,9 +743,8 @@ mod tests {
                 .unwrap();
         let lines: Vec<&str> = text(&env.stdout).lines().collect();
         assert!(lines.contains(&"RUNNER_OVERLAY=yes"));
-        if let Ok(home) = std::env::var("HOME") {
-            assert!(lines.contains(&format!("HOME={home}").as_str()));
-        }
+        assert!(lines.contains(&format!("HOME={HOME}").as_str()));
+        assert!(!lines.contains(&"RUNNER_OVERLAY=parent"));
     }
 
     #[test]
