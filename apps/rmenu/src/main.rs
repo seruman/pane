@@ -13,12 +13,8 @@ fn main() {
         Ok(launch) => launch,
         Err(message) => exit(Outcome::Failed(message.to_string())),
     };
-    // SAFETY: both run at startup, before any thread exists.
-    unsafe {
-        libc::signal(libc::SIGPIPE, libc::SIG_IGN);
-        // rmenu only ever draws in the terminal; callers shouldn't have to ask.
-        if std::env::var_os("RUNE_TERMINAL").is_none() { std::env::set_var("RUNE_TERMINAL", "1"); }
-    }
+    // SAFETY: installs the ignored disposition before any thread starts.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
     let spec = AppSpec {
         setup: Some(Menu::setup),
         poll: Some(|m: &mut Menu, _, tx: &mut Tx| m.poll(tx)),
@@ -26,6 +22,7 @@ fn main() {
         ..AppSpec::new("rmenu", (640.0, 400.0), || unreachable!("init is given"), view::view)
     };
     let started = App::new(spec)
+        .terminal()
         .init(move || Menu::new(launch))
         .args(Vec::new())
         .on_quit(Menu::quit)

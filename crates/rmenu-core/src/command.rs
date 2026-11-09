@@ -213,11 +213,10 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
 #[cfg(not(target_vendor = "apple"))]
 compile_error!("rmenu needs POSIX_SPAWN_CLOEXEC_DEFAULT to give commands only stdio, and only Apple targets have it");
 
-/// The command's environment: ours with `env` overlaid, never rmenu's own terminal mode, which
-/// would make a Rune program it runs take the terminal too.
+/// The caller's environment with explicit command values overlaid.
 fn environment(env: &[(String, String)]) -> Result<(Vec<CString>, Option<OsString>), CommandError> {
     let mut vars: Vec<(OsString, OsString)> = std::env::vars_os()
-        .filter(|(k, _)| k != "RUNE_TERMINAL" && !env.iter().any(|(o, _)| OsStr::new(o) == k))
+        .filter(|(k, _)| !env.iter().any(|(o, _)| OsStr::new(o) == k))
         .collect();
     vars.extend(env.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))));
     let path = vars.iter().find(|(k, _)| k == "PATH").map(|(_, v)| v.clone());
@@ -444,26 +443,45 @@ mod tests {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", &format!("command::tests::{test}"), "--nocapture", "--test-threads=1"])
             .env(CHILD_TEST, test)
-            .env("RUNE_TERMINAL", "1")
             .output().unwrap();
         assert!(output.status.success(), "{}\n{}", text(&output.stdout), text(&output.stderr));
         true
     }
 
     #[test]
-    fn commands_get_only_stdio_and_never_rmenus_terminal_mode() {
-        if run_in_child("commands_get_only_stdio_and_never_rmenus_terminal_mode") { return; }
-        assert_eq!(std::env::var("RUNE_TERMINAL").unwrap(), "1");
+    fn commands_preserve_the_callers_terminal_environment() {
+        const CHILD: &str = "RMENU_TERMINAL_ENV_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            for value in [None, Some("0"), Some("1"), Some("custom-value")] {
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child.args(["--exact", "command::tests::commands_preserve_the_callers_terminal_environment", "--nocapture"])
+                    .env(CHILD, "1").env_remove("RUNE_TERMINAL");
+                if let Some(value) = value { child.env("RUNE_TERMINAL", value); }
+                let output = child.output().unwrap();
+                assert!(output.status.success(), "RUNE_TERMINAL={value:?}: {}{}", text(&output.stdout), text(&output.stderr));
+            }
+            return;
+        }
+        let result = quick(&["/usr/bin/env"]).unwrap();
+        let expected = std::env::var("RUNE_TERMINAL").ok().map(|value| format!("RUNE_TERMINAL={value}"));
+        let actual = text(&result.stdout).lines().find(|line| line.starts_with("RUNE_TERMINAL="));
+        assert_eq!(actual, expected.as_deref());
+        let overlaid = run_with(&["/usr/bin/env"], None, &[("RUNE_TERMINAL", "override")], Duration::from_secs(5), 1 << 20).unwrap();
+        assert_eq!(text(&overlaid.stdout).lines().filter(|line| line.starts_with("RUNE_TERMINAL=")).collect::<Vec<_>>(), ["RUNE_TERMINAL=override"]);
+    }
+
+    #[test]
+    fn commands_get_only_stdio() {
+        if run_in_child("commands_get_only_stdio") { return; }
         let file = std::fs::File::open("/dev/null").unwrap();
         // A descriptor opened without close-on-exec, as a framework inside rmenu would.
         // A high number, so the command's own descriptors (ls opening /dev/fd) can't collide.
         let fd = unsafe { libc::dup2(file.as_raw_fd(), 200) };
         assert_eq!(fd, 200);
-        let result = quick(&["/bin/sh", "-c", "ls /dev/fd; echo env=${RUNE_TERMINAL-unset}"]).unwrap();
+        let result = quick(&["/bin/ls", "/dev/fd"]).unwrap();
         unsafe { libc::close(fd) };
         let out = text(&result.stdout);
         assert!(!out.lines().any(|l| l == fd.to_string()), "fd {fd} leaked into the command: {out}");
-        assert!(out.contains("env=unset"), "{out}");
     }
 
     #[test]
