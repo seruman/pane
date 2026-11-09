@@ -1,6 +1,6 @@
 //! Vim's keys for reading text: a cursor and visual selections moved with Vim's motions,
 //! text objects, operators and search. It knows nothing about what draws the text: the app keeps
-//! a [`Vim`] beside the text it shows (a page's [`RenderedText`](rune_kit::markdown::RenderedText),
+//! a [`Vim`] beside the text it shows (a page's `rune_kit::markdown::RenderedText`,
 //! a log, a file), feeds it keys, and paints [`Vim::cursor`], [`Vim::selection`] and
 //! [`Vim::matches`] back onto the page.
 //!

@@ -1,4 +1,4 @@
-//! Lucide icons (https://lucide.dev, ISC licence) as Rune icons: the subset Rex's interface
+//! Lucide icons (<https://lucide.dev>, ISC licence) as Rune icons: the subset Rex's interface
 //! uses. Generated from the SVG files; `polyline` and `polygon` become paths, and the stroke
 //! the SVG sets on its root moves onto each shape.
 #![allow(dead_code)]

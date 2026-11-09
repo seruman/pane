@@ -182,8 +182,8 @@ pub fn spinner(theme: &Theme) -> El {
         .color(theme.text_secondary)
 }
 
-/// A capsule notice: a leading mark, bold text and an optional action, as "Run finished
-/// [Dismiss]". Place it with [`crate::toast_region`].
+/// A capsule notice: a leading mark, bold text and an optional action, as "Run finished" with
+/// a Dismiss button. Place it with [`crate::toast_region`].
 pub struct Toast {
     message: String,
     leading: Option<El>,

@@ -26,6 +26,10 @@ incremental = true
 unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
 
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+bare_urls = "deny"
+
 [workspace.lints.clippy]
 await_holding_lock = "deny"
 await_holding_refcell_ref = "deny"
