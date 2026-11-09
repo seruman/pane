@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 use super::*;
 use crate::record::RecordDecoder;
+use crate::command::ExitStatus;
 
 struct Harness {
     model: Model,
@@ -130,13 +131,13 @@ impl Harness {
 
     fn preview_event(&mut self, text: &str) -> (Event, Vec<(String, String)>) {
         let Task::Preview { token, env, .. } = self.take(TaskKind::Preview) else { unreachable!() };
-        let result = CommandResult { stdout: text.into(), stderr: Vec::new(), status: 0 };
+        let result = CommandResult { stdout: text.into(), stderr: Vec::new(), status: ExitStatus::Code(0) };
         (Event::PreviewDone { token, result: Ok(result) }, env)
     }
 
     fn finish_operation(&mut self, status: i32, stderr: &str) {
         let Task::Operation { token, .. } = self.take(TaskKind::Operation) else { unreachable!() };
-        let result = CommandResult { stdout: Vec::new(), stderr: stderr.into(), status };
+        let result = CommandResult { stdout: Vec::new(), stderr: stderr.into(), status: ExitStatus::Code(status) };
         self.send(Event::OperationDone { token, result: Ok(result) });
     }
 
@@ -998,7 +999,7 @@ fn copy_puts_chosen_values_on_the_clipboard_and_stays_open() {
 
 #[test]
 fn command_failure_trims_and_bounds_stderr() {
-    let result = |stderr: Vec<u8>| CommandResult { stdout: Vec::new(), stderr, status: 3 };
+    let result = |stderr: Vec<u8>| CommandResult { stdout: Vec::new(), stderr, status: ExitStatus::Code(3) };
     assert_eq!(command_failure(&result(b"  \n".to_vec())), "Command exited 3");
     let long = command_failure(&result(vec![b'x'; 5000]));
     assert_eq!(long.len(), "Command exited 3: ".len() + 2048);

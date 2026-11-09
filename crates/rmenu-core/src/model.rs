@@ -152,9 +152,9 @@ pub fn command_failure(result: &CommandResult) -> String {
     let detail = String::from_utf8_lossy(stderr);
     let detail = detail.trim();
     if detail.is_empty() {
-        format!("Command exited {}", result.status)
+        format!("Command exited {}", result.status.shell_code())
     } else {
-        format!("Command exited {}: {detail}", result.status)
+        format!("Command exited {}: {detail}", result.status.shell_code())
     }
 }
 
@@ -468,7 +468,7 @@ impl Model {
                     return;
                 }
                 self.preview_text = match result {
-                    Ok(r) if r.status == 0 => String::from_utf8_lossy(&r.stdout).into_owned(),
+                    Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).into_owned(),
                     Ok(r) => command_failure(&r),
                     Err(error) => error,
                 };
@@ -917,7 +917,7 @@ impl Model {
     fn operation_done(&mut self, token: Token, result: Result<CommandResult, String>) {
         let Some(operation) = self.operation.take_if(|o| o.token == token) else { return };
         match result {
-            Ok(r) if r.status == 0 => {
+            Ok(r) if r.status.success() => {
                 self.message = Some(Status::Ack(format!("{} completed", operation.action)));
                 if operation.reload && operation.source_generation == self.source_generation {
                     self.reload();

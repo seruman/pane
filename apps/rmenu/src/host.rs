@@ -252,7 +252,7 @@ fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
             let result = match run(&argv, Some(&input), &env, 30, SOURCE_LIMIT) {
                 Err(CommandError::Cancelled) => return,
                 Err(error) => Err(error.to_string()),
-                Ok(done) if done.status != 0 => Err(command_failure(&done)),
+                Ok(done) if !done.status.success() => Err(command_failure(&done)),
                 Ok(done) => decode(format, &done),
             };
             emit(Event::SourceDone { token, result });

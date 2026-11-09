@@ -18,7 +18,7 @@ fn main() {
     let mut ms: Vec<f64> = (0..runs).map(|_| {
         let started = Instant::now();
         match run(&argv, None, &[], Duration::from_secs(5), 1 << 20, &Cancel::default()) {
-            Ok(result) if result.status == 0 => {}
+            Ok(result) if result.status.success() => {}
             _ => failed += 1,
         }
         started.elapsed().as_secs_f64() * 1000.0

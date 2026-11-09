@@ -15,8 +15,24 @@ use std::time::{Duration, Instant};
 pub struct CommandResult {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
-    /// Exit code, or 128 + signal number.
-    pub status: i32,
+    pub status: ExitStatus,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExitStatus {
+    Code(i32),
+    Signal(i32),
+}
+
+impl ExitStatus {
+    pub fn success(self) -> bool { self == Self::Code(0) }
+
+    pub fn shell_code(self) -> i32 {
+        match self {
+            Self::Code(code) => code,
+            Self::Signal(signal) => 128 + signal,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -285,9 +301,7 @@ impl Group {
         Ok(())
     }
 
-    /// The leader's exit status once it has exited (and been reaped), as an exit code or
-    /// 128 + signal.
-    fn try_wait(&mut self) -> Result<Option<i32>, CommandError> {
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>, CommandError> {
         let mut status = 0;
         loop {
             // SAFETY: waits on our own child without blocking.
@@ -299,7 +313,11 @@ impl Group {
                 return Err(system("waitpid", error));
             }
             self.reaped = true;
-            return Ok(Some(if libc::WIFSIGNALED(status) { 128 + libc::WTERMSIG(status) } else { libc::WEXITSTATUS(status) }));
+            return Ok(Some(if libc::WIFSIGNALED(status) {
+                ExitStatus::Signal(libc::WTERMSIG(status))
+            } else {
+                ExitStatus::Code(libc::WEXITSTATUS(status))
+            }));
         }
     }
 }
@@ -472,7 +490,7 @@ mod tests {
         // Rust ignores SIGPIPE in rmenu, and an ignored signal survives exec: a shell that
         // inherited it would outlive `kill -PIPE $$`. At the default it dies of it (141).
         let result = quick(&["/bin/sh", "-c", "kill -PIPE $$; echo survived"]).unwrap();
-        assert_eq!(result.status, 128 + libc::SIGPIPE, "stdout: {}", text(&result.stdout));
+        assert_eq!(result.status, ExitStatus::Signal(libc::SIGPIPE), "stdout: {}", text(&result.stdout));
         assert_eq!(text(&result.stdout), "");
     }
 
@@ -496,7 +514,7 @@ mod tests {
         group.wait_for_exit(Duration::from_secs(2)).unwrap();
         release.join().unwrap();
         assert!(started.elapsed() < Duration::from_secs(1), "exit wait used the full interval");
-        assert_eq!(group.try_wait().unwrap(), Some(0));
+        assert_eq!(group.try_wait().unwrap(), Some(ExitStatus::Code(0)));
     }
 
     #[test]
@@ -521,7 +539,7 @@ mod tests {
         let started = Instant::now();
         group.wait_for_exit(Duration::from_secs(2)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
-        assert_eq!(group.try_wait().unwrap(), Some(0));
+        assert_eq!(group.try_wait().unwrap(), Some(ExitStatus::Code(0)));
     }
 
     #[test]
@@ -531,7 +549,7 @@ mod tests {
                               &[("RUNNER_VALUE", "a value with spaces")], Duration::from_secs(10), 1 << 20).unwrap();
         assert_eq!(result.stdout, [b"a value with spaces\n".as_slice(), input].concat());
         assert!(result.stderr.is_empty());
-        assert_eq!(result.status, 0);
+        assert!(result.status.success());
     }
 
     #[test]
@@ -578,14 +596,27 @@ mod tests {
         let result = run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
         assert_eq!(result.stdout, [vec![0; 200_000], input].concat());
         assert_eq!(result.stderr, vec![0; 200_000]);
-        assert_eq!(result.status, 0);
+        assert!(result.status.success());
     }
 
     #[test]
     fn nonzero_and_signal_statuses_are_returned() {
         let result = quick(&["/bin/sh", "-c", "printf out; printf err >&2; exit 23"]).unwrap();
-        assert_eq!((result.status, text(&result.stdout), text(&result.stderr)), (23, "out", "err"));
-        assert_eq!(quick(&["/bin/sh", "-c", "kill -KILL $$"]).unwrap().status, 128 + libc::SIGKILL);
+        assert_eq!((result.status, text(&result.stdout), text(&result.stderr)), (ExitStatus::Code(23), "out", "err"));
+        assert_eq!(quick(&["/bin/sh", "-c", "kill -KILL $$"]).unwrap().status, ExitStatus::Signal(libc::SIGKILL));
+    }
+
+    #[test]
+    fn exit_codes_and_signals_remain_distinct() {
+        let exited = quick(&["/bin/sh", "-c", "exit 137"]).unwrap();
+        let killed = quick(&["/bin/sh", "-c", "kill -KILL $$"]).unwrap();
+        assert_ne!(exited.status, killed.status);
+        assert_eq!(exited.status, ExitStatus::Code(137));
+        assert_eq!(killed.status, ExitStatus::Signal(libc::SIGKILL));
+        assert_eq!(exited.status.shell_code(), 137);
+        assert_eq!(killed.status.shell_code(), 137);
+        assert!(!exited.status.success());
+        assert!(!killed.status.success());
     }
 
     #[test]
@@ -593,7 +624,7 @@ mod tests {
         let input = vec![42; 2_000_000];
         for _ in 0..10 {
             let result = run_with(&["/bin/sh", "-c", "exit 7"], Some(&input), &[], Duration::from_secs(10), 1 << 20);
-            assert_eq!(result.unwrap().status, 7);
+            assert_eq!(result.unwrap().status, ExitStatus::Code(7));
         }
     }
 
@@ -755,7 +786,7 @@ printf '%s\n' "$$" > "$1/leader"
             if i % 2 == 0 { cancel.cancel(); }
             let input = i.to_string();
             match run(&strings(&["/bin/cat"]), Some(input.as_bytes()), &[], Duration::from_secs(10), 1 << 20, &cancel) {
-                Ok(result) => assert_eq!((result.stdout, result.status), (input.into_bytes(), 0)),
+                Ok(result) => assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0))),
                 Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
                 Err(e) => panic!("{e}"),
             }
