@@ -1,10 +1,10 @@
 # Release checklist
 
-Rune draws this page **inside a terminal pane**, in the terminal's own colours. It reads
+Rune draws this page inside a terminal pane, in the terminal's own colours. It reads
 CommonMark plus the GitHub extensions: tables, task lists, ~~strikethrough~~ and autolinks
 such as https://github.com/anomalyco/rune.
 
-> Ship the terminal shell first; the theme can follow once it has run in Rex for a week.
+> This sample includes headings, tasks, code blocks, and tables.
 
 ## Tasks
 
@@ -15,7 +15,7 @@ such as https://github.com/anomalyco/rune.
   - [ ] Selected Markdown
 - [ ] Input methods (dead keys, CJK)
 
-Tick a box: with a file open, the change is written back.
+Tick a box. With a file open, mdview writes the change back to it.
 
 ## Example timings
 
@@ -61,4 +61,4 @@ flowchart LR
 
 ---
 
-That's all. Press <kbd>Ctrl</kbd>-<kbd>F</kbd> to find text on the page.
+Press `/` to find text on the page.

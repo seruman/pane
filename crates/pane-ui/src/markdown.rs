@@ -9,6 +9,7 @@ use vimkeys::{Vim, VimMode};
 use crate::{Badge, Theme, Tone, icons, kbd};
 
 pub const VIM_CURSOR: &str = "vim-cursor";
+pub const FONT_FAMILIES: (&str, &str) = ("Inter", "ui-monospace, Menlo, Inter");
 
 pub fn style(theme: &Theme) -> MarkdownStyle {
     let heading = |size, line_height| TextStyle {

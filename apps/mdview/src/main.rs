@@ -1,16 +1,18 @@
-//! A Markdown file viewed in a terminal pane, GitHub style, in the terminal's colours, read with
-//! Vim's keys: headings, tables, task lists you can tick, code with syntax colours and a copy
-//! button, diff and Mermaid fences, quotes and links.
+//! A Markdown reader with Vim navigation and the terminal's colours.
+//! It renders headings, tables, task lists, syntax-highlighted code, diff and Mermaid fences,
+//! quotes, and links.
 //!
 //! ```sh
 //! RUNE_TERMINAL=1 cargo run --release -p mdview -- README.md
 //! ```
 //!
-//! With no file it shows a sample. Move with `h j k l w b e 0 $ gg G { } f t %`, select with `v`
-//! and `V`, yank with `y` (`yy`, `yiw`, `ya"`, `yip`, …), or with `gy` to copy the Markdown
-//! source instead of the text (`gyy`, `gyip`, `V…gy`), search with `/` and `?`, `n` and `N`,
-//! `*` and `#`; Escape hides the matches. Ctrl-D and Ctrl-U page. Space on a task's line ticks
-//! it, and with a file open writes it back. Hover a code block for its copy button.
+//! With no file, mdview shows a sample. Move with `h j k l w b e 0 $ gg G { } f t %`.
+//! Select characters with `v` or lines with `V`. Yank rendered text with `y`, as in `yy` or `yiw`.
+//! Use `gy` to copy source Markdown, as in `gyy`, `gyip`, or `Vgy`.
+//! Search with `/` and `?`. Repeat with `n` and `N`, or search the current word with `*` and `#`.
+//! Escape hides the matches. Ctrl-D and Ctrl-U move 15 lines with the default page setting.
+//! Space toggles the task on the cursor's line and writes the change to the open file.
+//! Hover a code block for its copy button.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -121,6 +123,11 @@ impl Doc {
             .find(|(offset, _)| pane_ui::markdown::line_start(&self.source, *offset) == start)
     }
 
+    fn tick_and_return_keys_to_vim(&mut self, offset: usize, checked: bool, tx: &mut Tx) {
+        self.tick_and_save(offset, checked);
+        tx.blur();
+    }
+
     fn tick_and_save(&mut self, offset: usize, checked: bool) {
         if !self.tasks.iter().any(|(at, _)| *at == offset) {
             return;
@@ -210,11 +217,8 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
             &theme,
         ))
         .code_frame(code_frame(&theme, s.copied.map(|copied| copied.block)))
-        // A clicked box would keep focus, and Space would go on ticking it rather than the task
-        // under the cursor; drop focus so keys come back to Vim.
         .on_task_tx(|s: &mut Doc, _, offset, checked, tx| {
-            s.tick_and_save(offset, checked);
-            tx.blur();
+            s.tick_and_return_keys_to_vim(offset, checked, tx);
         })
         .build(&theme.kit);
     let content = col()
@@ -265,7 +269,6 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
             tx.scroll_into_view(VIM_CURSOR);
             true
         }
-        // Space on a task's line ticks it, as a click on its box does.
         Some(VimEffect::Action {
             action: Act::Tick, ..
         }) => {
@@ -316,8 +319,7 @@ fn main() {
         ],
         on_key: Some(on_key),
         poll: Some(poll),
-        // Code blocks need a monospaced face; the default family pair is Inter for both.
-        families: ("Inter", "ui-monospace, Menlo, Inter"),
+        families: markdown::FONT_FAMILIES,
         ..AppSpec::new("Markdown", (900.0, 900.0), Doc::default, view)
     })
     .init(move || doc)
@@ -402,6 +404,18 @@ mod tests {
             assert_eq!(rt.state.source, expected, "visible source stays in sync");
         }
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn clicking_a_task_returns_space_to_the_vim_cursor() {
+        let mut rt = runtime(Doc::with_source(None, "- [ ] one\n- [ ] two\n".into()));
+        let (x, y) = rt.find("i1").expect("second task");
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(0.1);
+        assert_eq!(rt.state.source, "- [ ] one\n- [x] two\n");
+        press(&mut rt, " ");
+        assert_eq!(rt.state.source, "- [x] one\n- [x] two\n");
     }
 
     #[test]
