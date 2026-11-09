@@ -347,6 +347,24 @@ fn paragraphs_and_brackets() {
 }
 
 #[test]
+fn bracket_matching_handles_nested_pairs_in_both_directions() {
+    for text in ["α(a(b)c)z", "α[a[b]c]z", "α{a{b}c}z"] {
+        let mut v = Vim::default();
+        press_on(&mut v, text, "%");
+        assert_eq!(v.cursor(text), text.len() - 2..text.len() - 1);
+        press_on(&mut v, text, "%");
+        assert_eq!(v.cursor(text), 2..3);
+    }
+    for text in ["(missing", "missing)", "plain"] {
+        let mut v = Vim::default();
+        press_on(&mut v, text, "%");
+        assert_eq!(v.cursor(text), 0..1);
+        press_on(&mut v, text, "y%");
+        assert!(!v.is_pending());
+    }
+}
+
+#[test]
 fn yank_motions_and_lines() {
     let mut v = Vim::default();
     assert_eq!(yanked(press(&mut v, "yw")), "fn ");

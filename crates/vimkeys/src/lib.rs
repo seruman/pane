@@ -329,7 +329,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     /// The byte range of the character under the cursor.
     pub fn cursor(&self, text: &str) -> Range<usize> {
         let b = Buf::new(text);
-        let i = b.index(self.cursor.min(text.len()));
+        let i = b.index(self.cursor);
         b.byte(i)..b.byte(i + 1)
     }
 
@@ -340,7 +340,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         if b.n() == 0 {
             return;
         }
-        let i = b.index(at.min(text.len())).min(b.n() - 1);
+        let i = b.index(at);
         self.cursor = b.byte(i);
         self.want_col = i - b.line_start(i);
         self.mode = Mode::Normal;
@@ -349,15 +349,16 @@ impl<A: Clone, O: Clone> Vim<A, O> {
 
     /// The selected bytes in visual modes.
     pub fn selection(&self, text: &str) -> Option<Range<usize>> {
-        let b = Buf::new(text);
-        let (c, a) = (b.index(self.cursor), b.index(self.anchor));
-        let (lo, hi) = (c.min(a), c.max(a));
-        match self.mode {
-            Mode::Visual(VisualMode::Character) => Some(b.byte(lo)..b.byte(hi + 1)),
-            Mode::Visual(VisualMode::Line) => {
-                Some(b.byte(b.line_start(lo))..b.byte(b.line_end(hi)))
-            }
-            _ => None,
+        self.visual_mode()
+            .map(|mode| self.visual_range(mode, &Buf::new(text)))
+    }
+
+    fn visual_range(&self, mode: VisualMode, b: &Buf) -> Range<usize> {
+        let (cursor, anchor) = (b.index(self.cursor), b.index(self.anchor));
+        let (lo, hi) = (cursor.min(anchor), cursor.max(anchor));
+        match mode {
+            VisualMode::Character => b.byte(lo)..b.byte(hi + 1),
+            VisualMode::Line => b.byte(b.line_start(lo))..b.byte(b.line_end(hi)),
         }
     }
 
@@ -412,12 +413,11 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             ) => {
                 self.count = count;
                 let Stroke::Char(c) = stroke else {
-                    self.reset_pending();
-                    return Some(VimEffect::Consumed);
+                    return Some(self.cancel());
                 };
                 self.last_find = Some((find, c));
                 let (n, _) = self.motion_count(op.as_ref().and_then(|op| op.count));
-                self.finish_find((find, c), n, op, text, &b)
+                Some(self.finish_find((find, c), n, op, text, &b))
             }
             (pending, Stroke::Char(c @ '0'..='9'))
                 if (c != '0' || self.count.is_some())
@@ -442,7 +442,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 let line_prefix = op.keys.starts_with(&typed);
                 match self.keymap.lookup_pending(&typed) {
                     Lookup::Exact(PendingCommand::Motion(m)) => {
-                        self.finish_motion(m, typed, Some(op), text, &b)
+                        Some(self.finish_motion(m, typed, Some(op), text, &b))
                     }
                     Lookup::Exact(c @ (PendingCommand::Inner | PendingCommand::Around)) => {
                         self.pending = Pending::Object {
@@ -457,10 +457,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                         self.pending = Pending::Operator { op, typed };
                         Some(VimEffect::Consumed)
                     }
-                    _ => {
-                        self.reset_pending();
-                        Some(VimEffect::Consumed)
-                    }
+                    _ => Some(self.cancel()),
                 }
             }
             (
@@ -476,7 +473,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 match self.keymap.lookup_object(&typed) {
                     Lookup::Exact(object) => {
                         self.count = opened.0;
-                        self.finish_object(object, around, op, text, &b)
+                        Some(self.finish_object(object, around, op, text, &b))
                     }
                     Lookup::Prefix => {
                         self.pending = Pending::Object {
@@ -487,10 +484,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                         };
                         Some(VimEffect::Consumed)
                     }
-                    Lookup::None => {
-                        self.reset_pending();
-                        Some(VimEffect::Consumed)
-                    }
+                    Lookup::None => Some(self.cancel()),
                 }
             }
         }
@@ -507,17 +501,14 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         let first = typed.is_empty();
         typed.push(stroke);
         match self.keymap.lookup(self.table(), &typed) {
-            Lookup::Exact(command) => self.run(command, typed, text, b),
+            Lookup::Exact(command) => Some(self.run(command, typed, text, b)),
             Lookup::Prefix => {
                 self.pending = Pending::Keys(typed);
                 Some(VimEffect::Consumed)
             }
             // An unbound first key is the app's; a sequence that went nowhere is dropped.
             Lookup::None if first && self.count.is_none() => None,
-            Lookup::None => {
-                self.reset_pending();
-                Some(VimEffect::Consumed)
-            }
+            Lookup::None => Some(self.cancel()),
         }
     }
 
@@ -527,31 +518,28 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         keys: Vec<Stroke>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A, O>> {
+    ) -> VimEffect<A, O> {
         if b.n() == 0 && !matches!(command, Command::App(_)) {
-            self.reset_pending();
-            return Some(VimEffect::Consumed);
+            return self.cancel();
         }
-        let visual = self.visual();
+        let visual = self.visual_mode();
         match command {
             Command::Motion(m) => self.finish_motion(m, keys, None, text, b),
-            Command::Operator(op) if visual => {
-                let range = self.selection(text)?;
-                let lines = self.mode() == VimMode::VisualLine;
-                self.count = None;
-                Some(self.apply(op, range, lines, text, b, false))
-            }
             Command::Operator(op) => {
+                if let Some(mode) = visual {
+                    let range = self.visual_range(mode, b);
+                    return self.apply(op, range, mode == VisualMode::Line, text, b, false);
+                }
                 let count = self.count.take();
                 self.pending = Pending::Operator {
                     op: OpState { op, keys, count },
                     typed: Vec::new(),
                 };
-                Some(VimEffect::Consumed)
+                VimEffect::Consumed
             }
             Command::Lines(op) => {
                 let count = self.count.take();
-                Some(self.operate_lines(op, count, text, b))
+                self.operate_lines(op, count, text, b)
             }
             Command::Inner | Command::Around => {
                 self.pending = Pending::Object {
@@ -560,7 +548,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                     opened: (self.count.take(), keys),
                     typed: Vec::new(),
                 };
-                Some(VimEffect::Consumed)
+                VimEffect::Consumed
             }
             Command::Visual | Command::VisualLine => {
                 let mode = if matches!(command, Command::Visual) {
@@ -568,35 +556,32 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 } else {
                     VisualMode::Line
                 };
-                if self.visual_mode() == Some(mode) {
+                if visual == Some(mode) {
                     self.mode = Mode::Normal;
                 } else {
-                    if !visual {
+                    if visual.is_none() {
                         self.anchor = self.cursor;
                     }
                     self.mode = Mode::Visual(mode);
                 }
-                self.reset_pending();
-                Some(VimEffect::Consumed)
+                self.cancel()
             }
             Command::OtherEnd => {
                 std::mem::swap(&mut self.cursor, &mut self.anchor);
-                self.reset_pending();
-                Some(VimEffect::Consumed)
+                self.cancel()
             }
             Command::Search { backward } => {
-                self.reset_pending();
                 self.search.backward = backward;
                 self.mode = Mode::Search {
-                    from: self.visual_mode(),
+                    from: visual,
                     typing: String::new(),
                 };
-                Some(VimEffect::Consumed)
+                self.cancel()
             }
             Command::App(action) => {
                 let count = self.count.take();
                 self.reset_pending();
-                Some(VimEffect::Action { action, count })
+                VimEffect::Action { action, count }
             }
         }
     }
@@ -606,10 +591,15 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         self.count = None;
     }
 
+    fn cancel(&mut self) -> VimEffect<A, O> {
+        self.reset_pending();
+        VimEffect::Consumed
+    }
+
     /// The count for a motion, times the operator's: `2y3w` moves six words.
     fn motion_count(&mut self, op_count: Option<usize>) -> (usize, Option<usize>) {
         let raw = self.count.take();
-        let n = (raw.unwrap_or(1) * op_count.unwrap_or(1)).clamp(1, MAX_COUNT);
+        let n = (raw.unwrap_or(1) * op_count.unwrap_or(1)).min(MAX_COUNT);
         (n, raw)
     }
 
@@ -622,7 +612,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A, O>> {
+    ) -> VimEffect<A, O> {
         let op_count = op.as_ref().and_then(|op| op.count);
         let (n, raw_count) = self.motion_count(op_count);
         let cur = b.index(self.cursor);
@@ -637,12 +627,11 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                     op,
                     opened: (raw_count, keys),
                 };
-                return Some(VimEffect::Consumed);
+                return VimEffect::Consumed;
             }
             Motion::RepeatFind | Motion::RepeatFindReverse => {
                 let Some((find, c)) = self.last_find else {
-                    self.reset_pending();
-                    return Some(VimEffect::Consumed);
+                    return self.cancel();
                 };
                 let find = if m == Motion::RepeatFind {
                     find
@@ -730,40 +719,32 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             Motion::ParagraphBackward => {
                 (repeat(n, cur, |i| paragraph(b, i, false)), Kind::Exclusive)
             }
-            Motion::MatchingBracket => match match_bracket(b, cur) {
-                Some(t) => (t, Kind::Inclusive),
-                None => {
-                    self.reset_pending();
-                    return Some(VimEffect::Consumed);
-                }
-            },
+            Motion::MatchingBracket => {
+                let Some(target) = match_bracket(b, cur) else {
+                    return self.cancel();
+                };
+                (target, Kind::Inclusive)
+            }
             Motion::SearchNext | Motion::SearchPrevious => {
                 let backward = self.search.backward != (m == Motion::SearchPrevious);
-                match self.next_match(text, backward) {
-                    Some(t) => (b.index(t), Kind::Exclusive),
-                    None => {
-                        self.reset_pending();
-                        return Some(VimEffect::Consumed);
-                    }
-                }
+                let Some(target) = self.next_match(text, backward) else {
+                    return self.cancel();
+                };
+                (b.index(target), Kind::Exclusive)
             }
             Motion::SearchWord | Motion::SearchWordBack => {
                 let Some(word) = word_at(b, cur, false) else {
-                    self.reset_pending();
-                    return Some(VimEffect::Consumed);
+                    return self.cancel();
                 };
                 self.search.query = Query {
                     text: b.chars[word].iter().collect(),
                     whole_word: true,
                 };
                 self.search.backward = m == Motion::SearchWordBack;
-                match self.next_match(text, self.search.backward) {
-                    Some(t) => (b.index(t), Kind::Exclusive),
-                    None => {
-                        self.reset_pending();
-                        return Some(VimEffect::Consumed);
-                    }
-                }
+                let Some(target) = self.next_match(text, self.search.backward) else {
+                    return self.cancel();
+                };
+                (b.index(target), Kind::Exclusive)
             }
         };
         self.go(target, kind, op, text, b, keep_column)
@@ -776,10 +757,9 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A, O>> {
+    ) -> VimEffect<A, O> {
         let Some(target) = find_char(b, b.index(self.cursor), find, c, n) else {
-            self.reset_pending();
-            return Some(VimEffect::Consumed);
+            return self.cancel();
         };
         let kind = if find.forward() {
             Kind::Inclusive
@@ -798,9 +778,8 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         text: &str,
         b: &Buf,
         keep_column: bool,
-    ) -> Option<VimEffect<A, O>> {
+    ) -> VimEffect<A, O> {
         let cur = b.index(self.cursor);
-        self.pending = Pending::None;
         if let Some(op) = op {
             let (lo, hi) = (cur.min(target), cur.max(target));
             let range = match kind {
@@ -808,7 +787,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 Kind::Inclusive => b.byte(lo)..b.byte(hi + 1),
                 Kind::Linewise => b.byte(b.line_start(lo))..b.byte(b.line_end(hi)),
             };
-            return Some(self.apply(op.op, range, kind == Kind::Linewise, text, b, keep_column));
+            return self.apply(op.op, range, kind == Kind::Linewise, text, b, keep_column);
         }
         let mut target = target.min(b.n() - 1);
         if self.skip_blank && b.at(target) == '\n' && b.blank_line(target) {
@@ -826,7 +805,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         if !keep_column {
             self.want_col = target - b.line_start(target);
         }
-        Some(VimEffect::Consumed)
+        self.cancel()
     }
 
     /// A text object at the cursor: selected in Visual mode, or what an operator acts on.
@@ -837,30 +816,27 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         op: Option<OpState<O>>,
         text: &str,
         b: &Buf,
-    ) -> Option<VimEffect<A, O>> {
+    ) -> VimEffect<A, O> {
         let count =
             self.count.take().unwrap_or(1) * op.as_ref().and_then(|op| op.count).unwrap_or(1);
-        self.reset_pending();
         let cur = b.index(self.cursor);
         let Some(range) = counted_object(b, cur, object, around, count.min(MAX_COUNT)) else {
-            return Some(VimEffect::Consumed);
+            return self.cancel();
         };
-        match op {
-            Some(op) => Some(self.apply(
+        if let Some(op) = op {
+            return self.apply(
                 op.op,
                 b.byte(range.start)..b.byte(range.end),
                 false,
                 text,
                 b,
                 false,
-            )),
-            None => {
-                self.mode = Mode::Visual(VisualMode::Character);
-                self.anchor = b.byte(range.start);
-                self.cursor = b.byte(range.end.saturating_sub(1).max(range.start));
-                Some(VimEffect::Consumed)
-            }
+            );
         }
+        self.mode = Mode::Visual(VisualMode::Character);
+        self.anchor = b.byte(range.start);
+        self.cursor = b.byte(range.end.saturating_sub(1).max(range.start));
+        self.cancel()
     }
 
     /// The operator over whole lines from the cursor's: as many as `count` times the count
@@ -872,8 +848,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         text: &str,
         b: &Buf,
     ) -> VimEffect<A, O> {
-        let n = (count.unwrap_or(1) * self.count.take().unwrap_or(1)).clamp(1, MAX_COUNT);
-        self.reset_pending();
+        let n = (count.unwrap_or(1) * self.count.take().unwrap_or(1)).min(MAX_COUNT);
         let cur = b.index(self.cursor);
         let first = b.line_start(cur);
         let last = b.line_end(b.nth_line((b.line_of(cur) + n - 1).min(b.line_count() - 1)));
@@ -898,7 +873,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         match op {
             Operator::Yank | Operator::YankSource => {
                 let source = matches!(op, Operator::YankSource);
-                let yanked = text.get(range.clone()).unwrap_or_default().to_owned();
+                let yanked = text[range.clone()].to_owned();
                 let count = yanked.lines().count().max(1);
                 let what = if source { " as source" } else { "" };
                 self.message = Some(if lines || count > 1 {
@@ -955,7 +930,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                     self.search.query = Query::typed(&typing);
                 }
                 if let Some(t) = self.next_match(text, self.search.backward) {
-                    return self.go(b.index(t), Kind::Exclusive, None, text, b, false);
+                    return Some(self.go(b.index(t), Kind::Exclusive, None, text, b, false));
                 }
                 return Some(VimEffect::Consumed);
             }
@@ -1313,26 +1288,20 @@ fn match_bracket(b: &Buf, cur: usize) -> Option<usize> {
             .or((ch == c).then_some((o, c, false)))
     })?;
     let mut depth = 0i32;
-    let indices: Box<dyn Iterator<Item = usize>> = if forward {
-        Box::new(at..b.n())
-    } else {
-        Box::new((0..=at).rev())
-    };
-    for j in indices {
-        let c = b.chars[j];
-        if c == open {
+    let closes_pair = |index: &usize| {
+        let character = b.chars[*index];
+        if character == open {
             depth += 1;
-        } else if c == close {
+        } else if character == close {
             depth -= 1;
         }
-        if depth == 0 {
-            return Some(j);
-        }
-        if !forward && depth > 0 {
-            return None;
-        }
+        depth == 0
+    };
+    if forward {
+        (at..b.n()).find(closes_pair)
+    } else {
+        (0..=at).rev().find(closes_pair)
     }
-    None
 }
 
 /// The word (or space run) under `i`.
