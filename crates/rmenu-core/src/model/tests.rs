@@ -75,6 +75,52 @@ fn row_lookup_only_resolves_currently_listed_items() {
     assert_eq!(h.model.listed_row(&gamma), None);
 }
 
+#[test]
+fn view_queries_follow_published_rows_and_filtered_marks() {
+    let mut h = start(json!({"sources": [src("a", json!({})), src("b", json!({}))]}));
+    assert_eq!(h.model.shown_query(), "");
+    assert!(!h.model.has_choice());
+    assert!(!h.model.can_navigate());
+    assert_eq!(h.model.marked_count(), 0);
+    h.load("alpha\nbeta\n");
+    assert!(h.model.has_choice());
+    assert!(h.model.can_navigate());
+    let alpha = h.model.result(0).clone();
+    let beta = h.model.result(1).clone();
+    assert!(!h.model.is_marked(&alpha));
+    h.toggle(0);
+    assert!(h.model.is_marked(&alpha));
+    assert!(!h.model.is_marked(&beta));
+    assert_eq!(h.model.marked_count(), 1);
+
+    h.query("beta");
+    assert_eq!(h.model.query(), "beta");
+    assert_eq!(h.model.shown_query(), "");
+    assert!(h.model.can_navigate());
+    h.settle();
+    assert_eq!(h.model.shown_query(), "beta");
+    assert_eq!(h.titles(), ["beta"]);
+    assert!(h.model.is_marked(&alpha));
+    assert_eq!(h.model.marked_count(), 1);
+    h.query("missing");
+    assert_eq!(h.model.shown_query(), "beta");
+    h.settle();
+    assert_eq!(h.model.highlighted_row(), None);
+    assert!(h.model.has_choice(), "a filtered mark remains a choice");
+
+    h.switch("b");
+    assert!(!h.model.can_navigate());
+    h.load("");
+    assert_eq!(h.model.marked_count(), 0);
+    assert!(!h.model.is_marked(&alpha));
+    assert!(!h.model.has_choice());
+    assert!(h.model.can_navigate());
+    h.switch("a");
+    h.fail_source("source failed");
+    assert!(!h.model.can_navigate());
+    assert!(!h.model.has_choice());
+}
+
 struct Harness {
     model: Model,
     /// The live task of each kind: starting one replaces the previous, Cancel removes it.
@@ -239,26 +285,22 @@ impl Harness {
     }
 
     fn settled(&self) -> bool {
-        self.model.can_act() && !self.model.is_searching()
+        self.model.can_navigate() && self.model.shown_query() == self.model.query() && !self.model.is_searching()
     }
     fn titles(&self) -> Vec<String> {
         (0..self.model.result_count()).map(|r| self.model.result(r).title().to_owned()).collect()
     }
-    fn values(&self) -> Vec<String> {
-        self.model.chosen().into_iter().map(|i| i.value().to_owned()).collect()
+    fn highlighted(&self) -> Option<&MenuItem> {
+        self.model.highlighted_row().map(|row| self.model.result(row))
     }
     fn marked(&self) -> HashSet<String> {
-        self.model
-            .current
-            .shown
-            .items
-            .iter()
+        let marks: HashSet<_> = (0..self.model.result_count())
+            .map(|row| self.model.result(row))
             .filter(|item| self.model.is_marked(item))
             .map(|item| item.id.clone())
-            .collect()
-    }
-    fn all_items(&self) -> Vec<String> {
-        self.model.current.shown.items.iter().map(|i| i.title().to_owned()).collect()
+            .collect();
+        assert_eq!(marks.len(), self.model.marked_count(), "this fixture has no filtered-out marks");
+        marks
     }
 
     fn is_open(&self) -> bool {
@@ -338,9 +380,10 @@ fn outcomes_define_the_process_exit_codes() {
 
 #[test]
 fn cancelling_carries_the_original_stdin_error_in_the_finish_effect() {
-    let (mut model, _) = Model::new(options(json!({})));
+    let (mut model, _) = Model::new(options(json!({"bindings": [{"key": "ctrl+r", "action": "reload"}]})));
     model.handle(Event::StdinFailed("invalid input record".into()));
-    model.current.message = Some(Status::Ack("unrelated status".into()));
+    model.handle(Event::Perform(BindingIndex(0)));
+    assert_eq!(model.message(), Some("Piped input cannot be re-run"));
     let effects = model.handle(Event::Nav(Nav::Cancel));
     assert!(matches!(effects.as_slice(), [Effect::Finish(Outcome::Failed(message))]
         if message == "invalid input record"));
@@ -359,16 +402,13 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
 "#,
     );
     h.toggle(1);
-    let (items, titles, row, marks) = (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked());
+    let (titles, row, marks) = (h.titles(), h.model.highlighted_row(), h.marked());
     let revision = h.model.result_revision();
     let unchanged = |h: &Harness| {
         assert_eq!(h.model.result_revision(), revision);
-        assert_eq!(
-            (h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()),
-            (items.clone(), titles.clone(), row, marks.clone())
-        );
+        assert_eq!((h.titles(), h.model.highlighted_row(), h.marked()), (titles.clone(), row, marks.clone()));
         assert!(h.model.loading());
-        assert!(!h.model.can_act());
+        assert!(!h.model.can_navigate());
     };
 
     h.switch("files");
@@ -384,13 +424,15 @@ fn source_switch_keeps_presented_snapshot_through_command_and_matching() {
     unchanged(&h);
     h.settle();
     assert_ne!(h.model.result_revision(), revision);
-    assert_eq!(h.all_items(), ["alpine", "omega"]);
     assert_eq!(h.titles(), ["alpine"]);
     assert_eq!(h.model.highlighted_row(), Some(0));
     assert!(h.marked().is_empty());
     assert!(!h.model.loading());
     assert!(h.settled());
     assert_eq!(h.model.query(), "al");
+    h.query("");
+    h.settle();
+    assert_eq!(h.titles(), ["alpine", "omega"]);
 }
 
 #[test]
@@ -409,7 +451,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
     assert_eq!(h.model.preview(), Some(""), "the preview clears as the source switches");
     assert!(cancelled(&h, TaskKind::Preview));
     assert_eq!(h.model.source_id().map(SourceId::as_str), Some("b"));
-    assert!(!h.model.can_act());
+    assert!(!h.model.can_navigate());
     h.highlight(0);
     assert_eq!(h.model.highlighted_row(), Some(1));
     h.nav(Nav::Up);
@@ -425,7 +467,7 @@ fn stale_source_snapshot_cannot_be_highlighted_marked_or_acted_on() {
     h.load("bravo\n");
     assert!(h.settled());
     assert!(h.is_open(), "the refused accept was not replayed");
-    assert_eq!(h.values(), ["bravo"]);
+    assert_eq!(h.highlighted().unwrap().value(), "bravo");
     assert!(h.marked().is_empty());
 }
 
@@ -437,12 +479,12 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         );
         h.load(&jsonl(&[("a", "alpha")]));
         h.toggle(0);
-        let (revision, items, marks) = (h.model.result_revision(), h.all_items(), h.marked());
+        let (revision, titles, marks) = (h.model.result_revision(), h.titles(), h.marked());
         h.switch("next");
         h.query("a");
         assert_eq!(
-            (h.model.result_revision(), h.all_items(), h.marked()),
-            (revision, items.clone(), marks.clone()),
+            (h.model.result_revision(), h.titles(), h.marked()),
+            (revision, titles.clone(), marks.clone()),
             "failure={failure:?}"
         );
         match failure {
@@ -451,21 +493,19 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         }
         assert_ne!(h.model.result_revision(), revision, "failure={failure:?}");
         assert_eq!(h.model.result_count(), 0, "failure={failure:?}");
-        assert!(h.all_items().is_empty(), "failure={failure:?}");
-        assert!(h.model.chosen().is_empty(), "failure={failure:?}");
+        assert!(!h.model.has_choice(), "failure={failure:?}");
         assert_eq!(h.model.highlighted_row(), None, "failure={failure:?}");
-        assert_eq!(h.model.highlighted(), None, "failure={failure:?}");
         assert!(h.marked().is_empty(), "failure={failure:?}");
         assert!(!h.model.loading(), "failure={failure:?}");
         assert!(!h.model.is_searching(), "failure={failure:?}");
         assert_eq!(h.model.input_failed(), failure.is_some(), "failure={failure:?}");
         assert_eq!(h.model.message(), failure, "failure={failure:?}");
-        assert_eq!(h.model.can_act(), failure.is_none(), "failure={failure:?}");
+        assert_eq!(h.model.can_navigate(), failure.is_none(), "failure={failure:?}");
 
         h.query("al");
         h.settle();
-        assert!(h.model.chosen().is_empty(), "failure={failure:?}");
-        assert_eq!(h.model.can_act(), failure.is_none(), "failure={failure:?}");
+        assert!(!h.model.has_choice(), "failure={failure:?}");
+        assert_eq!(h.model.can_navigate(), failure.is_none(), "failure={failure:?}");
 
         // Failure is local to this source generation, not a permanent disabled state.
         h.switch("good");
@@ -473,7 +513,7 @@ fn empty_and_failed_sources_commit_coherent_empty_snapshots() {
         h.query("");
         h.settle();
         assert!(h.settled(), "failure={failure:?}");
-        assert_eq!(h.values(), ["/v/a"], "failure={failure:?}");
+        assert_eq!(h.highlighted().unwrap().value(), "/v/a", "failure={failure:?}");
         assert!(h.marked().is_empty(), "failure={failure:?}");
         assert_eq!(h.model.message(), None, "failure={failure:?}");
     }
@@ -503,13 +543,13 @@ fn superseded_source_cannot_publish() {
             revision,
             "a superseded source published, during_matching={during_matching}"
         );
-        assert_eq!(h.values(), ["alpha"], "during_matching={during_matching}");
+        assert_eq!(h.highlighted().unwrap().value(), "alpha", "during_matching={during_matching}");
         assert!(h.model.loading(), "during_matching={during_matching}");
-        assert!(!h.model.can_act(), "during_matching={during_matching}");
+        assert!(!h.model.can_navigate(), "during_matching={during_matching}");
         h.load("charlie\n");
         assert_ne!(h.model.result_revision(), revision, "during_matching={during_matching}");
         assert_eq!(h.model.source_id().map(SourceId::as_str), Some("c"), "during_matching={during_matching}");
-        assert_eq!(h.values(), ["charlie"], "during_matching={during_matching}");
+        assert_eq!(h.highlighted().unwrap().value(), "charlie", "during_matching={during_matching}");
         assert!(h.settled(), "during_matching={during_matching}");
         assert!(!h.model.loading(), "during_matching={during_matching}");
     }
@@ -529,11 +569,11 @@ fn query_edit_during_replacement_matching_publishes_only_latest_query() {
     h.query("ome");
     h.send(stale);
     assert_eq!(h.model.result_revision(), revision);
-    assert_eq!(h.values(), ["alpha"]);
+    assert_eq!(h.highlighted().unwrap().value(), "alpha");
     h.settle();
     assert_ne!(h.model.result_revision(), revision);
     assert_eq!(h.model.query(), "ome");
-    assert_eq!(h.values(), ["omega"]);
+    assert_eq!(h.highlighted().unwrap().value(), "omega");
     assert!(!h.model.loading());
     assert!(h.settled());
 }
@@ -565,9 +605,9 @@ fn pending_query_cannot_run_with_old_items() {
         "bindings": [{"key": "ctrl+d", "action": "run", "command": ["touch"]}],
     }));
     h.load("alpha\nbeta\n");
-    assert_eq!(h.values(), ["alpha"]);
+    assert_eq!(h.highlighted().unwrap().value(), "alpha");
     h.query("does-not-match");
-    assert!(!h.model.can_act());
+    assert_ne!(h.model.shown_query(), h.model.query());
     h.perform(0);
     h.settle();
     assert_eq!(h.model.result_count(), 0);
@@ -583,20 +623,20 @@ fn reload_prunes_checks_even_when_query_changes_during_loading() {
     h.load(&jsonl(&[("a", "alpha"), ("b", "beta")]));
     h.toggle(0);
     h.toggle(1);
-    let (items, revision) = (h.all_items(), h.model.result_revision());
+    let (titles, revision) = (h.titles(), h.model.result_revision());
     assert_eq!(h.marked(), HashSet::from(["a".into(), "b".into()]));
     h.perform(0);
     h.query("alp");
-    assert!(!h.model.can_act());
+    assert!(!h.model.can_navigate());
     assert!(h.model.loading());
     assert_eq!(h.model.result_revision(), revision);
-    assert_eq!(h.all_items(), items);
+    assert_eq!(h.titles(), titles);
     assert_eq!(h.marked().len(), 2);
     assert_eq!(h.model.highlighted_row(), Some(1));
     h.load(&jsonl(&[("a", "alpine")]));
     assert_ne!(h.model.result_revision(), revision);
     assert_eq!(h.marked(), HashSet::from(["a".into()]));
-    assert_eq!(h.model.chosen()[0].title(), "alpine");
+    assert_eq!(h.model.result(0).title(), "alpine");
     assert_eq!(h.model.highlighted_row(), Some(0));
     assert!(!h.model.loading());
     assert!(h.settled());
@@ -613,10 +653,10 @@ fn plain_reload_cannot_transfer_checks_to_different_values() {
     let revision = h.model.result_revision();
     h.perform(0);
     assert_eq!(h.marked().len(), 1);
-    assert_eq!(h.all_items(), ["alpha", "beta"]);
+    assert_eq!(h.titles(), ["alpha", "beta"]);
     h.load("charlie\ndelta\n");
     assert_ne!(h.model.result_revision(), revision);
-    assert_eq!(h.all_items(), ["charlie", "delta"]);
+    assert_eq!(h.titles(), ["charlie", "delta"]);
     assert!(h.marked().is_empty());
     assert_eq!(h.model.highlighted_row(), Some(0));
 }
@@ -753,21 +793,16 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
     h.toggle(0);
     h.toggle(2);
     h.highlight(1);
-    let (items, titles, row, marks, highlighted) = (
-        h.all_items(),
-        h.titles(),
-        h.model.highlighted_row(),
-        h.marked(),
-        h.model.highlighted().map(|item| item.id.clone()),
-    );
+    let (titles, row, marks, highlighted) =
+        (h.titles(), h.model.highlighted_row(), h.marked(), h.highlighted().map(|item| item.id.clone()));
     assert_eq!(h.model.prompt(), "Repos");
     assert_eq!((titles.len(), marks.len()), (4, 2));
 
     h.perform(0);
     assert_eq!(h.model.depth(), 1);
     assert_eq!(h.model.query(), "");
-    assert_eq!(h.all_items(), items, "the parent's rows stay presented until the child commits");
-    assert!(!h.model.can_act());
+    assert_eq!(h.titles(), titles, "the parent's rows stay presented until the child commits");
+    assert!(!h.model.can_navigate());
     h.load(&jsonl(&[("x", "xray"), ("y", "yankee")]));
     assert_eq!(h.titles(), ["xray", "yankee"]);
     assert!(h.marked().is_empty());
@@ -776,10 +811,10 @@ fn push_then_pop_restores_the_parent_without_rerunning_it() {
     let revision = h.model.result_revision();
     h.nav(Nav::Back);
     assert_eq!(h.model.depth(), 0);
-    assert!(h.model.can_act());
+    assert!(h.model.can_navigate());
     assert_ne!(h.model.result_revision(), revision, "a host resets scrolling to the parent's");
-    assert_eq!((h.all_items(), h.titles(), h.model.highlighted_row(), h.marked()), (items, titles, row, marks));
-    assert_eq!(h.model.highlighted().map(|item| item.id.clone()), highlighted);
+    assert_eq!((h.titles(), h.model.highlighted_row(), h.marked()), (titles, row, marks));
+    assert_eq!(h.highlighted().map(|item| item.id.clone()), highlighted);
     assert_eq!(h.model.query(), "a");
     assert_eq!(h.model.prompt(), "Repos");
     assert!(h.tasks.is_empty());
@@ -823,7 +858,7 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
             start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
         h.load(&jsonl(&REPOS));
         h.toggle(1);
-        let (items, marks) = (h.all_items(), h.marked());
+        let (titles, marks) = (h.titles(), h.marked());
         h.perform(0);
         let late = h.source_event(&jsonl(&[("l", "late-1")]));
         let late = if during_matching {
@@ -844,8 +879,8 @@ fn a_slow_child_popped_mid_load_never_publishes_over_the_parent() {
             revision,
             "a late child result was published, during_matching={during_matching}"
         );
-        assert_eq!((h.all_items(), h.marked()), (items, marks), "during_matching={during_matching}");
-        assert!(h.model.can_act(), "during_matching={during_matching}");
+        assert_eq!((h.titles(), h.marked()), (titles, marks), "during_matching={during_matching}");
+        assert!(h.model.can_navigate(), "during_matching={during_matching}");
         assert_eq!(h.model.depth(), 0, "during_matching={during_matching}");
     }
 }
@@ -1113,7 +1148,7 @@ fn a_child_operation_finishing_after_pop_does_not_reload_the_parent() {
     assert!(!h.model.running_operation());
     assert_eq!((h.source_runs("repos"), h.source_runs("child")), (1, 1));
     assert_eq!(h.model.depth(), 0);
-    assert!(h.model.can_act());
+    assert!(h.model.can_navigate());
 }
 
 // OperationTests
@@ -1264,7 +1299,7 @@ fn rows_arrive_before_eof_and_eof_ends_loading() {
     h.settle();
     assert_eq!(h.model.result_count(), 2);
     assert!(h.model.loading(), "still streaming: the writer has not closed");
-    assert!(h.model.can_act(), "selection works before EOF");
+    assert!(h.model.can_navigate(), "selection works before EOF");
     h.stdin("three\n");
     h.stdin_done();
     h.settle();
@@ -1296,7 +1331,7 @@ fn malformed_input_fails_and_dismissal_exits_two() {
     let mut h = piped(false, false);
     h.send(Event::StdinFailed("Record 1 is not valid JSON".into()));
     assert!(h.model.input_failed());
-    assert!(!h.model.can_act());
+    assert!(!h.model.can_navigate());
     assert_eq!(h.model.message(), Some("Record 1 is not valid JSON"));
     h.nav(Nav::Back);
     assert_eq!(h.output(), (2, String::new()));
