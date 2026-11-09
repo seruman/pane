@@ -224,6 +224,56 @@ fn menu_highlights_reject_split_unicode_characters() {
 }
 
 #[test]
+fn invalid_empty_and_reversed_menu_highlights_are_rejected() {
+    for range in [1..1, 99..99, std::ops::Range { start: 2, end: 0 }] {
+        assert!(
+            std::panic::catch_unwind(|| {
+                crate::MenuItem::new("éclair").highlight(Some(range.clone()));
+            })
+            .is_err(),
+            "invalid range {range:?}"
+        );
+    }
+}
+
+#[test]
+fn empty_menu_highlights_keep_the_narrow_label_layout() {
+    const LABEL: &str = "éclair with a long label that must truncate";
+    fn view(
+        range: &Option<std::ops::Range<usize>>,
+        _: &mut rune::Cx<Option<std::ops::Range<usize>>>,
+    ) -> rune::El {
+        rune::col().child(
+            crate::MenuItem::new(LABEL)
+                .highlight(range.clone())
+                .build("item", &Theme::new(Palette::merino_dark()))
+                .w_full(),
+        )
+    }
+    let layout = |range| {
+        let mut rt = rune::Runtime::new(range, view, (120.0, 40.0), rune::Env::default());
+        rt.frame(0.0);
+        rt.elements()
+            .into_iter()
+            .filter_map(|e| e.text.filter(|t| !t.is_empty()).map(|text| (text, e.rect)))
+            .collect::<Vec<_>>()
+    };
+    let normal = layout(None);
+    assert_eq!(normal.len(), 1);
+    assert!(
+        normal[0].1[0] + normal[0].1[2] <= 120.0,
+        "normal label stays within the row"
+    );
+    for offset in [LABEL.len(), 0, "é".len()] {
+        assert_eq!(
+            layout(Some(offset..offset)),
+            normal,
+            "empty highlight at {offset}"
+        );
+    }
+}
+
+#[test]
 fn a_menu_item_reads_as_checked_until_checked_false() {
     let on = a11y(
         |t| crate::MenuItem::new("Wrap").checked(true).build("wrap", t),

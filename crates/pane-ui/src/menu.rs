@@ -68,7 +68,8 @@ impl MenuItem {
         self.trailing = trailing;
         self
     }
-    /// Marks a byte range in the label. Panics if it is out of bounds or splits a character.
+    /// Marks a byte range in the label. An empty range clears the highlight.
+    /// Panics if the range is out of bounds, reversed, or splits a character.
     pub fn highlight(mut self, range: Option<Range<usize>>) -> Self {
         if let Some(range) = &range {
             assert!(
@@ -76,7 +77,7 @@ impl MenuItem {
                 "highlight must be a byte range within the label on UTF-8 boundaries"
             );
         }
-        self.highlight = range;
+        self.highlight = range.filter(|range| !range.is_empty());
         self
     }
     pub fn selected(mut self, selected: bool) -> Self {
