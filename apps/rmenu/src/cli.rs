@@ -17,7 +17,7 @@ pub enum Appearance {
     name = "rmenu",
     version,
     about = "A programmable menu drawn inside the terminal.",
-    long_about = "A programmable menu drawn inside the terminal.\n\nRead lines, JSONL records, or NUL-delimited values from stdin. Configured commands use argv; candidate values are never shell-interpolated."
+    long_about = "A programmable menu drawn inside the terminal.\n\nRead lines, JSONL records, or NUL-delimited values from stdin. Configured commands use argv. Candidate values are never shell-interpolated."
 )]
 pub struct Cli {
     /// JSON configuration for sources, bindings and preview.
@@ -38,7 +38,7 @@ pub struct Cli {
     /// Preserve input order while filtering.
     #[arg(long)]
     pub no_sort: bool,
-    /// Persistent input prompt; use an empty string to hide it.
+    /// Persistent input prompt. An empty string hides it.
     #[arg(long, allow_hyphen_values = true)]
     pub prompt: Option<String>,
     /// Initial query.
@@ -51,7 +51,7 @@ pub struct Cli {
     /// Rows to move with `PageUp` and `PageDown`.
     #[arg(long, default_value_t = 12, value_parser = clap::value_parser!(u8).range(4..=30))]
     pub rows: u8,
-    /// Light or dark; system follows the terminal.
+    /// Light or dark. System follows the terminal.
     #[arg(long, value_enum, default_value = "system")]
     pub appearance: Appearance,
     #[arg(long, hide = true)]
