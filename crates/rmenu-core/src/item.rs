@@ -41,37 +41,29 @@ impl MenuItem {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct Wire<T> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<T>,
+    id: T,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle: Option<T>,
+    title: T,
+    value: Option<T>,
+}
+
 impl Serialize for MenuItem {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        #[derive(Serialize)]
-        struct Wire<'a> {
-            id: &'a str,
-            title: &'a str,
-            value: &'a str,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            subtitle: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            search: Option<&'a str>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            detail: Option<&'a str>,
-        }
-        Wire { id: &self.id, title: &self.title, value: self.value(), subtitle: self.subtitle.as_deref(),
+        Wire { id: self.id.as_str(), title: self.title(), value: Some(self.value()), subtitle: self.subtitle.as_deref(),
                search: self.search.as_deref(), detail: self.detail.as_deref() }.serialize(serializer)
     }
 }
 
 impl<'de> Deserialize<'de> for MenuItem {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        struct Wire {
-            id: String,
-            title: String,
-            value: Option<String>,
-            subtitle: Option<String>,
-            search: Option<String>,
-            detail: Option<String>,
-        }
-        let w = Wire::deserialize(deserializer)?;
+        let w = Wire::<String>::deserialize(deserializer)?;
         let item = MenuItem { id: w.id, title: w.title, value: None, subtitle: w.subtitle, search: w.search, detail: w.detail };
         Ok(match w.value { Some(value) => item.with_value(value), None => item })
     }
@@ -80,21 +72,21 @@ impl<'de> Deserialize<'de> for MenuItem {
 /// One level of a pushed menu: what was chosen there, root first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PathEntry {
+    pub items: Vec<MenuItem>,
+    pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    pub query: String,
-    pub items: Vec<MenuItem>,
 }
 
 /// JSON on command stdin and `--json` stdout.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActionContext {
     pub action: String,
+    pub items: Vec<MenuItem>,
+    pub path: Vec<PathEntry>,
     pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
-    pub items: Vec<MenuItem>,
-    pub path: Vec<PathEntry>,
 }
 
 impl ActionContext {
@@ -113,11 +105,8 @@ impl ActionContext {
         .collect()
     }
 
-    /// What mmenu writes (`JSONEncoder` with sorted keys, slashes unescaped), without a
-    /// trailing newline. Going through `serde_json::Value` sorts the keys: its map is a BTreeMap.
     pub fn json(&self) -> Vec<u8> {
-        let value = serde_json::to_value(self).expect("an ActionContext is always representable");
-        serde_json::to_vec(&value).expect("a Value always serializes")
+        serde_json::to_vec(self).expect("an ActionContext is always representable")
     }
 }
 
@@ -135,6 +124,18 @@ mod tests {
         let back: ActionContext = serde_json::from_slice(&context.json()).unwrap();
         assert_eq!(back.items, vec![item]);
         assert_eq!(context.environment()[3], ("MMENU_VALUE".into(), "'; echo bad\n$(whoami) /path".into()));
+    }
+
+    #[test]
+    fn wire_values_survive_storage_deduplication() {
+        for value in [None, Some("T"), Some(""), Some("other")] {
+            let mut input = serde_json::json!({"id": "a", "title": "T"});
+            if let Some(value) = value { input["value"] = value.into(); }
+            let item: MenuItem = serde_json::from_value(input).unwrap();
+            let output = serde_json::to_value(&item).unwrap();
+            assert_eq!(output, serde_json::json!({"id": "a", "title": "T", "value": value.unwrap_or("T")}));
+            assert_eq!(serde_json::from_value::<MenuItem>(output).unwrap(), item);
+        }
     }
 
     #[test]
