@@ -962,15 +962,25 @@ type OpState<A> = (Operator<A>, Vec<Stroke>, Option<usize>);
 struct Buf {
     chars: Vec<char>,
     offs: Vec<usize>,
+    lines: Vec<usize>,
     len: usize,
 }
 
 impl Buf {
     fn new(text: &str) -> Buf {
-        let (offs, chars) = text.char_indices().unzip();
+        let (offs, chars): (Vec<_>, Vec<_>) = text.char_indices().unzip();
+        let lines = std::iter::once(0)
+            .chain(
+                chars
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| (*c == '\n').then_some(i + 1)),
+            )
+            .collect();
         Buf {
             chars,
             offs,
+            lines,
             len: text.len(),
         }
     }
@@ -989,40 +999,28 @@ impl Buf {
         self.chars.get(i).copied().unwrap_or('\n')
     }
     fn line_start(&self, i: usize) -> usize {
-        (0..i.min(self.n()))
-            .rev()
-            .find(|&j| self.chars[j] == '\n')
-            .map_or(0, |j| j + 1)
+        self.lines[self.line_of(i)]
     }
     /// The newline ending `i`'s line, or the end.
     fn line_end(&self, i: usize) -> usize {
-        (i..self.n())
-            .find(|&j| self.chars[j] == '\n')
-            .unwrap_or(self.n())
+        self.lines
+            .get(self.line_of(i) + 1)
+            .map_or(self.n(), |start| start - 1)
     }
     /// The last character of `i`'s line that the cursor can sit on.
     fn line_last(&self, i: usize) -> usize {
         self.line_end(i).saturating_sub(1).max(self.line_start(i))
     }
     fn line_of(&self, i: usize) -> usize {
-        self.chars[..i.min(self.n())]
-            .iter()
-            .filter(|&&c| c == '\n')
-            .count()
+        self.lines
+            .partition_point(|&start| start <= i)
+            .saturating_sub(1)
     }
     fn line_count(&self) -> usize {
-        self.chars.iter().filter(|&&c| c == '\n').count() + 1
+        self.lines.len()
     }
     fn nth_line(&self, line: usize) -> usize {
-        if line == 0 {
-            return 0;
-        }
-        self.chars
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| **c == '\n')
-            .nth(line - 1)
-            .map_or(self.n(), |(j, _)| j + 1)
+        self.lines.get(line).copied().unwrap_or(self.n())
     }
     fn first_non_blank(&self, i: usize) -> usize {
         let (s, e) = (self.line_start(i), self.line_end(i));

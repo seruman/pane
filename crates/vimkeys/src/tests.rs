@@ -40,6 +40,38 @@ fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
 }
 
 #[test]
+fn buffer_lines_match_character_boundaries() {
+    for text in ["", "one", "\n", "αβ\n\n🙂z\n", "a\nb\nc"] {
+        let b = Buf::new(text);
+        let chars: Vec<_> = text.chars().collect();
+        let starts: Vec<_> = std::iter::once(0)
+            .chain(
+                chars
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, c)| (*c == '\n').then_some(i + 1)),
+            )
+            .collect();
+        assert_eq!(b.line_count(), starts.len());
+        for (line, start) in starts.iter().enumerate() {
+            assert_eq!(b.nth_line(line), *start);
+        }
+        assert_eq!(b.nth_line(starts.len()), chars.len());
+        for i in 0..=chars.len() {
+            let line = chars[..i].iter().filter(|c| **c == '\n').count();
+            assert_eq!(b.line_of(i), line);
+            assert_eq!(b.line_start(i), starts[line]);
+            assert_eq!(
+                b.line_end(i),
+                (i..chars.len())
+                    .find(|j| chars[*j] == '\n')
+                    .unwrap_or(chars.len())
+            );
+        }
+    }
+}
+
+#[test]
 fn word_motions() {
     let mut v = Vim::default();
     press(&mut v, "w");
