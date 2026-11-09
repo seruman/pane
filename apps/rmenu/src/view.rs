@@ -327,7 +327,8 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
             .sum::<f32>()
     };
     let labelled = cost(true, bindings.len()) <= room;
-    let shown = (0..=bindings.len()).rev().find(|&n| cost(labelled, n) <= room).unwrap_or(0);
+    let shown =
+        (0..=bindings.len()).rev().find(|&n| cost(labelled, n) <= room).expect("zero bindings always fit");
     for (index, label, key) in &bindings[..shown] {
         let index = *index;
         bar = bar.child(
