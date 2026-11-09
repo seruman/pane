@@ -19,10 +19,10 @@ pub struct CommandResult {
     pub status: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum CommandError {
     InvalidArguments,
-    System { operation: String, code: i32 },
+    System { operation: &'static str, error: io::Error },
     TimedOut,
     OutputLimitExceeded,
     Cancelled,
@@ -32,8 +32,7 @@ impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CommandError::InvalidArguments => f.write_str("Invalid command arguments or environment"),
-            CommandError::System { operation, code } =>
-                write!(f, "{operation}: {} ({code})", io::Error::from_raw_os_error(*code)),
+            CommandError::System { operation, error } => write!(f, "{operation}: {error}"),
             CommandError::TimedOut => f.write_str("Command timed out"),
             CommandError::OutputLimitExceeded => f.write_str("Command exceeded the combined output limit"),
             CommandError::Cancelled => f.write_str("Command cancelled"),
@@ -41,7 +40,14 @@ impl fmt::Display for CommandError {
     }
 }
 
-impl std::error::Error for CommandError {}
+impl std::error::Error for CommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::System { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Cancels a running command from another thread; the command's whole process group is killed
 /// and reaped before `run` returns. Cancelling before `run` starts means nothing is spawned.
@@ -58,8 +64,8 @@ impl Cancel {
 /// Bounds how long a cancel waits when no stream is active.
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
-fn system(operation: &str, error: io::Error) -> CommandError {
-    CommandError::System { operation: operation.to_owned(), code: error.raw_os_error().unwrap_or(libc::EIO) }
+fn system(operation: &'static str, error: io::Error) -> CommandError {
+    CommandError::System { operation, error }
 }
 
 /// Signals a command starts with at their default action, whatever rmenu does with them.
@@ -85,7 +91,7 @@ fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError>
         }
     }
     let code = if denied { libc::EACCES } else { libc::ENOENT };
-    Err(CommandError::System { operation: "posix_spawn".into(), code })
+    Err(system("posix_spawn", io::Error::from_raw_os_error(code)))
 }
 
 /// A pipe whose ends are close-on-exec, so no other command inherits them.
@@ -102,8 +108,8 @@ fn pipe() -> Result<(File, File), CommandError> {
 }
 
 /// Fails with the operation's name when a posix_spawn* call returns an error number.
-fn spawn_call(code: libc::c_int, operation: &str) -> Result<(), CommandError> {
-    if code == 0 { Ok(()) } else { Err(CommandError::System { operation: operation.into(), code }) }
+fn spawn_call(code: libc::c_int, operation: &'static str) -> Result<(), CommandError> {
+    if code == 0 { Ok(()) } else { Err(system(operation, io::Error::from_raw_os_error(code))) }
 }
 
 /// The started command: its process group leader and the parent's ends of its stdio pipes.
@@ -556,15 +562,15 @@ mod tests {
 
     #[test]
     fn missing_executable_and_invalid_inputs_fail() {
-        assert_eq!(quick(&[]), Err(CommandError::InvalidArguments));
-        assert_eq!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments));
-        assert_eq!(quick(&["bad\0program"]), Err(CommandError::InvalidArguments));
+        assert!(matches!(quick(&[]), Err(CommandError::InvalidArguments)));
+        assert!(matches!(quick(&["/bin/echo", "bad\0argument"]), Err(CommandError::InvalidArguments)));
+        assert!(matches!(quick(&["bad\0program"]), Err(CommandError::InvalidArguments)));
         for env in [[("BAD\0KEY", "value")], [("KEY", "bad\0value")], [("", "value")], [("BAD=KEY", "value")]] {
-            assert_eq!(run_with(&["/usr/bin/true"], None, &env, Duration::from_secs(10), 1024),
-                       Err(CommandError::InvalidArguments), "{env:?}");
+            assert!(matches!(run_with(&["/usr/bin/true"], None, &env, Duration::from_secs(10), 1024),
+                             Err(CommandError::InvalidArguments)), "{env:?}");
         }
-        assert_eq!(quick(&["missing-command-rmenu-test"]),
-                   Err(CommandError::System { operation: "posix_spawn".into(), code: libc::ENOENT }));
+        assert!(matches!(quick(&["missing-command-rmenu-test"]),
+                         Err(CommandError::System { operation: "posix_spawn", error }) if error.raw_os_error() == Some(libc::ENOENT)));
     }
 
     #[test]
@@ -572,7 +578,8 @@ mod tests {
         let dir = TempDir::new("denied");
         std::fs::write(dir.0.join("script"), "#!/bin/sh\n").unwrap();
         let result = run_with(&["script"], Some(b""), &[("PATH", dir.0.to_str().unwrap())], Duration::from_secs(10), 1 << 20);
-        assert_eq!(result, Err(CommandError::System { operation: "posix_spawn".into(), code: libc::EACCES }));
+        assert!(matches!(result, Err(CommandError::System { operation: "posix_spawn", error })
+                         if error.raw_os_error() == Some(libc::EACCES)));
     }
 
     #[test]
@@ -585,10 +592,10 @@ mod tests {
         let argv = ["/bin/sh", "-c", "printf 1234; printf 5678 >&2"];
         let exact = run_with(&argv, Some(b""), &[], Duration::from_secs(10), 8).unwrap();
         assert_eq!(exact.stdout.len() + exact.stderr.len(), 8);
-        assert_eq!(run_with(&argv, Some(b""), &[], Duration::from_secs(10), 7), Err(CommandError::OutputLimitExceeded));
+        assert!(matches!(run_with(&argv, Some(b""), &[], Duration::from_secs(10), 7), Err(CommandError::OutputLimitExceeded)));
         assert!(run_with(&["/usr/bin/true"], Some(b""), &[], Duration::from_secs(10), 0).unwrap().stdout.is_empty());
         let unbounded = ["/bin/sh", "-c", "while :; do printf 1234567890; done"];
-        assert_eq!(run_with(&unbounded, Some(b""), &[], Duration::from_secs(10), 128), Err(CommandError::OutputLimitExceeded));
+        assert!(matches!(run_with(&unbounded, Some(b""), &[], Duration::from_secs(10), 128), Err(CommandError::OutputLimitExceeded)));
     }
 
     #[test]
@@ -596,7 +603,7 @@ mod tests {
         let start = Instant::now();
         let result = run_with(&["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"], Some(&[1; 1_000_000]), &[],
                               Duration::from_millis(100), 1 << 20);
-        assert_eq!(result, Err(CommandError::TimedOut));
+        assert!(matches!(result, Err(CommandError::TimedOut)));
         assert!(start.elapsed() < Duration::from_secs(2));
     }
 
@@ -612,7 +619,7 @@ mod tests {
         };
         let leader = pids(&marker, 1);
         cancel.cancel();
-        assert_eq!(task.join().unwrap(), Err(CommandError::Cancelled));
+        assert!(matches!(task.join().unwrap(), Err(CommandError::Cancelled)));
         assert_gone(&leader);
     }
 
@@ -620,7 +627,7 @@ mod tests {
     fn timeout_after_all_pipes_close() {
         let result = run_with(&["/bin/sh", "-c", "exec 0<&- 1>&- 2>&-; exec /bin/sleep 30"], Some(b""), &[],
                               Duration::from_millis(100), 1 << 20);
-        assert_eq!(result, Err(CommandError::TimedOut));
+        assert!(matches!(result, Err(CommandError::TimedOut)));
     }
 
     /// The nested shell waits, so it can't exec away the middle generation. Every generation
@@ -669,7 +676,7 @@ printf '%s\n' "$$" > "$1/leader"
         let leader = pids(&dir.0.join("leader"), 1);
         let start = Instant::now();
         cancel.cancel();
-        assert_eq!(task.join().unwrap(), Err(CommandError::Cancelled));
+        assert!(matches!(task.join().unwrap(), Err(CommandError::Cancelled)));
         assert!(start.elapsed() < Duration::from_secs(2));
         assert_gone(&[leader, descendants].concat());
         assert_eq!(text(&survivor.join().unwrap().unwrap().stdout), "alive");
@@ -680,7 +687,7 @@ printf '%s\n' "$$" > "$1/leader"
         let dir = TempDir::new("timeout");
         let argv = descendant_command(&dir.0, "exit 0");
         let result = run(&argv, Some(b""), &[], Duration::from_millis(300), 1 << 20, &Cancel::default());
-        assert_eq!(result, Err(CommandError::TimedOut), "inherited pipes stay subject to the timeout");
+        assert!(matches!(result, Err(CommandError::TimedOut)), "inherited pipes stay subject to the timeout");
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
 
@@ -689,7 +696,7 @@ printf '%s\n' "$$" > "$1/leader"
         let dir = TempDir::new("limit");
         let argv = descendant_command(&dir.0, "while [ ! -s \"$1/descendants\" ]; do /bin/sleep 0.01; done\nwhile :; do printf 1234567890; done");
         let result = run(&argv, Some(b""), &[], Duration::from_secs(10), 128, &Cancel::default());
-        assert_eq!(result, Err(CommandError::OutputLimitExceeded));
+        assert!(matches!(result, Err(CommandError::OutputLimitExceeded)));
         assert_gone(&pids(&dir.0.join("descendants"), 2));
     }
 
@@ -700,7 +707,7 @@ printf '%s\n' "$$" > "$1/leader"
         let cancel = Cancel::default();
         cancel.cancel();
         let argv = strings(&["/usr/bin/touch", marker.to_str().unwrap()]);
-        assert_eq!(run(&argv, Some(b""), &[], Duration::from_secs(10), 1 << 20, &cancel), Err(CommandError::Cancelled));
+        assert!(matches!(run(&argv, Some(b""), &[], Duration::from_secs(10), 1 << 20, &cancel), Err(CommandError::Cancelled)));
         assert!(!marker.exists());
     }
 
@@ -720,10 +727,16 @@ printf '%s\n' "$$" > "$1/leader"
     }
 
     #[test]
+    fn system_errors_preserve_non_os_details() {
+        let error = system("read output", io::Error::other("fixture failure"));
+        assert!(error.to_string().contains("fixture failure"), "{error}");
+    }
+
+    #[test]
     fn errors_describe_themselves() {
         assert_eq!(CommandError::TimedOut.to_string(), "Command timed out");
         assert!(CommandError::OutputLimitExceeded.to_string().contains("output limit"));
-        let missing = CommandError::System { operation: "posix_spawn".into(), code: libc::ENOENT };
+        let missing = system("posix_spawn", io::Error::from_raw_os_error(libc::ENOENT));
         assert!(missing.to_string().starts_with("posix_spawn: No such file or directory"));
     }
 }
