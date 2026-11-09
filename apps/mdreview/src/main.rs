@@ -1230,7 +1230,6 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     }
 }
 
-// The quit hook runs after terminal teardown, so feedback can go to stdout.
 fn send(s: &mut App_, _: &mut Tx) {
     if s.send && s.composer.is_some() {
         s.save();
