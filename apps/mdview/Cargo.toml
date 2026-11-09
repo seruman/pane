@@ -10,6 +10,7 @@ rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-kit = { workspace = true, features = ["markdown", "mermaid"] }
 pane-ui.workspace = true
 vimkeys.workspace = true
+pulldown-cmark = "0.13"
 
 [lints]
 workspace = true

@@ -12,13 +12,17 @@
 //! `*` and `#`; Escape hides the matches. Ctrl-D and Ctrl-U page. Space on a task's line ticks
 //! it, and with a file open writes it back. Hover a code block for its copy button.
 
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use pane_ui::{Badge, Button, Theme, icons, kbd};
-use rune::{App, AppSpec, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text};
-use rune_kit::markdown::{Highlight, RenderedText};
-use rune_kit::{CodeFrame, Markdown, MarkdownStyle};
-use vimkeys::{Keymap, Operator, Stroke, Vim, VimEffect, VimMode};
+use pulldown_cmark::{Event, Options, Parser};
+
+use pane_ui::markdown::{self, VIM_CURSOR, style, type_keys};
+use pane_ui::{Button, Theme, icons};
+use rune::{App, AppSpec, Cx, El, KeyEvent, ScrollSpec, Tx, col, el, row};
+use rune_kit::markdown::RenderedText;
+use rune_kit::{CodeFrame, Markdown};
+use vimkeys::{Keymap, Operator, Stroke, Vim, VimEffect};
 
 const SAMPLE: &str = include_str!("sample.md");
 const COPIED_FOR: Duration = Duration::from_millis(1500);
@@ -30,12 +34,33 @@ enum Act {
     Tick,
 }
 
+enum Origin {
+    Sample,
+    File(PathBuf),
+}
+
+impl Origin {
+    fn title(&self) -> String {
+        match self {
+            Self::Sample => "sample.md".into(),
+            Self::File(path) => path.display().to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Copied {
+    block: usize,
+    at: Instant,
+}
+
 struct Doc {
-    path: Option<String>,
+    origin: Origin,
     source: String,
+    page: RenderedText,
+    tasks: Vec<(usize, bool)>,
     vim: Vim<Act>,
-    /// The code block whose copy button shows a check, and since when.
-    copied: Option<(usize, Instant)>,
+    copied: Option<Copied>,
     /// A one-off note for the status line.
     note: Option<String>,
 }
@@ -61,7 +86,9 @@ impl Doc {
 
     fn with_source(path: Option<String>, source: String) -> Doc {
         Doc {
-            path,
+            origin: path.map_or(Origin::Sample, |path| Origin::File(path.into())),
+            page: RenderedText::new(&source),
+            tasks: task_markers(&source),
             source,
             vim: Vim::new(
                 Keymap::vim()
@@ -81,115 +108,46 @@ impl Doc {
 
 impl Doc {
     /// The `[` of the task list item the Vim cursor is on, and whether it is ticked.
-    fn task_under_cursor(&self, page: &RenderedText) -> Option<(usize, bool)> {
-        let at = page
-            .source_ranges(self.vim.cursor(page.text()))
+    fn task_under_cursor(&self) -> Option<(usize, bool)> {
+        let at = self
+            .page
+            .source_ranges(self.vim.cursor(self.page.text()))
             .first()?
             .start;
-        let line_start = self.source[..at].rfind('\n').map_or(0, |i| i + 1);
-        let line = &self.source[line_start..];
-        let rest = line.trim_start_matches([' ', '\t', '>']);
-        let rest = rest.strip_prefix(['-', '*', '+']).or_else(|| {
-            let digits = rest.trim_start_matches(|c: char| c.is_ascii_digit());
-            (digits.len() < rest.len())
-                .then(|| digits.strip_prefix(['.', ')']))
-                .flatten()
-        })?;
-        let box_at = rest.len() - rest.trim_start().len();
-        let mark = rest.trim_start().get(..3)?;
-        let checked = match mark {
-            "[ ]" => false,
-            "[x]" | "[X]" => true,
-            _ => return None,
-        };
-        Some((line_start + (line.len() - rest.len()) + box_at, checked))
+        let start = pane_ui::markdown::line_start(&self.source, at);
+        self.tasks
+            .iter()
+            .copied()
+            .find(|(offset, _)| pane_ui::markdown::line_start(&self.source, *offset) == start)
     }
 
-    /// Ticks or clears the task whose `[` is at `offset`, and writes the file back.
-    fn set_task(&mut self, offset: usize, checked: bool) {
-        let mark = if checked { "x" } else { " " };
-        if self.source.get(offset + 1..offset + 2).is_none() {
+    fn tick_and_save(&mut self, offset: usize, checked: bool) {
+        if !self.tasks.iter().any(|(at, _)| *at == offset) {
             return;
         }
-        self.source.replace_range(offset + 1..offset + 2, mark);
-        if let Some(path) = &self.path
+        self.source
+            .replace_range(offset + 1..offset + 2, if checked { "x" } else { " " });
+        self.page = RenderedText::new(&self.source);
+        self.tasks = task_markers(&self.source);
+        if let Origin::File(path) = &self.origin
             && let Err(error) = std::fs::write(path, &self.source)
         {
-            // stderr is the terminal the page is drawn on, so the note goes in the status line.
-            self.note = Some(format!("could not save {path}: {error}"));
+            self.note = Some(format!("could not save {}: {error}", path.display()));
         }
     }
 }
 
-/// GitHub's reading width and type, in the theme's colours.
-fn style(theme: &Theme) -> MarkdownStyle {
-    MarkdownStyle::from_kit(&theme.kit)
-        .text(theme.text)
-        .muted(theme.text_secondary)
-        .link(theme.accent_text)
-        .link_underline(theme.accent_text.alpha(0.4))
-        .quote_rule(theme.separator)
-        .rule(theme.separator)
-        .code_block(theme.group, theme.separator)
-        .inline_code_bg(theme.field)
-        .selection(theme.accent_soft)
-        // GitHub's heading scale: 2, 1.5 and 1.25 times the body.
-        .heading_font(
-            1,
-            TextStyle {
-                size: 26.0,
-                weight: 600.0,
-                line_height: 34.0,
-                ..theme.ty.body
-            },
-        )
-        .heading_font(
-            2,
-            TextStyle {
-                size: 20.0,
-                weight: 600.0,
-                line_height: 28.0,
-                ..theme.ty.body
-            },
-        )
-        .heading_font(
-            3,
-            TextStyle {
-                size: 16.0,
-                weight: 600.0,
-                line_height: 24.0,
-                ..theme.ty.body
-            },
-        )
-}
-
-/// The Vim cursor, selection and search matches as highlights on the page.
-fn vim_highlights(
-    vim: &Vim<Act>,
-    page: &RenderedText,
-    theme: &Theme,
-) -> Vec<(Vec<std::ops::Range<usize>>, Highlight)> {
-    let text = page.text();
-    let mut out = Vec::new();
-    for range in vim.matches(text) {
-        out.push((page.source_ranges(range), Highlight::new()));
-    }
-    if let Some(range) = vim.selection(text) {
-        out.push((
-            page.source_ranges(range),
-            Highlight::new().bg(theme.accent_soft).fg(theme.text),
-        ));
-    }
-    let cursor = vim.cursor(text);
-    out.push((
-        page.source_ranges(cursor),
-        Highlight::new()
-            .bg(theme.accent)
-            .fg(theme.on_accent)
-            .key("vim-cursor"),
-    ));
-    out.retain(|(ranges, _)| !ranges.is_empty());
-    out
+fn task_markers(source: &str) -> Vec<(usize, bool)> {
+    Parser::new_ext(
+        source,
+        Options::ENABLE_TASKLISTS | Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+    )
+    .into_offset_iter()
+    .filter_map(|(event, range)| match event {
+        Event::TaskListMarker(checked) => Some((range.start, checked)),
+        _ => None,
+    })
+    .collect()
 }
 
 /// A code block with a copy button over its top right corner while the pointer is on it.
@@ -207,7 +165,10 @@ fn code_frame(theme: &Theme, copied: Option<usize>) -> impl Fn(El, &CodeFrame<'_
         .small()
         .on_press_tx(move |s: &mut Doc, tx: &mut Tx| {
             tx.copy(code.clone());
-            s.copied = Some((index, Instant::now()));
+            s.copied = Some(Copied {
+                block: index,
+                at: Instant::now(),
+            });
             tx.wake_after(COPIED_FOR);
         })
         .build(&format!("copy-{index}"), &theme);
@@ -226,58 +187,33 @@ fn code_frame(theme: &Theme, copied: Option<usize>) -> impl Fn(El, &CodeFrame<'_
 
 fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
     let theme = Theme::current(cx.system_dark());
-    let page = RenderedText::new(&s.source);
-    let title = s.path.as_deref().unwrap_or("sample.md");
-    let bar = row()
-        .key("bar")
-        .w_full()
-        .min_h(40.0)
-        .px(20.0)
-        .py(6.0)
-        .gap(10.0)
-        .center_y()
-        .child(rune::icon(&icons::FILE_TEXT, 16.0).color(theme.text_secondary))
-        .child(
-            text(title)
-                .font(theme.ty.strong)
-                .color(theme.text)
-                .truncate()
-                .shrink(),
-        )
-        .child(el().grow(1.0))
-        .child(kbd("/", &theme))
-        .child(
-            text("search")
-                .font(theme.ty.caption)
-                .color(theme.text_tertiary),
-        )
-        .child(kbd("v", &theme))
-        .child(
-            text("select")
-                .font(theme.ty.caption)
-                .color(theme.text_tertiary),
-        )
-        .child(kbd("y", &theme))
-        .child(
-            text("yank")
-                .font(theme.ty.caption)
-                .color(theme.text_tertiary),
-        )
-        .child(kbd("gy", &theme))
-        .child(
-            text("as md")
-                .font(theme.ty.caption)
-                .color(theme.text_tertiary),
-        );
+    let page = &s.page;
+    let title = s.origin.title();
+    let bar = markdown::title_bar(
+        &title,
+        &[
+            ("/", "search"),
+            ("v", "select"),
+            ("y", "yank"),
+            ("gy", "as md"),
+        ],
+        &theme,
+    );
     let doc = Markdown::new(s.source.as_str())
-        .style(style(&theme))
+        .style(style(&theme).selection(theme.accent_soft))
         .selectable(true)
-        .highlights(vim_highlights(&s.vim, &page, &theme))
-        .code_frame(code_frame(&theme, s.copied.map(|(i, _)| i)))
+        .highlights(markdown::vim_highlights(
+            &s.vim,
+            page.text(),
+            |range| page.source_ranges(range),
+            true,
+            &theme,
+        ))
+        .code_frame(code_frame(&theme, s.copied.map(|copied| copied.block)))
         // A clicked box would keep focus, and Space would go on ticking it rather than the task
         // under the cursor; drop focus so keys come back to Vim.
         .on_task_tx(|s: &mut Doc, _, offset, checked, tx| {
-            s.set_task(offset, checked);
+            s.tick_and_save(offset, checked);
             tx.blur();
         })
         .build(&theme.kit);
@@ -297,81 +233,44 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
         .child(bar)
         .child(el().h(1.0).w_full().fill(theme.separator))
         .child(content.grow(1.0).min_h(0.0))
-        .child(status_line(&s.vim, s.note.as_deref(), &page, &theme))
-}
-
-/// Vim's status line: the mode (or the search being typed), a note, half-typed keys and the
-/// cursor's line.
-fn status_line(vim: &Vim<Act>, note: Option<&str>, page: &RenderedText, theme: &Theme) -> El {
-    let text_of = page.text();
-    let line = text_of[..vim.cursor(text_of).start].matches('\n').count() + 1;
-    let lines = text_of.matches('\n').count() + 1;
-    let searching = vim.mode() == VimMode::Search;
-    let mode = if searching {
-        text(vim.status()).font(theme.ty.mono).color(theme.text)
-    } else {
-        el().child(
-            Badge::new(vim.status())
-                .tone(match vim.mode() {
-                    VimMode::Normal => pane_ui::Tone::Neutral,
-                    _ => pane_ui::Tone::Accent,
-                })
-                .build(theme),
-        )
-    };
-    row()
-        .key("status")
-        .w_full()
-        .h(28.0)
-        .px(16.0)
-        .gap(12.0)
-        .center_y()
-        .fill(theme.group)
-        .child(mode)
-        .child(
-            text(note.or(vim.message()).unwrap_or_default().to_owned())
-                .font(theme.ty.caption)
-                .color(theme.text_secondary)
-                .truncate()
-                .shrink(),
-        )
-        .child(el().grow(1.0))
-        .child(
-            text(vim.pending())
-                .font(theme.ty.mono)
-                .color(theme.text_secondary),
-        )
-        .child(
-            text(format!("{line}:{lines}"))
-                .font(theme.ty.mono)
-                .color(theme.text_tertiary),
-        )
+        .child(markdown::status_line(
+            &s.vim,
+            page.text(),
+            s.note.as_deref(),
+            None,
+            None,
+            &theme,
+        ))
 }
 
 fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
     s.note = None;
-    let page = RenderedText::new(&s.source);
+    let page = &s.page;
     match s.vim.key(k, page.text()) {
-        Some(VimEffect::Moved) => {
-            tx.scroll_into_view("vim-cursor");
+        Some(VimEffect::Consumed) => {
+            tx.scroll_into_view(VIM_CURSOR);
             true
         }
         Some(VimEffect::Copy(yanked)) => {
             tx.copy(yanked);
-            tx.scroll_into_view("vim-cursor");
+            tx.scroll_into_view(VIM_CURSOR);
             true
         }
         Some(VimEffect::CopySource { range, linewise }) => {
-            tx.copy(source_of(&s.source, &page, range, linewise));
-            tx.scroll_into_view("vim-cursor");
+            tx.copy(markdown::source_of(
+                &s.source,
+                &page.source_ranges(range),
+                linewise,
+            ));
+            tx.scroll_into_view(VIM_CURSOR);
             true
         }
         // Space on a task's line ticks it, as a click on its box does.
         Some(VimEffect::Action {
             action: Act::Tick, ..
         }) => {
-            if let Some((offset, checked)) = s.task_under_cursor(&page) {
-                s.set_task(offset, !checked);
+            if let Some((offset, checked)) = s.task_under_cursor() {
+                s.tick_and_save(offset, !checked);
             }
             true
         }
@@ -380,32 +279,9 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
     }
 }
 
-/// The Markdown behind `range` of the page's text: from the first source byte it was drawn from
-/// to the last, as written, so a range starting inside bold text keeps its closing `**` and
-/// drops the opening one. A linewise yank takes the whole source lines, with list markers,
-/// heading hashes and code fences that fall on them.
-fn source_of(
-    source: &str,
-    page: &RenderedText,
-    range: std::ops::Range<usize>,
-    linewise: bool,
-) -> String {
-    let ranges = page.source_ranges(range);
-    let (Some(first), Some(last)) = (ranges.first(), ranges.last()) else {
-        return String::new();
-    };
-    let (mut start, mut end) = (first.start, last.end);
-    if linewise {
-        start = source[..start].rfind('\n').map_or(0, |i| i + 1);
-        end = source[end..].find('\n').map_or(source.len(), |i| end + i);
-        return format!("{}\n", &source[start..end]);
-    }
-    source[start..end].to_owned()
-}
-
 /// Puts a copy button back to its icon once the check has shown long enough.
 fn poll(s: &mut Doc, _: f64, tx: &mut Tx) -> bool {
-    let Some((_, at)) = s.copied else {
+    let Some(Copied { at, .. }) = s.copied else {
         return false;
     };
     let left = COPIED_FOR.saturating_sub(at.elapsed());
@@ -428,30 +304,15 @@ fn main() {
     App::new(AppSpec::<Doc> {
         scenes: &[
             ("visual", |s| {
-                let page = RenderedText::new(&s.source);
-                for c in "jjwwvee".chars() {
-                    s.vim.key(
-                        &KeyEvent {
-                            key: rune::Key::Text(c.to_string()),
-                            mods: rune::Mods::default(),
-                        },
-                        page.text(),
-                    );
-                }
+                type_keys(&mut s.vim, "jjwwvee", s.page.text())
             }),
-            ("search", |s| {
-                let page = RenderedText::new(&s.source);
-                for c in "/rune".chars() {
-                    s.vim.key(
-                        &KeyEvent {
-                            key: rune::Key::Text(c.to_string()),
-                            mods: rune::Mods::default(),
-                        },
-                        page.text(),
-                    );
-                }
+            ("search", |s| type_keys(&mut s.vim, "/rune", s.page.text())),
+            ("copied", |s| {
+                s.copied = Some(Copied {
+                    block: 0,
+                    at: Instant::now(),
+                })
             }),
-            ("copied", |s| s.copied = Some((0, Instant::now()))),
         ],
         on_key: Some(on_key),
         poll: Some(poll),
@@ -472,7 +333,7 @@ mod tests {
     fn yank(text: &str, linewise: bool) -> String {
         let page = RenderedText::new(SRC);
         let at = page.text().find(text).expect("drawn");
-        source_of(SRC, &page, at..at + text.len(), linewise)
+        markdown::source_of(SRC, &page.source_ranges(at..at + text.len()), linewise)
     }
 
     #[test]
@@ -507,9 +368,8 @@ mod tests {
             Some(missing.to_str().unwrap().to_owned()),
             "- [ ] one\n".to_owned(),
         );
-        let page = RenderedText::new(&doc.source);
-        let (offset, checked) = doc.task_under_cursor(&page).unwrap();
-        doc.set_task(offset, !checked);
+        let (offset, checked) = doc.task_under_cursor().unwrap();
+        doc.tick_and_save(offset, !checked);
         assert_eq!(doc.source, "- [x] one\n");
         let note = doc.note.clone().unwrap_or_default();
         assert!(
@@ -524,6 +384,30 @@ mod tests {
             shown.iter().any(|t| t.starts_with("could not save")),
             "in the status line: {shown:?}"
         );
+    }
+
+    #[test]
+    fn tasks_follow_the_parser_and_refresh_after_toggling() {
+        let source = "> - [x] quoted\n\n1. [ ] ordered\n\n- [ ] outer\n  - [X] inner\n";
+        let mut doc = Doc::with_source(None, source.into());
+        assert_eq!(doc.tasks.len(), 4);
+        for needle in ["quoted", "ordered", "outer", "inner"] {
+            let at = doc.page.text().find(needle).unwrap();
+            doc.vim.set_cursor(at, doc.page.text());
+            let (offset, checked) = doc.task_under_cursor().unwrap();
+            doc.tick_and_save(offset, !checked);
+            assert_eq!(doc.task_under_cursor(), Some((offset, !checked)));
+            assert_eq!(doc.page.text(), RenderedText::new(&doc.source).text());
+        }
+        let before = doc.source.clone();
+        doc.tick_and_save(0, true);
+        assert_eq!(doc.source, before);
+    }
+
+    #[test]
+    fn task_markers_in_code_are_not_interactive() {
+        let doc = Doc::with_source(None, "```text\n- [ ] not a task\n```\n".into());
+        assert_eq!(doc.task_under_cursor(), None);
     }
 
     #[test]

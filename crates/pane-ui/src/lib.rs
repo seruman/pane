@@ -42,6 +42,7 @@ mod display;
 mod form;
 mod layout;
 mod list;
+pub mod markdown;
 mod menu;
 mod settings;
 mod theme;
