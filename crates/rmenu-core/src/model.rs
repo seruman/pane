@@ -6,7 +6,7 @@ use std::mem;
 use crate::items::Items;
 use std::time::Duration;
 
-use crate::command::CommandResult;
+use crate::command::{CommandResult, Limits};
 use crate::config::{BindingAction, InputFormat, KeyChord, MarkScope, MenuBinding, MenuConfiguration, MenuSource};
 use crate::item::{ActionContext, MenuItem, PathEntry};
 use crate::search::SearchIndex;
@@ -41,16 +41,20 @@ pub enum TaskKind {
     Operation,
 }
 
+pub const SOURCE_LIMITS: Limits = Limits { timeout: Duration::from_secs(30), output_bytes: 16 * 1024 * 1024 };
+pub const PREVIEW_LIMITS: Limits = Limits { timeout: Duration::from_secs(5), output_bytes: 512 * 1024 };
+pub const OPERATION_LIMITS: Limits = Limits { timeout: Duration::from_secs(30), output_bytes: 1024 * 1024 };
+
 #[derive(Clone, Debug)]
 pub enum Task {
-    /// Run a source command (16 MiB, 30 s) and decode its stdout as `format`, answer
+    /// Run a source command under `SOURCE_LIMITS` and decode its stdout as `format`, answer
     /// `SourceDone`. A nonzero exit is an error worded by [`command_failure`].
     Source { token: Token, argv: Vec<String>, input: Vec<u8>, env: Vec<(String, String)>, format: InputFormat },
     /// Search `index` off the UI thread, answer `SearchDone`.
     Search { token: Token, index: SearchIndex, query: String, sorted: bool },
-    /// After `delay`, run a preview command with stdin on /dev/null (512 KiB, 5 s), answer `PreviewDone`.
+    /// After `delay`, run a preview command under `PREVIEW_LIMITS` with stdin on /dev/null, answer `PreviewDone`.
     Preview { token: Token, argv: Vec<String>, env: Vec<(String, String)>, delay: Duration },
-    /// Run an operation (1 MiB, 30 s), answer `OperationDone`.
+    /// Run an operation under `OPERATION_LIMITS`, answer `OperationDone`.
     Operation { token: Token, argv: Vec<String>, input: Vec<u8>, env: Vec<(String, String)> },
 }
 

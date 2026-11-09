@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use rmenu_core::command::{self, Cancel, CommandError, CommandResult};
 use rmenu_core::config::InputFormat;
 use rmenu_core::item::MenuItem;
-use rmenu_core::model::{Effect, Event, Model, Outcome, Task, TaskKind, command_failure};
+use rmenu_core::model::{Effect, Event, Model, Outcome, Task, TaskKind, command_failure, SOURCE_LIMITS, PREVIEW_LIMITS, OPERATION_LIMITS};
 use rmenu_core::record::RecordDecoder;
 use rune::{TextEdit, Tx, Waker};
 
@@ -234,10 +234,6 @@ fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {
     flush(&mut batch, &mut last, true);
     emit(Event::StdinDone);
 }
-
-const SOURCE_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(30), output_bytes: 16 * 1024 * 1024 };
-const PREVIEW_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(5), output_bytes: 512 * 1024 };
-const OPERATION_LIMITS: command::Limits = command::Limits { timeout: Duration::from_secs(30), output_bytes: 1024 * 1024 };
 
 fn run_task(task: Task, cancel: &Cancel, emit: &dyn Fn(Event)) {
     match task {
