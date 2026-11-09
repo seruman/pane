@@ -113,6 +113,12 @@ impl Harness {
         self.send(Event::StdinItems(items));
     }
 
+    fn preview_event(&mut self, text: &str) -> (Event, Vec<(String, String)>) {
+        let Task::Preview { token, env, .. } = self.take(TaskKind::Preview) else { unreachable!() };
+        let result = CommandResult { stdout: text.into(), stderr: Vec::new(), status: 0 };
+        (Event::PreviewDone { token, result: Ok(result) }, env)
+    }
+
     fn finish_operation(&mut self, status: i32, stderr: &str) {
         let Task::Operation { token, .. } = self.take(TaskKind::Operation) else { unreachable!() };
         let result = CommandResult { stdout: Vec::new(), stderr: stderr.into(), status };
@@ -474,13 +480,13 @@ fn values_containing_the_output_delimiter_are_never_written() {
 fn preview_commands_get_the_item_in_the_environment_after_a_delay() {
     let mut h = start(json!({"sources": [src("a", json!({}))], "preview": ["show"]}));
     h.load("alpha\n");
-    let Task::Preview { token, argv, env: vars, delay } = h.take(TaskKind::Preview) else { unreachable!() };
-    assert_eq!(argv, ["show"]);
+    let Task::Preview { argv, delay, .. } = &h.tasks[&TaskKind::Preview] else { unreachable!() };
+    assert_eq!(argv, &["show"]);
+    assert_eq!(*delay, Duration::from_millis(60));
+    let (done, vars) = h.preview_event("value=alpha");
     assert_eq!(env(&vars, "MMENU_VALUE"), "alpha");
     assert_eq!(env(&vars, "MMENU_ACTION"), "preview");
-    assert_eq!(delay, Duration::from_millis(60));
-    let result = CommandResult { stdout: b"value=alpha".to_vec(), stderr: Vec::new(), status: 0 };
-    h.send(Event::PreviewDone { token, result: Ok(result) });
+    h.send(done);
     assert_eq!(h.model.preview(), Some("value=alpha"));
 }
 
@@ -493,13 +499,9 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     }));
     o.query = "a".into();
     let mut h = Harness::new(o);
-    let preview = |h: &mut Harness, stdout: &str| {
-        let Task::Preview { token, env: vars, .. } = h.take(TaskKind::Preview) else { unreachable!() };
-        (Event::PreviewDone { token, result: Ok(CommandResult { stdout: stdout.into(), stderr: Vec::new(), status: 0 }) }, env(&vars, "MMENU_QUERY").to_owned())
-    };
     h.load("alpha\n");
-    let (done, query) = preview(&mut h, "a");
-    assert_eq!(query, "a");
+    let (done, vars) = h.preview_event("a");
+    assert_eq!(env(&vars, "MMENU_QUERY"), "a");
     h.send(done);
     assert_eq!(h.model.preview(), Some("a"));
 
@@ -508,13 +510,13 @@ fn preview_tracks_query_and_stops_when_hidden_or_source_changes() {
     assert!(cancelled(&h, TaskKind::Preview));
     h.settle();
     assert_eq!(h.model.preview(), Some("a"));
-    let (stale, query) = preview(&mut h, "al");
-    assert_eq!(query, "al");
+    let (stale, vars) = h.preview_event("al");
+    assert_eq!(env(&vars, "MMENU_QUERY"), "al");
     h.query("alp");
     h.send(stale);
     assert_eq!(h.model.preview(), Some("a"), "a preview for an older query cannot publish");
     h.settle();
-    let (hidden, _) = preview(&mut h, "alp");
+    let (hidden, _) = h.preview_event("alp");
 
     h.perform(0);
     assert_eq!(h.model.preview(), None);
@@ -1169,16 +1171,12 @@ fn the_highlight_stays_within_the_listed_rows() {
 
 // Review fixes.
 
-fn previewed(h: &mut Harness, text: &str) {
-    let Task::Preview { token, .. } = h.take(TaskKind::Preview) else { unreachable!() };
-    h.send(Event::PreviewDone { token, result: Ok(CommandResult { stdout: text.into(), stderr: Vec::new(), status: 0 }) });
-}
-
 #[test]
 fn a_query_with_no_matches_clears_the_preview() {
     let mut h = start(json!({"sources": [src("a", json!({}))], "preview": ["show"]}));
     h.load("alpha\nbeta\n");
-    previewed(&mut h, "PREVIEW OF alpha");
+    let (done, _) = h.preview_event("PREVIEW OF alpha");
+    h.send(done);
     h.query("zzzz");
     h.settle();
     assert_eq!(h.model.result_count(), 0);
@@ -1189,7 +1187,8 @@ fn a_query_with_no_matches_clears_the_preview() {
 fn switching_source_after_typing_drops_the_old_sources_preview() {
     let mut h = start(json!({"sources": [src("a", json!({})), src("b", json!({}))], "preview": ["show"]}));
     h.load("alpha\nbeta\n");
-    previewed(&mut h, "PREVIEW OF alpha");
+    let (done, _) = h.preview_event("PREVIEW OF alpha");
+    h.send(done);
     h.query("al");
     assert_eq!(h.model.preview(), Some("PREVIEW OF alpha"), "kept while the next search runs");
     h.switch("b");
@@ -1204,10 +1203,12 @@ fn going_back_drops_the_childs_preview() {
         "sources": [repos(json!({})), hidden("child", json!({}))],
         "bindings": [push_binding()], "preview": ["show"]}));
     h.load(r#"{"id":"a","title":"alpha"}"#);
-    previewed(&mut h, "PARENT");
+    let (done, _) = h.preview_event("PARENT");
+    h.send(done);
     h.perform(0);
     h.load(r#"{"id":"x","title":"xray"}"#);
-    previewed(&mut h, "CHILD xray");
+    let (done, _) = h.preview_event("CHILD xray");
+    h.send(done);
     h.nav(Nav::Back);
     assert_eq!(h.model.preview(), Some(""), "the parent's own preview comes, not the child's");
 }
