@@ -163,8 +163,6 @@ fn spawn(program: &CString, argv: &[String], envp: &[CString], input: bool) -> R
         libc::posix_spawn_file_actions_destroy(&mut actions);
         libc::posix_spawnattr_destroy(&mut attrs);
         let pid = result?;
-        // The child's ends are its own now; dropping ours lets EOF arrive when it exits.
-        drop((out_w, err_w));
         Ok(Spawned { pid, stdin: stdin.map(|(_, write)| write), stdout: out_r, stderr: err_r })
     }
 }
@@ -214,9 +212,7 @@ pub fn run(argv: &[String], input: Option<&[u8]>, env: &[(String, String)], time
     let program = resolve(&argv[0], path.as_deref())?;
     let spawned = spawn(&program, argv, &envp, input.is_some())?;
     let mut group = Group { pid: spawned.pid, reaped: false };
-    let result = pump(&mut group, spawned, input.unwrap_or_default(), deadline, output_limit, cancel)?;
-    group.reaped = true;
-    Ok(result)
+    pump(&mut group, spawned, input.unwrap_or_default(), deadline, output_limit, cancel)
 }
 
 /// Kills and reaps the whole process group unless the leader was reaped after a clean finish.
