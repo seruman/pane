@@ -18,15 +18,78 @@ use pane_ui::{
 };
 use rune::{AppSpec, Color, Cx, El, Key, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
 
-const COMMANDS: &[PaletteEntry] = &[
-    PaletteEntry::new("Run Tests").shortcut("⌃R"),
-    PaletteEntry::new("Deploy to Staging").submenu(),
-    PaletteEntry::new("Open Logs"),
-    PaletteEntry::new("Restart Server").shortcut("⌃⇧R"),
-    PaletteEntry::new("Clear Cache"),
-    PaletteEntry::new("Follow Terminal Theme").section("Appearance"),
-    PaletteEntry::new("Light Theme").section("Appearance"),
-    PaletteEntry::new("Dark Theme").section("Appearance"),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThemeChoice {
+    Terminal,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    const ALL: [Self; 3] = [Self::Terminal, Self::Light, Self::Dark];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Terminal => "Follow terminal",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+        }
+    }
+
+    fn palette(self) -> Option<Palette> {
+        match self {
+            Self::Terminal => None,
+            Self::Light => Some(Palette::merino_light()),
+            Self::Dark => Some(Palette::merino_dark()),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CommandAction {
+    Toast,
+    Theme(ThemeChoice),
+}
+
+#[derive(Clone, Copy)]
+struct Command {
+    entry: PaletteEntry,
+    action: CommandAction,
+}
+
+const COMMANDS: [Command; 8] = [
+    Command {
+        entry: PaletteEntry::new("Run Tests").shortcut("⌃R"),
+        action: CommandAction::Toast,
+    },
+    Command {
+        entry: PaletteEntry::new("Deploy to Staging").submenu(),
+        action: CommandAction::Toast,
+    },
+    Command {
+        entry: PaletteEntry::new("Open Logs"),
+        action: CommandAction::Toast,
+    },
+    Command {
+        entry: PaletteEntry::new("Restart Server").shortcut("⌃⇧R"),
+        action: CommandAction::Toast,
+    },
+    Command {
+        entry: PaletteEntry::new("Clear Cache"),
+        action: CommandAction::Toast,
+    },
+    Command {
+        entry: PaletteEntry::new("Follow Terminal Theme").section("Appearance"),
+        action: CommandAction::Theme(ThemeChoice::Terminal),
+    },
+    Command {
+        entry: PaletteEntry::new("Light Theme").section("Appearance"),
+        action: CommandAction::Theme(ThemeChoice::Light),
+    },
+    Command {
+        entry: PaletteEntry::new("Dark Theme").section("Appearance"),
+        action: CommandAction::Theme(ThemeChoice::Dark),
+    },
 ];
 
 const MENU: [(&str, &rune::Icon, Option<&str>); 5] = [
@@ -40,8 +103,6 @@ const MENU: [(&str, &rune::Icon, Option<&str>); 5] = [
 const TASKS: [&str; 3] = ["Build", "Run tests", "Publish"];
 
 const TABS: [&str; 3] = ["Overview", "Activity", "Settings"];
-
-const THEMES: [&str; 3] = ["Follow terminal", "Light", "Dark"];
 
 struct File {
     name: &'static str,
@@ -94,7 +155,7 @@ struct State {
     palette_open: bool,
     selected: usize,
     tab: usize,
-    theme: usize,
+    theme: ThemeChoice,
     theme_open: bool,
     confirm_delete: bool,
     file: Option<usize>,
@@ -112,8 +173,6 @@ struct State {
     volume: f32,
     swatch: usize,
     toast: Option<String>,
-    /// A theme picked from the palette; None follows the terminal.
-    fixed: Option<Palette>,
 }
 
 impl Default for State {
@@ -125,7 +184,7 @@ impl Default for State {
             palette_open: false,
             selected: 0,
             tab: 0,
-            theme: 0,
+            theme: ThemeChoice::Terminal,
             theme_open: false,
             confirm_delete: false,
             file: Some(2),
@@ -141,7 +200,6 @@ impl Default for State {
             volume: 0.4,
             swatch: 4,
             toast: None,
-            fixed: None,
         }
     }
 }
@@ -163,30 +221,22 @@ impl State {
         self.query.focused = false;
     }
 
-    fn set_theme(&mut self, theme: usize) {
-        self.theme = theme;
-        self.fixed = match theme {
-            1 => Some(Palette::merino_light()),
-            2 => Some(Palette::merino_dark()),
-            _ => None,
-        };
+    fn run_command(&mut self, index: usize) {
+        self.execute(COMMANDS[index]);
     }
 
-    fn run_command(&mut self, index: usize) {
-        let title = COMMANDS[index].title;
-        match title {
-            "Follow Terminal Theme" => self.set_theme(0),
-            "Light Theme" => self.set_theme(1),
-            "Dark Theme" => self.set_theme(2),
-            _ => self.toast = Some(title.to_owned()),
+    fn execute(&mut self, command: Command) {
+        match command.action {
+            CommandAction::Theme(choice) => self.theme = choice,
+            CommandAction::Toast => self.toast = Some(command.entry.title.to_owned()),
         }
         self.close_palette();
     }
 }
 
 fn view(s: &State, cx: &mut Cx<State>) -> El {
-    let theme = match &s.fixed {
-        Some(palette) => Theme::new(palette.clone()),
+    let theme = match s.theme.palette() {
+        Some(palette) => Theme::new(palette),
         None => Theme::current(cx.system_dark()),
     };
     let top = row()
@@ -394,13 +444,13 @@ fn settings(s: &State, theme: &Theme, layer: &mut Vec<El>) -> El {
                 .build(&format!("label-{i}"), theme),
         );
     }
-    let theme_picker = Select::new(THEMES)
-        .current(s.theme)
+    let theme_picker = Select::new(ThemeChoice::ALL.map(ThemeChoice::label))
+        .current(s.theme as usize)
         .open(s.theme_open)
         .width(170.0)
         .on_toggle(|s: &mut State| s.theme_open = !s.theme_open)
         .on_choose(|s: &mut State, i| {
-            s.set_theme(i);
+            s.theme = ThemeChoice::ALL[i];
             s.theme_open = false;
         })
         .build("theme", theme, layer);
@@ -575,23 +625,27 @@ fn color_picker(s: &State, theme: &Theme) -> El {
 }
 
 fn palette(s: &State, theme: &Theme) -> El {
-    CommandPalette::new(&s.query, |s: &mut State| &mut s.query, COMMANDS)
-        .selected(s.selected)
-        .hint("Run", "↩")
-        .hint("Close", "esc")
-        .on_key(|s: &mut State, key| {
-            let matches = palette_matches(COMMANDS, &s.query.text);
-            match key {
-                PaletteKey::Confirm => match matches.get(s.selected) {
-                    Some((index, _)) => s.run_command(*index),
-                    None => s.close_palette(),
-                },
-                PaletteKey::Dismiss => s.close_palette(),
-                step => s.selected = step.step(s.selected, matches.len()),
-            }
-        })
-        .on_choose(|s: &mut State, index| s.run_command(index))
-        .build("palette", theme)
+    CommandPalette::new(
+        &s.query,
+        |s: &mut State| &mut s.query,
+        &COMMANDS.map(|c| c.entry),
+    )
+    .selected(s.selected)
+    .hint("Run", "↩")
+    .hint("Close", "esc")
+    .on_key(|s: &mut State, key| {
+        let matches = palette_matches(&COMMANDS.map(|c| c.entry), &s.query.text);
+        match key {
+            PaletteKey::Confirm => match matches.get(s.selected) {
+                Some((index, _)) => s.run_command(*index),
+                None => s.close_palette(),
+            },
+            PaletteKey::Dismiss => s.close_palette(),
+            step => s.selected = step.step(s.selected, matches.len()),
+        }
+    })
+    .on_choose(|s: &mut State, index| s.run_command(index))
+    .build("palette", theme)
 }
 
 /// Finishes the pretend run `RUN_SECONDS` after it starts.
@@ -671,6 +725,25 @@ fn file_icon(name: &str) -> &'static rune::Icon {
 mod tests {
     use super::*;
     use rune::{Env, Runtime};
+
+    #[test]
+    fn theme_commands_do_not_depend_on_display_titles() {
+        let mut state = State::default();
+        for choice in ThemeChoice::ALL {
+            state.open_palette();
+            state.execute(Command {
+                entry: PaletteEntry::new("Renamed command"),
+                action: CommandAction::Theme(choice),
+            });
+            assert_eq!(state.theme, choice);
+            assert_eq!(
+                state.theme.palette().is_none(),
+                choice == ThemeChoice::Terminal
+            );
+            assert!(state.toast.is_none());
+            assert!(!state.palette_open);
+        }
+    }
 
     #[test]
     fn every_button_answers_a_press() {
