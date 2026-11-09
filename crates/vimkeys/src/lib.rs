@@ -375,8 +375,12 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     /// Handles `ev` over `text`. `None` when the key means nothing here, so the app can use it.
     pub fn key(&mut self, ev: &KeyEvent, text: &str) -> Option<VimEffect<A, O>> {
         let b = Buf::new(text);
-        if b.n() == 0 {
-            return None;
+        if b.n() == 0
+            && (self.mode() != VimMode::Normal
+                || !matches!(self.pending, Pending::None | Pending::Keys(_)))
+        {
+            self.reset_pending();
+            self.mode = Mode::Normal;
         }
         self.cursor = b.byte(b.index(self.cursor));
         self.message = None;
@@ -524,6 +528,10 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         text: &str,
         b: &Buf,
     ) -> Option<VimEffect<A, O>> {
+        if b.n() == 0 && !matches!(command, Command::App(_)) {
+            self.reset_pending();
+            return Some(VimEffect::Consumed);
+        }
         let visual = self.visual();
         match command {
             Command::Motion(m) => self.finish_motion(m, keys, None, text, b),

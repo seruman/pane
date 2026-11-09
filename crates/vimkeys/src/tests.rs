@@ -40,6 +40,65 @@ fn yanked(effect: Option<VimEffect<NoAction>>) -> String {
 }
 
 #[test]
+fn empty_text_still_dispatches_app_actions() {
+    let keys = Keymap::<Act>::vim()
+        .action(&[Stroke::Char('C')], Act::Comment, "General comment")
+        .action(&[Stroke::Char(':')], Act::Next, "Command")
+        .action(&[Stroke::Char('Z'), Stroke::Char('Z')], Act::Quit, "Quit");
+    let mut v = Vim::new(keys);
+    for (keys, action, count) in [
+        ("C", Act::Comment, None),
+        (":", Act::Next, None),
+        ("ZZ", Act::Quit, None),
+        ("2C", Act::Comment, Some(2)),
+    ] {
+        let mut effect = None;
+        for c in keys.chars() {
+            effect = v.key(
+                &KeyEvent {
+                    key: Key::Text(c.to_string()),
+                    mods: Mods::default(),
+                },
+                "",
+            );
+        }
+        assert_eq!(effect, Some(VimEffect::Action { action, count }), "{keys}");
+        assert_eq!(v.cursor(""), 0..0);
+        assert_eq!(v.selection(""), None);
+        assert!(!v.is_pending());
+    }
+}
+
+#[test]
+fn empty_text_drops_text_commands_without_range_effects() {
+    for pending in ["", "y2", "yi", "f", "v", "V", "/s"] {
+        for keys in [
+            "h", "l", "j", "k", "gg", "G", "$", "%", "w", "b", "e", "{", "}", "fX", "n", "*", "yy",
+            "gygy", "yiw", "viw", "Vj", "Y", "/hello",
+        ] {
+            let mut v = Vim::default();
+            press(&mut v, pending);
+            for c in keys.chars() {
+                let effect = v.key(
+                    &KeyEvent {
+                        key: Key::Text(c.to_string()),
+                        mods: Mods::default(),
+                    },
+                    "",
+                );
+                assert!(
+                    matches!(effect, None | Some(VimEffect::Consumed)),
+                    "{pending} then {keys}: {effect:?}"
+                );
+            }
+            assert_eq!(v.mode(), VimMode::Normal);
+            assert_eq!(v.cursor(""), 0..0);
+            assert_eq!(v.selection(""), None);
+        }
+    }
+}
+
+#[test]
 fn named_and_control_leaders_resolve_and_render() {
     for (leader, event, label) in [
         (
