@@ -1025,14 +1025,20 @@ impl Buf {
     }
 }
 
-/// 0 for space, 1 for word characters, 2 for punctuation; with `big`, anything but space is 1.
-fn class(c: char, big: bool) -> u8 {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CharClass {
+    Space,
+    Word,
+    Punctuation,
+}
+
+fn class(c: char, big: bool) -> CharClass {
     if c.is_whitespace() {
-        0
+        CharClass::Space
     } else if big || c.is_alphanumeric() || c == '_' {
-        1
+        CharClass::Word
     } else {
-        2
+        CharClass::Punctuation
     }
 }
 
@@ -1120,12 +1126,12 @@ fn word_forward(b: &Buf, i: usize, big: bool) -> usize {
     let n = b.n();
     let mut j = i;
     let c = class(b.at(j), big);
-    if c != 0 {
+    if c != CharClass::Space {
         while j < n && class(b.at(j), big) == c {
             j += 1;
         }
     }
-    while j < n && class(b.at(j), big) == 0 {
+    while j < n && class(b.at(j), big) == CharClass::Space {
         j += 1;
     }
     j.min(n - 1)
@@ -1133,7 +1139,7 @@ fn word_forward(b: &Buf, i: usize, big: bool) -> usize {
 
 fn word_backward(b: &Buf, i: usize, big: bool) -> usize {
     let mut j = i;
-    while j > 0 && class(b.at(j - 1), big) == 0 {
+    while j > 0 && class(b.at(j - 1), big) == CharClass::Space {
         j -= 1;
     }
     if j == 0 {
@@ -1149,7 +1155,7 @@ fn word_backward(b: &Buf, i: usize, big: bool) -> usize {
 fn word_end(b: &Buf, i: usize, big: bool) -> usize {
     let n = b.n();
     let mut j = i + 1;
-    while j < n && class(b.at(j), big) == 0 {
+    while j < n && class(b.at(j), big) == CharClass::Space {
         j += 1;
     }
     if j >= n {
