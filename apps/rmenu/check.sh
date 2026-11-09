@@ -13,8 +13,5 @@ cargo fmt --package rmenu-core --package rmenu -- --check
 cargo build --workspace --jobs 2
 cargo test --workspace --jobs 2
 cargo clippy --workspace --all-targets --jobs 2 -- -D warnings
-python3 -I examples/check-ghqr.py
-if [ -f examples/check-repos.py ]; then
-    python3 -I examples/check-repos.py
-fi
+bash examples/repos/check.sh
 python3 -I tests/pty/check.py --binary "${RMENU_BIN:-$CARGO_TARGET_DIR/debug/rmenu}"
