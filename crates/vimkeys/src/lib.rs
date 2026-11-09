@@ -365,6 +365,10 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     }
 
     /// Handles `ev` over `text`. `None` when the key means nothing here, so the app can use it.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Dispatch pending input states in one exhaustive match"
+    )]
     pub fn key(&mut self, ev: &KeyEvent, text: &str) -> Option<VimEffect<A, O>> {
         let b = Buf::new(text);
         if b.n() == 0
@@ -590,6 +594,10 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         (n, raw)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Keep each motion target and range kind in one exhaustive match"
+    )]
     fn finish_motion(
         &mut self,
         m: Motion,

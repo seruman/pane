@@ -413,6 +413,10 @@ impl<A: Clone, O: Clone> Keymap<A, O> {
     /// Vim's keys for reading: motions (`h j k l`, `w b e W B E`, `0 ^ $`, `gg G`, `{ }`, `%`,
     /// `f F t T ; ,`, `n N * #`, Ctrl-D and Ctrl-U, the arrows), `y` and `gy` (yank as source),
     /// `Y`, `v` `V` `o`, `/` `?`, and the text objects ``w W p " ' ` ( ) b [ ] { } B < >``.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Keep the default Vim bindings together for comparison"
+    )]
     pub fn vim() -> Self {
         use Motion as M;
         use Stroke::Char as C;
