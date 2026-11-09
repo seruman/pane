@@ -691,14 +691,14 @@ fn rapid_push_pop_push_lands_on_the_last_pushed_level() {
     assert_eq!(h.titles(), ["fresh"]);
 }
 
-fn two_levels(marks: &str, json_output: bool) -> Harness {
+fn two_levels(marks: MarkScope, json_output: bool) -> Harness {
     let grand = json!({"key": "ctrl+g", "id": "deeper", "action": "push", "source": "grand"});
     let split = json!({"key": "ctrl+v", "id": "split-right", "action": "accept"});
     let mut o = options(json!({
         "sources": [repos(json!({})), hidden("child", json!({})), hidden("grand", json!({}))],
         "bindings": [push_binding(), grand, split],
-        "marks": marks,
     }));
+    o.configuration.marks = marks;
     o.json = json_output;
     let mut h = Harness::new(o);
     h.load(&jsonl(&REPOS));
@@ -719,7 +719,7 @@ fn two_levels(marks: &str, json_output: bool) -> Harness {
 
 #[test]
 fn accept_at_depth_two_returns_the_path() {
-    for marks in ["level", "global"] {
+    for marks in [MarkScope::Level, MarkScope::Global] {
         let mut h = two_levels(marks, true);
         h.perform(2);
         let context = h.context();
@@ -728,13 +728,17 @@ fn accept_at_depth_two_returns_the_path() {
         assert_eq!(context.path.iter().map(|p| p.source.clone().unwrap()).collect::<Vec<_>>(), ["repos", "child", "grand"]);
         assert_eq!(context.path.iter().map(|p| p.query.as_str()).collect::<Vec<_>>(), ["", "u", ""]);
         assert_eq!(context.path.iter().map(|p| ids(&p.items)).collect::<Vec<_>>(), [vec!["b", "d"], vec!["z"], vec!["2"]]);
-        assert_eq!(ids(&context.items), if marks == "level" { vec!["2"] } else { vec!["b", "d", "z"] });
+        let expected = match marks {
+            MarkScope::Level => vec!["2"],
+            MarkScope::Global => vec!["b", "d", "z"],
+        };
+        assert_eq!(ids(&context.items), expected);
     }
 }
 
 #[test]
 fn global_marks_include_the_current_levels_marks_in_plain_output() {
-    let mut h = two_levels("global", false);
+    let mut h = two_levels(MarkScope::Global, false);
     h.toggle(0);
     h.nav(Nav::Accept);
     assert_eq!(h.output(), (0, "/v/b\n/v/d\n/v/z\n/v/1\n".into()));
@@ -742,7 +746,7 @@ fn global_marks_include_the_current_levels_marks_in_plain_output() {
 
 #[test]
 fn level_marks_plain_output_is_the_current_level() {
-    let mut h = two_levels("level", false);
+    let mut h = two_levels(MarkScope::Level, false);
     h.nav(Nav::Accept);
     assert_eq!(h.output(), (0, "/v/2\n".into()));
 }
@@ -1018,8 +1022,12 @@ fn malformed_input_fails_and_dismissal_exits_two() {
 
 #[test]
 fn accept_writes_exactly_the_chosen_values_in_source_order() {
-    for mode in ["newline", "print0", "json"] {
-        let mut h = piped(mode == "json", mode == "print0");
+    for (json, print0, expected) in [
+        (false, false, Some("first value\nthird\n")),
+        (false, true, Some("first value\0third\0")),
+        (true, false, None),
+    ] {
+        let mut h = piped(json, print0);
         let items = [("a", "first value"), ("b", "second"), ("c", "third")]
             .map(|(id, value)| MenuItem::new(id, id.to_uppercase()).with_value(value));
         h.send(Event::StdinItems(items.to_vec()));
@@ -1029,15 +1037,13 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
         h.toggle(2);
         h.toggle(0);
         h.nav(Nav::Accept);
-        match mode {
-            "newline" => assert_eq!(h.output(), (0, "first value\nthird\n".into())),
-            "print0" => assert_eq!(h.output(), (0, "first value\0third\0".into())),
-            _ => {
-                let context = h.context();
-                assert_eq!(context.action, "accept");
-                assert_eq!(context.source, None);
-                assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"]);
-            }
+        if let Some(expected) = expected {
+            assert_eq!(h.output(), (0, expected.into()));
+        } else {
+            let context = h.context();
+            assert_eq!(context.action, "accept");
+            assert_eq!(context.source, None);
+            assert_eq!(context.items.iter().map(|i| i.value()).collect::<Vec<_>>(), ["first value", "third"]);
         }
     }
 }
