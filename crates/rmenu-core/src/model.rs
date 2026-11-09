@@ -337,8 +337,6 @@ impl Model {
     /// Whether Enter would choose something: a mark, or a highlighted row.
     pub fn has_choice(&self) -> bool { self.marked_count() > 0 || self.highlighted().is_some() }
 
-    /// Rows are shown but not actionable: a source is loading or its search is running.
-
     pub fn loading(&self) -> bool { self.loading }
 
     /// A status or error line (`Copied 2`, `Command exited 1: ...`).
