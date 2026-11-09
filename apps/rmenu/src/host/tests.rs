@@ -34,14 +34,18 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
     let mut second = menu_without_stdin();
     let first_result = first.outcome.clone();
     let second_result = second.outcome.clone();
-    first.apply(vec![Effect::Finish(Outcome::Chosen(b"chosen\\n".to_vec()))], &mut Tx::default());
+    first.handle(Event::StdinItems(vec![MenuItem::new("chosen", "chosen")]), &mut Tx::default());
+    first.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut first, |m| m.model.result_count() == 1 && !m.model.is_searching());
+    first.handle(Event::Nav(rmenu_core::model::Nav::Accept), &mut Tx::default());
     first.quit(&mut Tx::default());
-    first.apply(vec![Effect::Finish(Outcome::Failed("late".into()))], &mut Tx::default());
+    first.handle(Event::StdinFailed("late".into()), &mut Tx::default());
+    first.handle(Event::Nav(rmenu_core::model::Nav::Cancel), &mut Tx::default());
     assert!(second_result.borrow().is_none());
     second.quit(&mut Tx::default());
     drop(first);
     drop(second);
-    assert_eq!(first_result.borrow_mut().take(), Some(Outcome::Chosen(b"chosen\\n".to_vec())));
+    assert_eq!(first_result.borrow_mut().take(), Some(Outcome::Chosen(b"chosen\n".to_vec())));
     assert_eq!(second_result.borrow_mut().take(), Some(Outcome::Cancelled));
 }
 

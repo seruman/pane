@@ -147,9 +147,8 @@ impl Menu {
                 Effect::Finish(result) => {
                     self.stop();
                     let mut outcome = self.outcome.borrow_mut();
-                    if outcome.is_none() {
-                        *outcome = Some(result);
-                    }
+                    debug_assert!(outcome.is_none(), "the model finishes only once");
+                    *outcome = Some(result);
                     tx.quit();
                 }
             }
