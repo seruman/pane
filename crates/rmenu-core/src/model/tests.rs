@@ -18,10 +18,12 @@ struct Harness {
     copied: Vec<String>,
     beeps: usize,
     reads_stdin: bool,
+    stdin_decoder: RecordDecoder,
 }
 
 impl Harness {
     fn new(options: Options) -> Harness {
+        let stdin_decoder = RecordDecoder::new(options.input);
         let (model, effects) = Model::new(options);
         let mut h = Harness {
             model,
@@ -31,6 +33,7 @@ impl Harness {
             copied: Vec::new(),
             beeps: 0,
             reads_stdin: false,
+            stdin_decoder,
         };
         h.apply(effects);
         h
@@ -109,8 +112,20 @@ impl Harness {
     }
 
     fn stdin(&mut self, text: &str) {
-        let items = text.lines().map(|t| MenuItem::new(t, t)).collect();
-        self.send(Event::StdinItems(items));
+        match self.stdin_decoder.append(text.as_bytes()) {
+            Ok(items) => self.send(Event::StdinItems(items)),
+            Err(error) => self.send(Event::StdinFailed(error.to_string())),
+        }
+    }
+
+    fn stdin_done(&mut self) {
+        match self.stdin_decoder.finish() {
+            Ok(items) => {
+                self.send(Event::StdinItems(items));
+                self.send(Event::StdinDone);
+            }
+            Err(error) => self.send(Event::StdinFailed(error.to_string())),
+        }
     }
 
     fn preview_event(&mut self, text: &str) -> (Event, Vec<(String, String)>) {
@@ -846,7 +861,7 @@ fn piped_stdin_keeps_streaming_into_the_root_behind_a_child() {
     h.load("in alpha\n");
     assert_eq!(h.titles(), ["in alpha"]);
     h.stdin("beta\n");
-    h.send(Event::StdinDone);
+    h.stdin_done();
     assert!(cancelled(&h, TaskKind::Search), "root input never searches in the child");
     assert_eq!(h.titles(), ["in alpha"]);
     h.nav(Nav::Back);
@@ -978,6 +993,38 @@ fn piped(json_output: bool, print0: bool) -> Harness {
 }
 
 #[test]
+fn stdin_helper_assigns_distinct_ids_across_appends() {
+    let mut h = piped(true, false);
+    h.stdin("same\n");
+    h.stdin("same\n");
+    h.settle();
+    h.toggle(0);
+    h.toggle(1);
+    h.nav(Nav::Accept);
+    let context = h.context();
+    assert_eq!(context.items.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), ["0", "1"]);
+    assert_eq!(context.items.iter().map(|item| item.value()).collect::<Vec<_>>(), ["same", "same"]);
+}
+
+#[test]
+fn stdin_helper_buffers_records_in_the_configured_format() {
+    let mut o = options(json!({}));
+    o.input = InputFormat::Nul;
+    let mut h = Harness::new(o);
+    h.stdin("first\n");
+    h.settle();
+    assert_eq!(h.model.result_count(), 0);
+    h.stdin("value\0");
+    h.settle();
+    assert_eq!(h.titles(), ["first\nvalue"]);
+    h.stdin("last");
+    h.stdin_done();
+    h.settle();
+    assert_eq!(h.titles(), ["first\nvalue", "last"]);
+    assert!(!h.model.loading());
+}
+
+#[test]
 fn rows_arrive_before_eof_and_eof_ends_loading() {
     let mut h = piped(false, false);
     assert!(h.reads_stdin);
@@ -988,7 +1035,7 @@ fn rows_arrive_before_eof_and_eof_ends_loading() {
     assert!(h.model.loading(), "still streaming: the writer has not closed");
     assert!(h.model.can_act(), "selection works before EOF");
     h.stdin("three\n");
-    h.send(Event::StdinDone);
+    h.stdin_done();
     h.settle();
     assert!(!h.model.loading());
     assert_eq!(h.titles(), ["one", "two", "three"]);
@@ -1031,7 +1078,7 @@ fn accept_writes_exactly_the_chosen_values_in_source_order() {
         let items = [("a", "first value"), ("b", "second"), ("c", "third")]
             .map(|(id, value)| MenuItem::new(id, id.to_uppercase()).with_value(value));
         h.send(Event::StdinItems(items.to_vec()));
-        h.send(Event::StdinDone);
+        h.stdin_done();
         h.settle();
         // Mark out of order; output follows source order.
         h.toggle(2);
@@ -1072,7 +1119,7 @@ fn plain_cancel_exits_130_with_no_output() {
     h.nav(Nav::Cancel);
     assert_eq!(h.output(), (130, String::new()));
     h.nav(Nav::Accept);
-    h.send(Event::StdinDone);
+    h.stdin_done();
     assert_eq!(h.output().0, 130, "nothing happens after finishing");
 }
 
@@ -1178,7 +1225,7 @@ fn the_highlight_stays_within_the_listed_rows() {
     o.list_cap = 3;
     let mut h = Harness::new(o);
     h.stdin("a\nb\nc\nd\ne\n");
-    h.send(Event::StdinDone);
+    h.stdin_done();
     h.settle();
     for _ in 0..10 { h.nav(Nav::Down); }
     assert_eq!(h.model.highlighted_row(), Some(2));
