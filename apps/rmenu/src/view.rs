@@ -196,7 +196,7 @@ fn results(menu: &Menu, c: &Palette) -> El {
         .virtual_rows(
             count,
             ROW_H,
-            |m: &Menu, i| Cow::Owned(m.model.result(i).id.clone()),
+            |m: &Menu, i| Cow::Borrowed(m.model.result(i).id.as_str()),
             move |m: &Menu, i| result_row(m, i, &c),
         )
         .virtual_rows_version((model.result_revision(), count));
