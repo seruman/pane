@@ -1,5 +1,3 @@
-//! Piped input and command output into rows. Port of `Sources/MenuCore/RecordDecoder.swift`.
-
 use std::collections::HashSet;
 use std::fmt;
 

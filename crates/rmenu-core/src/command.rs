@@ -1,5 +1,3 @@
-//! argv commands in their own process group. Port of `Sources/MenuCore/CommandRunner.swift`.
-
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs::File;
@@ -83,19 +81,15 @@ impl Cancel {
     }
 }
 
-/// Bounds how long a cancel waits when no stream is active.
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const CANCEL_CHECK_INTERVAL: Duration = Duration::from_millis(10);
 
 fn system(operation: &'static str, error: io::Error) -> CommandError {
     CommandError::System { operation, error }
 }
 
-/// Signals a command starts with at their default action, whatever rmenu does with them.
 const DEFAULT_SIGNALS: [libc::c_int; 5] = [libc::SIGPIPE, libc::SIGINT, libc::SIGTERM, libc::SIGQUIT, libc::SIGHUP];
 
-/// `program` resolved against PATH from the command's own environment, as execvp would:
-/// `posix_spawnp` would search rmenu's PATH instead. Without PATH, execvp's default applies.
-/// When no candidate is executable but one exists, the error is EACCES, not ENOENT.
+// posix_spawnp searches rmenu's PATH rather than the command's environment.
 fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError> {
     let cstring = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(|_| CommandError::InvalidArguments);
     if program.contains('/') {
@@ -138,7 +132,6 @@ fn set_cloexec(fd: RawFd) -> Result<(), CommandError> {
     Ok(())
 }
 
-/// Fails with the operation's name when a `posix_spawn*` call returns an error number.
 fn spawn_call(code: libc::c_int, operation: &'static str) -> Result<(), CommandError> {
     if code == 0 { Ok(()) } else { Err(system(operation, io::Error::from_raw_os_error(code))) }
 }
@@ -175,7 +168,6 @@ impl Drop for SpawnAttributes {
     }
 }
 
-/// The started command: its process group leader and the parent's ends of its stdio pipes.
 struct Spawned {
     pid: libc::pid_t,
     stdin: Option<File>,
@@ -183,9 +175,6 @@ struct Spawned {
     stderr: File,
 }
 
-/// Starts `program` in a new process group with only stdio. `POSIX_SPAWN_CLOEXEC_DEFAULT` closes
-/// every other descriptor in the exec itself, as mmenu does, so a descriptor another thread
-/// opens at the same moment can't slip through.
 fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> Result<Spawned, CommandError> {
     let mut arg_ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr().cast_mut()).collect();
     arg_ptrs.push(std::ptr::null_mut());
@@ -230,6 +219,7 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
         unsafe { libc::posix_spawnattr_setsigdefault(&raw mut attrs.0, &raw const defaults) },
         "spawn signal defaults",
     )?;
+    // POSIX_SPAWN_CLOEXEC_DEFAULT closes descriptors unless a file action inherits them.
     let flags = libc::POSIX_SPAWN_SETPGROUP
         | libc::POSIX_SPAWN_SETSIGMASK
         | libc::POSIX_SPAWN_SETSIGDEF
@@ -258,7 +248,6 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
 #[cfg(not(target_vendor = "apple"))]
 compile_error!("rmenu needs POSIX_SPAWN_CLOEXEC_DEFAULT to give commands only stdio, and only Apple targets have it");
 
-/// The caller's environment with explicit command values overlaid.
 fn environment(env: &[(String, String)]) -> Result<(Vec<CString>, Option<OsString>), CommandError> {
     let mut vars: Vec<(OsString, OsString)> =
         std::env::vars_os().filter(|(k, _)| !env.iter().any(|(o, _)| OsStr::new(o) == k)).collect();
@@ -319,16 +308,13 @@ pub fn run(
     pump(&mut group, spawned, input.unwrap_or_default(), deadline, limits.output_bytes, cancel)
 }
 
-/// Kills and reaps the whole process group unless the leader was reaped after a clean finish.
-/// The leader stays unreaped until then, so its PID still names the group.
+// An unreaped leader reserves its PID, so the process group ID cannot be reused.
 struct Group {
     pid: libc::pid_t,
     reaped: bool,
 }
 
 impl Group {
-    /// Blocks until the leader exits or `limit` passes, whichever comes first, so `run` can
-    /// still check cancellation and its deadline.
     fn wait_for_exit(&self, limit: Duration) -> Result<(), CommandError> {
         // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
         let queue = unsafe { libc::kqueue() };
@@ -399,7 +385,7 @@ impl Drop for Group {
         if self.reaped {
             return;
         }
-        // SIGKILL also handles children that ignore TERM. Descendants that setsid are not ours.
+        // Descendants that call setsid leave this process group.
         // SAFETY: signals our own process group, then reaps its leader.
         unsafe {
             libc::kill(-self.pid, libc::SIGKILL);
@@ -438,8 +424,7 @@ fn pump(
                 let [(_, stdout), (_, stderr)] = outputs;
                 return Ok(CommandResult { stdout, stderr, status });
             }
-            // The pipes can close a moment before the leader is reaped.
-            group.wait_for_exit(POLL_INTERVAL)?;
+            group.wait_for_exit(CANCEL_CHECK_INTERVAL)?;
             continue;
         }
         let mut fds = [
@@ -452,7 +437,7 @@ fn pump(
             libc::poll(
                 fds.as_mut_ptr(),
                 fds.len().try_into().expect("poll slots fit nfds_t"),
-                POLL_INTERVAL.as_millis().try_into().expect("poll interval fits c_int"),
+                CANCEL_CHECK_INTERVAL.as_millis().try_into().expect("poll interval fits c_int"),
             )
         } < 0
         {
@@ -606,10 +591,9 @@ mod tests {
             return;
         }
         let file = std::fs::File::open("/dev/null").unwrap();
-        // A descriptor opened without close-on-exec, as a framework inside rmenu would.
-        // A high number, so the command's own descriptors (ls opening /dev/fd) can't collide.
-        let fd = unsafe { libc::dup2(file.as_raw_fd(), 200) };
-        assert_eq!(fd, 200);
+        const LEAK_FD: RawFd = 200;
+        let fd = unsafe { libc::dup2(file.as_raw_fd(), LEAK_FD) };
+        assert_eq!(fd, LEAK_FD);
         let result = quick(&["/bin/ls", "/dev/fd"]).unwrap();
         unsafe { libc::close(fd) };
         let out = text(&result.stdout);
@@ -624,15 +608,14 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         let null = std::fs::File::open("/dev/null").unwrap();
         let raw = null.as_raw_fd();
-        // Another thread keeps creating descriptor 250 without close-on-exec, as a framework
-        // inside rmenu might while a command starts.
+        const LEAK_FD: RawFd = 250;
         let churn = {
             let stop = stop.clone();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
                     unsafe {
-                        libc::dup2(raw, 250);
-                        libc::close(250);
+                        libc::dup2(raw, LEAK_FD);
+                        libc::close(LEAK_FD);
                     }
                 }
             })
@@ -640,18 +623,17 @@ mod tests {
         let leaked = (0..300)
             .filter(|_| {
                 let out = quick(&["/bin/ls", "/dev/fd"]).unwrap();
-                text(&out.stdout).lines().any(|l| l == "250")
+                text(&out.stdout).lines().any(|l| l == LEAK_FD.to_string())
             })
             .count();
         stop.store(true, Ordering::Relaxed);
         churn.join().unwrap();
-        assert_eq!(leaked, 0, "descriptor 250 reached {leaked} of 300 commands");
+        assert_eq!(leaked, 0, "descriptor {LEAK_FD} reached {leaked} of 300 commands");
     }
 
     #[test]
     fn commands_start_with_sigpipe_at_its_default() {
-        // Rust ignores SIGPIPE in rmenu, and an ignored signal survives exec: a shell that
-        // inherited it would outlive `kill -PIPE $$`. At the default it dies of it (141).
+        // An ignored SIGPIPE survives exec unless posix_spawn resets its disposition.
         let result = quick(&["/bin/sh", "-c", "kill -PIPE $$; echo survived"]).unwrap();
         assert_eq!(result.status, ExitStatus::Signal(libc::SIGPIPE), "stdout: {}", text(&result.stdout));
         assert_eq!(text(&result.stdout), "");
@@ -772,7 +754,6 @@ mod tests {
 
     #[test]
     fn simultaneous_stdout_stderr_and_large_stdin() {
-        // Both writers exceed pipe capacity before stdin is consumed; sequential I/O deadlocks.
         let input: Vec<u8> = (0..=u8::MAX).cycle().take(400_000).collect();
         let script = "/usr/bin/head -c 200000 /dev/zero &\n/usr/bin/head -c 200000 /dev/zero >&2 &\nwait\n/bin/cat";
         let result = run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
@@ -943,8 +924,7 @@ mod tests {
         assert!(matches!(result, Err(CommandError::TimedOut)));
     }
 
-    /// The nested shell waits, so it can't exec away the middle generation. Every generation
-    /// ignores TERM and inherits the output pipes.
+    // A shell can replace itself with its last command unless it still needs to wait.
     fn descendant_command(dir: &Path, leader_action: &str) -> Vec<String> {
         let script = format!(
             r#"trap '' TERM
