@@ -61,6 +61,17 @@ pub use menu::*;
 pub use settings::*;
 pub use theme::*;
 
+fn hairline(theme: &Theme) -> rune::El {
+    rune::el().h(1.0).fill(theme.separator)
+}
+
+fn with_separator(row: rune::El, separator: Option<rune::El>) -> rune::El {
+    match separator {
+        Some(separator) => rune::col().child(row).child(separator),
+        None => row,
+    }
+}
+
 type Transform<T = rune::El> = Box<dyn FnOnce(T) -> T>;
 type IndexedPress = std::rc::Rc<dyn Fn(usize) -> Transform>;
 

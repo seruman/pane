@@ -269,7 +269,7 @@ impl<'a> CommandPalette<'a> {
                 );
             }
             palette = palette
-                .child(el().h(1.0).w_full().fill(theme.separator).mt(4.0))
+                .child(crate::hairline(theme).w_full().mt(4.0))
                 .child(footer);
         }
         palette

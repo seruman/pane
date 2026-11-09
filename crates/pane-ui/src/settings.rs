@@ -1,8 +1,8 @@
 //! Rex's settings layout: inset groups of rows, each a title and description with a control.
 
-use rune::{El, col, el, row, text};
+use rune::{El, col, row, text};
 
-use crate::Theme;
+use crate::{Theme, hairline, with_separator};
 
 /// A row of a [`SettingsGroup`]: title and description on the left, the control on the right.
 /// When the row is too narrow for both, the control moves under the title.
@@ -53,12 +53,7 @@ impl SettingsRow {
         if let Some(control) = self.control {
             r = r.child(control.shrink());
         }
-        if !separator {
-            return r;
-        }
-        col()
-            .child(r)
-            .child(el().h(1.0).w_full().fill(theme.separator))
+        with_separator(r, separator.then(|| hairline(theme).w_full()))
     }
 }
 

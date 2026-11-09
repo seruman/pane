@@ -191,7 +191,7 @@ pub fn menu_section(title: impl Into<String>, theme: &Theme) -> El {
 
 /// A hairline between groups of menu rows.
 pub fn menu_separator(theme: &Theme) -> El {
-    el().h(1.0).w_full().my(4.0).fill(theme.separator)
+    crate::hairline(theme).w_full().my(4.0)
 }
 
 /// The floating panel menus, the palette and pickers sit on. Up and Down move between its rows.

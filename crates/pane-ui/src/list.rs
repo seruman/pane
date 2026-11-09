@@ -3,7 +3,7 @@
 
 use rune::{El, col, el, row, text};
 
-use crate::{Theme, Transform};
+use crate::{Theme, Transform, hairline, with_separator};
 
 /// A row of a [`List`].
 pub struct ListRow {
@@ -95,12 +95,7 @@ impl ListRow {
         if let Some(press) = self.press {
             r = press(r);
         }
-        if !separator {
-            return r;
-        }
-        col()
-            .child(r)
-            .child(el().h(1.0).mx(10.0).fill(theme.separator))
+        with_separator(r, separator.then(|| hairline(theme).mx(10.0)))
     }
 }
 
