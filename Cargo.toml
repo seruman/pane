@@ -6,8 +6,6 @@ members = ["crates/pane-ui", "crates/vimkeys", "apps/mdview", "apps/gallery", "a
 edition = "2024"
 license = "MIT"
 
-# The Rune fork with the terminal shell. A local checkout while we iterate; switch to
-# `git = "...", rev = "..."` once it lives somewhere.
 [workspace.dependencies]
 rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune", default-features = false }
 rune-kit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-kit" }
@@ -22,7 +20,6 @@ debug = false
 codegen-units = 16
 incremental = true
 
-# The same strictness as Rune's own crates.
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
