@@ -1,6 +1,11 @@
+use std::cell::Cell;
 use std::sync::atomic::AtomicUsize;
 
 use super::*;
+
+thread_local! {
+    pub(super) static SCORED_ROWS: Cell<usize> = const { Cell::new(0) };
+}
 
 fn index(titles: &[&str]) -> SearchIndex {
     let items: Vec<MenuItem> = titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), *t)).collect();
@@ -138,11 +143,20 @@ fn workers_can_observe_cancellation_directly() {
 
 #[test]
 fn cancellation_mid_scan_stops_early() {
-    let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; 50_000]);
-    let polls = AtomicUsize::new(0);
-    let result = rows.search("swift", Order::Ranked, &|| polls.fetch_add(1, Ordering::Relaxed) >= 3);
-    assert_eq!(result, Err(Cancelled));
-    assert!(polls.load(Ordering::Relaxed) >= 4);
+    for size in [CHUNK, CHUNK * 2] {
+        let rows = index(&vec!["Sources/MenuCore/SearchIndex.swift"; size]);
+        SCORED_ROWS.set(0);
+        let observed = AtomicUsize::new(0);
+        let result = rows.search("swift", Order::Ranked, &|| {
+            let scored = SCORED_ROWS.get();
+            observed.fetch_max(scored, Ordering::Relaxed);
+            scored > 0
+        });
+        assert_eq!(result, Err(Cancelled), "{size} rows");
+        let scored = observed.load(Ordering::Relaxed).max(SCORED_ROWS.get());
+        assert!(scored > 0, "{size} rows cancelled before matching started");
+        assert!(scored <= 256, "{size} rows scored {scored} rows on one thread before stopping");
+    }
 }
 
 #[test]

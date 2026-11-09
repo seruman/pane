@@ -168,6 +168,8 @@ impl SearchIndex {
                 if local % 256 == 0 && cancelled() {
                     return Err(Cancelled);
                 }
+                #[cfg(test)]
+                tests::SCORED_ROWS.with(|scored| scored.set(scored.get() + 1));
                 if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
                     rows.push(Ranked {
                         score,
