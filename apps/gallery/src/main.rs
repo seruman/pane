@@ -104,7 +104,7 @@ struct State {
     sort_by_name: bool,
     notify: bool,
     autosave: bool,
-    tasks: [bool; 3],
+    tasks: [bool; TASKS.len()],
     status: Status,
     /// When the pretend run finishes, on the app clock; set by `poll` once a run starts.
     run_ends: Option<f64>,
@@ -134,7 +134,7 @@ impl Default for State {
             sort_by_name: true,
             notify: true,
             autosave: false,
-            tasks: [true, false, false],
+            tasks: std::array::from_fn(|i| i == 0),
             status: Status::Idle,
             run_ends: None,
             hue: 0.7,
