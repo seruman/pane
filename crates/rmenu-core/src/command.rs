@@ -389,7 +389,7 @@ fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Inst
             }
         }
         if let Some(pipe) = stdin.as_mut().filter(|_| fds[2].revents != 0) {
-            match pipe.write(&input[written..input.len().min(written + buffer.len())]) {
+            match pipe.write(&input[written..]) {
                 Ok(n) => {
                     written += n;
                     if written == input.len() { stdin = None; }
