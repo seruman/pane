@@ -12,6 +12,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::item::MenuItem;
 
 const CHUNK: usize = 8_192;
+const MATCHER_CONFIG: Config = Config::DEFAULT;
+
+fn pattern(query: &str) -> Pattern {
+    Pattern::parse(query, CaseMatching::Smart, Normalization::Smart)
+}
 
 /// Prepared search text for a list of rows. Cloning is cheap (shared; append makes a new
 /// generation), so a host can search a snapshot on another thread while input keeps arriving.
@@ -24,9 +29,9 @@ pub struct SearchIndex {
 
 /// Byte ranges of `text` the query matched, merged and in order.
 fn highlights(query: &str, text: &str) -> Vec<Range<usize>> {
-    let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+    let pattern = pattern(query);
     if pattern.atoms.is_empty() { return Vec::new(); }
-    let mut matcher = Matcher::new(Config::DEFAULT);
+    let mut matcher = Matcher::new(MATCHER_CONFIG);
     let mut buf = Vec::new();
     let haystack = Utf32Str::new(text, &mut buf);
     let mut hits = Vec::new();
@@ -107,7 +112,7 @@ impl SearchIndex {
 
     fn ranked(&self, query: &str, sorted: bool, cancelled: &dyn Fn() -> bool) -> Result<Vec<Ranked>, Cancelled> {
         if cancelled() { return Err(Cancelled); }
-        let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+        let pattern = pattern(query);
         if pattern.atoms.is_empty() {
             return Ok((0..self.len as u32).map(|offset| Ranked { score: 0, len: 0, offset }).collect());
         }
@@ -135,7 +140,7 @@ impl SearchIndex {
     }
 
     fn match_chunks(&self, pattern: &Pattern, next: &AtomicUsize, stop: &AtomicBool) -> Vec<(usize, Vec<Ranked>)> {
-        let mut matcher = Matcher::new(Config::DEFAULT);
+        let mut matcher = Matcher::new(MATCHER_CONFIG);
         let mut out = Vec::new();
         while let Some(index) = self.claim(next, stop) {
             match self.match_chunk(index, pattern, &mut matcher, &|| stop.load(Ordering::Relaxed)) {
