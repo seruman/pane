@@ -737,8 +737,8 @@ fn two_levels(marks: MarkScope, json_output: bool) -> Harness {
     let mut o = options(json!({
         "sources": [repos(json!({})), hidden("child", json!({})), hidden("grand", json!({}))],
         "bindings": [push_binding(), grand, split],
+        "marks": match marks { MarkScope::Level => "level", MarkScope::Global => "global" },
     }));
-    o.configuration.marks = marks;
     o.json = json_output;
     let mut h = Harness::new(o);
     h.load(&jsonl(&REPOS));
