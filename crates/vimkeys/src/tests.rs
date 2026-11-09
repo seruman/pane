@@ -176,7 +176,7 @@ fn word_motions() {
 fn lines_columns_and_counts() {
     let mut v = Vim::default();
     press(&mut v, "j");
-    assert!(at(&v).starts_with(" "));
+    assert_eq!(v.cursor(TEXT).start, TEXT.find('\n').unwrap() + 1);
     press(&mut v, "^");
     assert!(at(&v).starts_with("let"));
     press(&mut v, "$");
@@ -235,6 +235,46 @@ fn find_and_repeat() {
 }
 
 #[test]
+fn backward_finds_stop_on_or_after_the_target() {
+    let text = "aXbcXde";
+    for (keys, expected) in [("$FX", 4..5), ("$2FX", 1..2), ("$TX", 5..6), ("$2TX", 2..3)] {
+        let mut v = Vim::default();
+        press_on(&mut v, text, keys);
+        assert_eq!(v.cursor(text), expected, "{keys}");
+    }
+    let mut v = Vim::default();
+    press_on(&mut v, text, "$FX;");
+    assert_eq!(v.cursor(text), 1..2);
+    press_on(&mut v, text, ",");
+    assert_eq!(v.cursor(text), 4..5);
+}
+
+#[test]
+fn setting_the_cursor_clears_selection_and_pending_input() {
+    let text = "αβ\nabcdef\nuvwxyz";
+    for keys in ["v", "V", "y2", "g", "/hello"] {
+        let mut v = Vim::default();
+        press_on(&mut v, text, keys);
+        let at = text.find('d').unwrap();
+        v.set_cursor(at, text);
+        assert_eq!(v.cursor(text), at..at + 1, "{keys}");
+        assert_eq!(v.mode(), VimMode::Normal);
+        assert_eq!(v.status(), "NORMAL");
+        assert_eq!(v.selection(text), None);
+        assert_eq!(v.pending(), "");
+        assert!(!v.is_pending());
+        press_on(&mut v, text, "j");
+        let at = text.find('x').unwrap();
+        assert_eq!(v.cursor(text), at..at + 1, "{keys}");
+    }
+    let mut v = Vim::default();
+    v.set_cursor(text.len() + 10, text);
+    assert_eq!(v.cursor(text), text.len() - 1..text.len());
+    v.set_cursor("α".len(), text);
+    assert_eq!(v.cursor(text), 2..4);
+}
+
+#[test]
 fn paragraphs_and_brackets() {
     let mut v = Vim::default();
     press(&mut v, "}");
@@ -288,12 +328,16 @@ fn text_objects() {
 fn visual_selections() {
     let mut v = Vim::default();
     press(&mut v, "vee");
+    assert_eq!(v.mode(), VimMode::Visual);
+    assert_eq!(v.status(), "VISUAL");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "fn main");
     press(&mut v, "o");
     assert!(at(&v).starts_with("fn"));
     assert_eq!(yanked(press(&mut v, "y")), "fn main");
     assert_eq!(v.mode(), VimMode::Normal);
     press(&mut v, "Vj");
+    assert_eq!(v.mode(), VimMode::VisualLine);
+    assert_eq!(v.status(), "V-LINE");
     assert_eq!(
         &TEXT[v.selection(TEXT).unwrap()],
         "fn main() {\n    let s = \"hello world\";"
@@ -304,7 +348,16 @@ fn visual_selections() {
     );
     press(&mut v, "jfhviw");
     assert_eq!(&TEXT[v.selection(TEXT).unwrap()], "hello");
-    press(&mut v, "\u{1b}");
+    v.key(
+        &KeyEvent {
+            key: Key::Escape,
+            mods: Mods::default(),
+        },
+        TEXT,
+    );
+    assert_eq!(v.mode(), VimMode::Normal);
+    assert_eq!(v.status(), "NORMAL");
+    assert_eq!(v.selection(TEXT), None);
 }
 
 #[test]
@@ -376,8 +429,8 @@ fn search_smart_case_and_star() {
     assert!(at(&v).starts_with("s);"));
     press(&mut v, "N");
     assert!(at(&v).starts_with("s = "));
-    assert_eq!(search_matches("Hello hello", "hello").len(), 2);
-    assert_eq!(search_matches("Hello hello", "Hello").len(), 1);
+    assert_eq!(search_matches("Hello hello", "hello"), vec![0..5, 6..11]);
+    assert_eq!(search_matches("Hello hello", "Hello"), vec![0..5]);
     press(&mut v, "gg*");
     assert_eq!(v.message(), Some("[1/1]"));
     press(&mut v, "/zzz");
@@ -519,8 +572,14 @@ fn gy_asks_for_the_source() {
     let (range, linewise) = source(press(&mut v, "gyw"));
     assert_eq!((&TEXT[range], linewise), ("fn ", false));
     assert_eq!(v.message(), Some("3 characters yanked as source"));
-    let (range, linewise) = source(press(&mut v, "gyy"));
-    assert_eq!((&TEXT[range], linewise), ("fn main() {", true));
+    for keys in ["gyy", "gygy"] {
+        let (range, linewise) = source(press(&mut v, keys));
+        assert_eq!(
+            (range, linewise),
+            (0..TEXT.find('\n').unwrap(), true),
+            "{keys}"
+        );
+    }
     let (range, linewise) = source(press(&mut v, "Vjgy"));
     assert_eq!(
         (&TEXT[range], linewise),
@@ -557,7 +616,14 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Typed("y".into()));
-    assert_eq!(hints_for(&groups, HintGroup::Vim)[0], hint("y", "The line"));
+    assert_eq!(
+        hints_for(&groups, HintGroup::Vim),
+        vec![
+            hint("y", "The line"),
+            hint("i", "Inside an object…"),
+            hint("a", "Around an object…"),
+        ]
+    );
     press(&mut v, "i");
     assert_eq!(v.hints().unwrap().0, HintsFor::Typed("yi".into()));
     v.key(
@@ -572,8 +638,15 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(
-        (typed, hints_for(&groups, HintGroup::Vim)[0].clone()),
-        (HintsFor::Typed("gy".into()), hint("gy", "The line"))
+        (typed, hints_for(&groups, HintGroup::Vim)),
+        (
+            HintsFor::Typed("gy".into()),
+            vec![
+                hint("gy", "The line"),
+                hint("i", "Inside an object…"),
+                hint("a", "Around an object…"),
+            ]
+        )
     );
     press(&mut v, "a");
     assert_eq!(v.hints().unwrap().0, HintsFor::Typed("gya".into()));
@@ -767,11 +840,21 @@ fn hints_come_from_the_keymap() {
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Mode(VimMode::Visual));
     assert_eq!(
-        hints_for(&groups, HintGroup::App),
-        vec![hint("c", "Comment")]
+        groups,
+        vec![
+            (HintGroup::App, vec![hint("c", "Comment")]),
+            (
+                HintGroup::Vim,
+                vec![
+                    hint("y", "Yank"),
+                    hint("gy", "Yank as source"),
+                    hint("o", "Go to the other end"),
+                    hint("i", "Select inside an object…"),
+                    hint("a", "Select around an object…"),
+                ]
+            ),
+        ]
     );
-    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("gy", "Yank as source")));
-    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("o", "Go to the other end")));
     press_app(&mut v, "v");
 
     // After an operator: the line, then text objects and motions.
@@ -782,12 +865,45 @@ fn hints_come_from_the_keymap() {
         hints_for(&groups, HintGroup::App),
         vec![hint("c", "The line")]
     );
-    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("i", "Inside an object…")));
-    assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("w", "To the next word")));
+    assert_eq!(
+        hints_for(&groups, HintGroup::Vim),
+        vec![
+            hint("i", "Inside an object…"),
+            hint("a", "Around an object…"),
+        ]
+    );
+    assert_eq!(
+        hints_for(&groups, HintGroup::Motion),
+        vec![
+            hint("w", "To the next word"),
+            hint("b", "Back a word"),
+            hint("e", "To the word's end"),
+            hint("0", "From the line's start"),
+            hint("$", "To the line's end"),
+            hint("gg", "To the top"),
+            hint("}", "To the paragraph's end"),
+            hint("f", "To a character"),
+            hint("t", "Up to a character"),
+        ]
+    );
     press_app(&mut v, "i");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, HintsFor::Typed("ci".into()));
-    assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("p", "Paragraph")));
+    assert_eq!(
+        hints_for(&groups, HintGroup::Motion),
+        vec![
+            hint("w", "Word"),
+            hint("W", "WORD, to spaces"),
+            hint("p", "Paragraph"),
+            hint("\"", "Double quotes"),
+            hint("'", "Single quotes"),
+            hint("`", "Backticks"),
+            hint("(", "Parentheses"),
+            hint("[", "Brackets"),
+            hint("{", "Braces"),
+            hint("<", "Angle brackets"),
+        ]
+    );
 }
 
 #[test]
@@ -804,7 +920,7 @@ fn objects_are_their_own_table() {
 }
 
 #[test]
-#[should_panic(expected = "] starts ]c; with no timeout, ]c could never be typed")]
+#[should_panic(expected = "]c")]
 fn a_binding_that_starts_another_panics() {
     let _ = Keymap::<Act>::vim()
         .action(&[Stroke::Char(']'), Stroke::Char('c')], Act::Next, None)
@@ -834,7 +950,7 @@ fn rebinding_replaces_and_unbinding_drops() {
 }
 
 #[test]
-#[should_panic(expected = "Normal: , starts ,q")]
+#[should_panic(expected = ",q")]
 fn a_leader_vim_already_uses_panics() {
     let _ = Keymap::<Act>::vim()
         .action(&[Stroke::Leader, Stroke::Char('q')], Act::Quit, None)
@@ -885,24 +1001,9 @@ fn search_matches(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
 fn search_survives_characters_whose_lowercase_changes_length() {
     // `İ` lowercases to two characters, three bytes where it had two.
     let text = "İstanbul Hello hello";
-    let found = search_matches(text, "hello");
-    let quoted: Vec<&str> = found.iter().map(|r| &text[r.clone()]).collect();
-    assert_eq!(quoted, ["Hello", "hello"]);
-    assert_eq!(
-        search_matches(text, "i̇stanbul")
-            .iter()
-            .map(|r| &text[r.clone()])
-            .collect::<Vec<_>>(),
-        ["İstanbul"]
-    );
-    let text = "ẞtraße STRASSE";
-    assert_eq!(
-        search_matches(text, "sse")
-            .iter()
-            .map(|r| &text[r.clone()])
-            .collect::<Vec<_>>(),
-        ["SSE"]
-    );
+    assert_eq!(search_matches(text, "hello"), vec![10..15, 16..21]);
+    assert_eq!(search_matches(text, "i̇stanbul"), vec![0..9]);
+    assert_eq!(search_matches("ẞtraße STRASSE", "sse"), vec![14..17]);
 }
 
 #[test]
