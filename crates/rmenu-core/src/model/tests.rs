@@ -1018,14 +1018,20 @@ fn level_marks_plain_output_is_the_current_level() {
 }
 
 #[test]
-fn push_with_no_results_is_a_no_op() {
+fn push_with_no_results_beeps_after_deferral_and_when_already_empty() {
     let mut h = start(json!({"sources": [repos(json!({})), hidden("child", json!({}))], "bindings": [push_binding()]}));
     h.load(&jsonl(&REPOS));
     h.query("does-not-match");
-    h.perform(0); // queued until the query's results land, then refused
+    h.perform(0);
+    assert_eq!(h.beeps, 0);
+    assert_eq!(h.model.depth(), 0);
+    assert_eq!(h.source_runs("child"), 0);
     h.settle();
+    assert_eq!(h.beeps, 1);
     assert_eq!(h.model.result_count(), 0);
     h.perform(0);
+    assert_eq!(h.beeps, 2);
+    assert!(h.is_open());
     assert_eq!((h.model.depth(), h.model.source_id().map(SourceId::as_str)), (0, Some("repos")));
     assert_eq!(h.source_runs("child"), 0);
 }
