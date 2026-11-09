@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use rune::{Align, El, Side, icon, row, text};
 
-use crate::{Attach, ControlSize, MenuItem, Theme, icons, popover};
+use crate::{ControlSize, MenuItem, Theme, Transform, icons, popover};
 
 /// A capsule track of options with the selected one raised, for a few short choices or tabs.
 /// Left and Right move between options and select them.
@@ -18,7 +18,7 @@ pub struct SegmentedControl {
     selected: usize,
     size: ControlSize,
     fill: bool,
-    select: Option<Rc<dyn Fn(usize) -> Attach>>,
+    select: Option<Rc<dyn Fn(usize) -> Transform>>,
 }
 
 impl SegmentedControl {
@@ -141,7 +141,7 @@ pub struct Select {
     width: Option<f32>,
     toggle: Option<Rc<dyn Fn(El) -> El>>,
     close: Option<Rc<dyn Fn(El) -> El>>,
-    choose: Option<Rc<dyn Fn(usize) -> Attach>>,
+    choose: Option<Rc<dyn Fn(usize) -> Transform>>,
 }
 
 impl Select {

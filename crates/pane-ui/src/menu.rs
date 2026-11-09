@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use rune::{El, Icon, col, el, icon, row, text};
 
-use crate::{Attach, Theme, icons};
+use crate::{Theme, Transform, icons};
 
 /// What sits at the end of a [`MenuItem`].
 #[derive(Clone, Debug, Default)]
@@ -29,7 +29,7 @@ pub struct MenuItem {
     checked: Option<bool>,
     selected: bool,
     disabled: bool,
-    handlers: Vec<Attach>,
+    handlers: Vec<Transform>,
 }
 
 impl MenuItem {

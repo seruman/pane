@@ -7,7 +7,7 @@ use rune::{
     Color, Drag, El, Icon, KeyEvent, Phase, TextEdit, Tx, col, el, icon, row, text, text_input,
 };
 
-use crate::{Attach, ControlSize, Theme, hex_code, icons};
+use crate::{ControlSize, Theme, Transform, hex_code, icons};
 
 /// A one-line text field, optionally with a leading icon (a search field has the magnifier).
 ///
@@ -17,12 +17,12 @@ use crate::{Attach, ControlSize, Theme, hex_code, icons};
 /// ```
 pub struct TextField<'a> {
     edit: &'a TextEdit,
-    bind: Attach,
+    bind: Transform,
     placeholder: String,
     leading: Option<&'static Icon>,
     size: ControlSize,
     width: Option<f32>,
-    extra: Vec<Attach>,
+    extra: Vec<Transform>,
 }
 
 impl<'a> TextField<'a> {
@@ -128,7 +128,7 @@ pub struct Toggle {
     on: bool,
     name: String,
     disabled: bool,
-    toggle: Option<Box<dyn FnOnce(rune_kit::Switch) -> rune_kit::Switch>>,
+    toggle: Option<Transform<rune_kit::Switch>>,
 }
 
 impl Toggle {
@@ -170,7 +170,7 @@ pub struct Checkbox {
     label: Option<String>,
     name: Option<String>,
     disabled: bool,
-    toggle: Option<Attach>,
+    toggle: Option<Transform>,
 }
 
 impl Checkbox {
@@ -261,7 +261,7 @@ pub struct Slider {
     value_label: Option<String>,
     stops: Vec<Color>,
     width: Option<f32>,
-    change: Option<Attach>,
+    change: Option<Transform>,
 }
 
 const KNOB: f32 = 18.0;
@@ -427,7 +427,7 @@ pub struct Swatch {
     color: Color,
     selected: bool,
     compact: bool,
-    press: Option<Attach>,
+    press: Option<Transform>,
 }
 
 impl Swatch {

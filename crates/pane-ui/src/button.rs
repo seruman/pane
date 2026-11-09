@@ -2,7 +2,7 @@
 
 use rune::{Color, El, Icon, Tx, icon, row, text};
 
-use crate::{Attach, Theme, mix};
+use crate::{Theme, Transform, mix};
 
 /// How a [`Button`] is filled.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -69,7 +69,7 @@ pub struct Button {
     variant: ButtonVariant,
     size: ControlSize,
     disabled: bool,
-    press: Option<Attach>,
+    press: Option<Transform>,
 }
 
 impl Button {

@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use rune::{El, Icon, Key, TextEdit, el, row, text};
 
-use crate::{Attach, MenuItem, MenuTrailing, TextField, Theme, kbd, menu_section, popover};
+use crate::{MenuItem, MenuTrailing, TextField, Theme, Transform, kbd, menu_section, popover};
 
 /// One command in the palette.
 #[derive(Clone, Copy, Debug, Default)]
@@ -115,7 +115,7 @@ pub struct CommandPalette<'a> {
     selected: usize,
     hints: Vec<(String, String)>,
     width: f32,
-    choose: Option<std::rc::Rc<dyn Fn(usize) -> Attach>>,
+    choose: Option<std::rc::Rc<dyn Fn(usize) -> Transform>>,
 }
 
 impl<'a> CommandPalette<'a> {

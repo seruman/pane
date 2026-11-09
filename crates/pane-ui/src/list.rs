@@ -3,7 +3,7 @@
 
 use rune::{El, col, el, row, text};
 
-use crate::{Attach, Theme};
+use crate::{Theme, Transform};
 
 /// A row of a [`List`].
 pub struct ListRow {
@@ -12,7 +12,7 @@ pub struct ListRow {
     leading: Option<El>,
     trailing: Option<El>,
     selected: bool,
-    press: Option<Attach>,
+    press: Option<Transform>,
 }
 
 impl ListRow {

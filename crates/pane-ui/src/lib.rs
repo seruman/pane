@@ -55,5 +55,4 @@ pub use menu::*;
 pub use settings::*;
 pub use theme::*;
 
-/// A handler a builder holds until it builds its element, so a disabled control can drop it.
-type Attach = Box<dyn FnOnce(rune::El) -> rune::El>;
+type Transform<T = rune::El> = Box<dyn FnOnce(T) -> T>;
