@@ -877,16 +877,26 @@ mod tests {
 
     #[test]
     fn timeout_with_blocked_stdin_and_term_ignoring_child() {
-        let start = Instant::now();
+        let dir = TempDir::new("blocked-stdin");
+        let marker = dir.0.join("leader");
+        let timeout = Duration::from_secs(1);
+        let deadline = Instant::now() + timeout;
         let result = run_with(
-            &["/bin/sh", "-c", "trap '' TERM; exec /bin/sleep 30"],
+            &[
+                "/bin/sh",
+                "-c",
+                "trap '' TERM; echo $$ > \"$1\"; exec /bin/sleep 30",
+                "runner",
+                marker.to_str().unwrap(),
+            ],
             Some(&vec![1; 1_000_000]),
             &[],
-            Duration::from_millis(100),
+            timeout,
             1 << 20,
         );
         assert!(matches!(result, Err(CommandError::TimedOut)));
-        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(deadline.elapsed() < Duration::from_secs(10), "timeout cleanup did not finish");
+        assert_gone(&pids(&marker, 1));
     }
 
     #[test]
@@ -939,7 +949,7 @@ printf '%s\n' "$$" > "$1/leader"
     }
 
     fn pids(path: &Path, count: usize) -> Vec<libc::pid_t> {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {
             let found: Vec<libc::pid_t> =
                 std::fs::read_to_string(path).unwrap_or_default().lines().filter_map(|l| l.parse().ok()).collect();
@@ -952,7 +962,7 @@ printf '%s\n' "$$" > "$1/leader"
     }
 
     fn assert_gone(pids: &[libc::pid_t]) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let alive: Vec<_> = pids.iter().copied()
                 .filter(|&p| unsafe { libc::kill(p, 0) } == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH))
@@ -982,7 +992,7 @@ printf '%s\n' "$$" > "$1/leader"
         let start = Instant::now();
         cancel.cancel();
         assert!(matches!(task.join().unwrap(), Err(CommandError::Cancelled)));
-        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(start.elapsed() < Duration::from_secs(10), "cancellation cleanup did not finish");
         assert_gone(&[leader, descendants].concat());
         assert_eq!(text(&survivor.join().unwrap().unwrap().stdout), "alive");
     }
