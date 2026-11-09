@@ -171,6 +171,10 @@ impl Run {
         }
     }
 
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "progress is clamped to 0..=1 for the f32 renderer"
+    )]
     fn progress(&self) -> f32 {
         match self {
             Self::Idle | Self::Starting => 0.0,
@@ -658,8 +662,8 @@ fn tags(theme: &Theme) -> El {
 
 fn color_picker(s: &State, theme: &Theme) -> El {
     let current = rune::oklch(0.68, 0.16, s.hue * 360.0);
-    let stops: Vec<Color> = (0..7)
-        .map(|i| rune::oklch(0.7, 0.16, i as f32 * 60.0))
+    let stops: Vec<Color> = (0_u8..7)
+        .map(|i| rune::oklch(0.7, 0.16, f32::from(i) * 60.0))
         .collect();
     row()
         .gap(12.0)
