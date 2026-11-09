@@ -23,10 +23,10 @@
 mod page;
 mod review;
 
+use std::cell::Cell;
 use std::io::{IsTerminal as _, Read as _, Write};
 use std::ops::Range;
-use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::rc::Rc;
 
 use pane_ui::{Badge, Button, Theme, Tone, icons, kbd};
 use rune::{
@@ -54,8 +54,6 @@ struct Input {
     source: String,
     out: Option<String>,
 }
-
-static INPUT: OnceLock<Input> = OnceLock::new();
 
 /// What the composer is writing.
 #[derive(Clone, Debug, PartialEq)]
@@ -151,27 +149,31 @@ struct App_ {
     list: Option<usize>,
     /// Quitting sends the review: `ZZ`, `:wq` or `:x`. Any other way out sends nothing.
     send: bool,
+    send_failed: Rc<Cell<bool>>,
     note: Option<String>,
 }
 
 impl Default for App_ {
     fn default() -> Self {
-        let input = INPUT.get_or_init(|| Input {
+        App_::new(Input {
             title: "sample.md".into(),
             name: None,
             source: SAMPLE.into(),
             out: None,
-        });
-        let mut app = App_::new(input.title.clone(), input.source.clone(), input.out.clone());
-        app.name = input.name.clone();
-        app
+        })
     }
 }
 
 impl App_ {
-    fn new(title: String, source: String, out: Option<String>) -> Self {
+    fn new(input: Input) -> Self {
+        let Input {
+            title,
+            name,
+            source,
+            out,
+        } = input;
         App_ {
-            name: None,
+            name,
             title,
             out,
             page: Page::new(&source),
@@ -185,6 +187,7 @@ impl App_ {
             cmdline: None,
             list: None,
             send: false,
+            send_failed: Rc::new(Cell::new(false)),
             note: None,
         }
     }
@@ -1227,9 +1230,7 @@ fn list_key_press(s: &mut App_, k: &KeyEvent, tx: &mut Tx) {
     }
 }
 
-/// Sends the review on the way out, when `:wq` or `ZZ` asked: to the file `-o` names, or to
-/// stdout once the terminal is the shell's again. A review that can't be written sets
-/// [`SEND_FAILED`], so `main` exits non-zero.
+// The quit hook runs after terminal teardown, so feedback can go to stdout.
 fn send(s: &mut App_, _: &mut Tx) {
     if s.send && s.composer.is_some() {
         s.save();
@@ -1237,12 +1238,9 @@ fn send(s: &mut App_, _: &mut Tx) {
     let Some(feedback) = s.feedback() else { return };
     if let Err(e) = deliver(&feedback, s.out.as_deref(), &mut std::io::stdout()) {
         eprintln!("mdreview: {e}");
-        SEND_FAILED.store(true, Ordering::Relaxed);
+        s.send_failed.set(true);
     }
 }
-
-/// The review couldn't be written. `on_quit` can't return an exit code, so it tells `main`.
-static SEND_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// Writes `feedback` to the file at `out`, or to `stdout` when there's none. When the file
 /// can't be written the review goes to `stdout` instead, so it isn't lost, and the error
@@ -1338,9 +1336,8 @@ fn fail(message: &str) -> ! {
 }
 
 fn main() {
-    if INPUT.set(read_input()).is_err() {
-        unreachable!("the input is read once, here");
-    }
+    let state = App_::new(read_input());
+    let send_failed = state.send_failed.clone();
     App::new(AppSpec::<App_> {
         scenes: &[
             ("comments", |s| {
@@ -1432,9 +1429,10 @@ fn main() {
         families: ("Inter", "ui-monospace, Menlo, Inter"),
         ..AppSpec::new("Review", (1000.0, 900.0), App_::default, view)
     })
+    .init(move || state)
     .on_quit(send)
     .run();
-    if SEND_FAILED.load(Ordering::Relaxed) {
+    if send_failed.get() {
         std::process::exit(1);
     }
 }

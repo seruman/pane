@@ -12,11 +12,10 @@
 //! `*` and `#`; Escape hides the matches. Ctrl-D and Ctrl-U page. Space on a task's line ticks
 //! it, and with a file open writes it back. Hover a code block for its copy button.
 
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use pane_ui::{Badge, Button, Theme, icons, kbd};
-use rune::{AppSpec, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text};
+use rune::{App, AppSpec, Cx, El, KeyEvent, ScrollSpec, TextStyle, Tx, col, el, row, text};
 use rune_kit::markdown::{Highlight, RenderedText};
 use rune_kit::{CodeFrame, Markdown, MarkdownStyle};
 use vimkeys::{Keymap, Operator, Stroke, Vim, VimEffect, VimMode};
@@ -31,7 +30,6 @@ enum Act {
     Tick,
 }
 
-#[derive(Clone)]
 struct Doc {
     path: Option<String>,
     source: String,
@@ -42,16 +40,9 @@ struct Doc {
     note: Option<String>,
 }
 
-/// The document `main` opened before the app starts, so a file it can't read is an error in
-/// the shell rather than the sample shown under its name.
-static OPENED: OnceLock<Doc> = OnceLock::new();
-
 impl Default for Doc {
     fn default() -> Self {
-        OPENED
-            .get()
-            .cloned()
-            .unwrap_or_else(|| Doc::with_source(None, SAMPLE.to_owned()))
+        Doc::with_source(None, SAMPLE.to_owned())
     }
 }
 
@@ -427,18 +418,14 @@ fn poll(s: &mut Doc, _: f64, tx: &mut Tx) -> bool {
 }
 
 fn main() {
-    match Doc::open(rune::extra_args().first().cloned()) {
-        Ok(doc) => {
-            if OPENED.set(doc).is_err() {
-                unreachable!("main opens the document once");
-            }
-        }
+    let doc = match Doc::open(rune::extra_args().first().cloned()) {
+        Ok(doc) => doc,
         Err(e) => {
             eprintln!("mdview: {e}");
             std::process::exit(1);
         }
-    }
-    rune::run(AppSpec::<Doc> {
+    };
+    App::new(AppSpec::<Doc> {
         scenes: &[
             ("visual", |s| {
                 let page = RenderedText::new(&s.source);
@@ -471,7 +458,9 @@ fn main() {
         // Code blocks need a monospaced face; the default family pair is Inter for both.
         families: ("Inter", "ui-monospace, Menlo, Inter"),
         ..AppSpec::new("Markdown", (900.0, 900.0), Doc::default, view)
-    });
+    })
+    .init(move || doc)
+    .run();
 }
 
 #[cfg(test)]

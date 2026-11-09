@@ -4,7 +4,12 @@ use rune::{Env, Mods, Runtime};
 const SRC: &str = "# Title\n\nSome **bold phrase** and more.\n\n- one\n- two\n\n```rust\nlet x = 1;\n```\n\nA [link][r] here.\n\n[r]: https://example.com\n";
 
 fn app(src: &str) -> App_ {
-    App_::new("t.md".into(), src.into(), None)
+    App_::new(Input {
+        title: "t.md".into(),
+        name: None,
+        source: src.into(),
+        out: None,
+    })
 }
 
 fn press(rt: &mut Runtime<App_>, keys: &str) {
