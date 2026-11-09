@@ -13,17 +13,9 @@ use std::time::{Duration, Instant};
 use rmenu_core::command::{self, Cancel, CommandError, CommandResult};
 use rmenu_core::config::InputFormat;
 use rmenu_core::item::MenuItem;
-use rmenu_core::model::{Effect, Event, Model, Task, TaskKind, command_failure};
+use rmenu_core::model::{Effect, Event, Model, Outcome, Task, TaskKind, command_failure};
 use rmenu_core::record::RecordDecoder;
 use rune::{TextEdit, Tx, Waker};
-
-/// How the process ends: set once by the model's `Finish`, read after Rune returns.
-pub struct Outcome {
-    pub status: i32,
-    pub output: Vec<u8>,
-    /// mmenu reports the model's message on stderr when it exits 2.
-    pub error: Option<String>,
-}
 
 pub static OUTCOME: Mutex<Option<Outcome>> = Mutex::new(None);
 
@@ -139,11 +131,10 @@ impl Menu {
                 Effect::Cancel(kind) => self.retire(kind),
                 Effect::Copy(text) => tx.copy(text),
                 Effect::Beep => {}
-                Effect::Finish { status, output } => {
-                    let error = (status == 2).then(|| self.model.stdin_error().or(self.model.message()).map(str::to_owned)).flatten();
+                Effect::Finish(result) => {
                     self.stop();
                     let mut outcome = OUTCOME.lock().unwrap();
-                    if outcome.is_none() { *outcome = Some(Outcome { status, output, error }); }
+                    if outcome.is_none() { *outcome = Some(result); }
                     tx.quit();
                 }
             }

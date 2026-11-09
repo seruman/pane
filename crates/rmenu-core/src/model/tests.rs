@@ -14,7 +14,7 @@ struct Harness {
     /// The live task of each kind: starting one replaces the previous, Cancel removes it.
     tasks: HashMap<TaskKind, Task>,
     started: Vec<Task>,
-    finished: Option<(i32, Vec<u8>)>,
+    finished: Option<Outcome>,
     copied: Vec<String>,
     beeps: usize,
     reads_stdin: bool,
@@ -55,9 +55,9 @@ impl Harness {
                 }
                 Effect::Copy(text) => self.copied.push(text),
                 Effect::Beep => self.beeps += 1,
-                Effect::Finish { status, output } => {
+                Effect::Finish(outcome) => {
                     assert!(self.finished.is_none(), "finished twice");
-                    self.finished = Some((status, output));
+                    self.finished = Some(outcome);
                 }
             }
         }
@@ -157,8 +157,12 @@ impl Harness {
     fn is_open(&self) -> bool { self.finished.is_none() }
 
     fn output(&self) -> (i32, String) {
-        let (status, output) = self.finished.clone().expect("not finished");
-        (status, String::from_utf8(output).unwrap())
+        let outcome = self.finished.as_ref().expect("not finished");
+        let output = match outcome {
+            Outcome::Chosen(output) => String::from_utf8(output.clone()).unwrap(),
+            _ => String::new(),
+        };
+        (outcome.exit_code(), output)
     }
 
     fn context(&self) -> ActionContext {
@@ -205,6 +209,23 @@ fn cancelled(h: &Harness, kind: TaskKind) -> bool { !h.tasks.contains_key(&kind)
 
 fn env<'a>(env: &'a [(String, String)], key: &str) -> &'a str {
     &env.iter().find(|(k, _)| k == key).unwrap().1
+}
+
+#[test]
+fn outcomes_define_the_process_exit_codes() {
+    assert_eq!(Outcome::Chosen(b"picked\n".to_vec()).exit_code(), 0);
+    assert_eq!(Outcome::Cancelled.exit_code(), 130);
+    assert_eq!(Outcome::Failed("bad input".into()).exit_code(), 2);
+}
+
+#[test]
+fn cancelling_carries_the_original_stdin_error_in_the_finish_effect() {
+    let (mut model, _) = Model::new(options(json!({})));
+    model.handle(Event::StdinFailed("invalid input record".into()));
+    model.message = Some(Status::Ack("unrelated status".into()));
+    let effects = model.handle(Event::Nav(Nav::Cancel));
+    assert!(matches!(effects.as_slice(), [Effect::Finish(Outcome::Failed(message))]
+        if message == "invalid input record"));
 }
 
 // MenuModelTests

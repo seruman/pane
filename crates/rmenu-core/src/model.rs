@@ -65,6 +65,23 @@ impl Task {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Chosen(Vec<u8>),
+    Cancelled,
+    Failed(String),
+}
+
+impl Outcome {
+    pub fn exit_code(&self) -> i32 {
+        match self {
+            Self::Chosen(_) => 0,
+            Self::Cancelled => 130,
+            Self::Failed(_) => 2,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Effect {
     /// Read piped stdin as `Options::input` in `StdinItems` batches, then answer
@@ -76,8 +93,8 @@ pub enum Effect {
     Copy(String),
     /// The action was refused (mmenu's NSSound.beep). A host may flash or ignore it.
     Beep,
-    /// Cancel every task, reap their process groups, write `output` to stdout, exit `status`.
-    Finish { status: i32, output: Vec<u8> },
+    /// Cancel and reap background work, then publish the process outcome.
+    Finish(Outcome),
 }
 
 /// Directions the host translates keys into. Keys bound in the configuration arrive as
@@ -966,19 +983,19 @@ impl Model {
             }
             items.iter().map(|i| format!("{}{delimiter}", i.value())).collect::<String>().into_bytes()
         };
-        self.finish(0, output);
+        self.finish(Outcome::Chosen(output));
     }
 
     // A failed command source is one source; the user can switch or just cancel.
     // Failed piped stdin means the caller's whole input broke, which is an error.
     fn cancel(&mut self) {
-        let status = if self.stdin_error.is_some() { 2 } else { 130 };
-        self.finish(status, Vec::new());
+        let outcome = self.stdin_error.clone().map_or(Outcome::Cancelled, Outcome::Failed);
+        self.finish(outcome);
     }
 
-    fn finish(&mut self, status: i32, output: Vec<u8>) {
+    fn finish(&mut self, outcome: Outcome) {
         self.closing = true;
-        self.effects.push(Effect::Finish { status, output });
+        self.effects.push(Effect::Finish(outcome));
     }
 
     /// Root to the current level; each ancestor holds what was chosen when it was pushed.
