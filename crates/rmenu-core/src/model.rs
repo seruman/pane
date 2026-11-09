@@ -385,7 +385,6 @@ impl Preview {
 
 pub struct Model {
     options: Options,
-    effects: Vec<Effect>,
     next_token: u64,
     levels: Vec<SuspendedLevel>,
     current: Level,
@@ -401,7 +400,6 @@ impl Model {
         let current = Level::new(options.query.clone(), Shown::default());
         let mut model = Model {
             options,
-            effects: Vec::new(),
             next_token: 0,
             levels: Vec::new(),
             current,
@@ -411,19 +409,20 @@ impl Model {
             preview: Preview { enabled: true, content: PreviewContent::Empty },
             closing: false,
         };
+        let mut effects = Vec::new();
         match model.options.configuration.root_source().cloned() {
-            Some(source) => model.load(&source, LoadKind::Replace),
-            None => model.effects.push(Effect::ReadStdin),
+            Some(source) => model.load(&source, LoadKind::Replace, &mut effects),
+            None => effects.push(Effect::ReadStdin),
         }
-        let effects = mem::take(&mut model.effects);
         (model, effects)
     }
 
     pub fn handle(&mut self, event: Event) -> Vec<Effect> {
+        let mut effects = Vec::new();
         if !self.closing {
-            self.dispatch(event);
+            self.dispatch(event, &mut effects);
         }
-        mem::take(&mut self.effects)
+        effects
     }
 
     pub fn options(&self) -> &Options { &self.options }
@@ -531,25 +530,25 @@ impl Model {
         self.levels.first_mut().map_or(&mut self.current, |root| &mut root.level)
     }
 
-    fn dispatch(&mut self, event: Event) {
+    fn dispatch(&mut self, event: Event, effects: &mut Vec<Effect>) {
         match event {
-            Event::SetQuery(value) => self.set_query(value),
-            Event::Nav(nav) => self.nav(nav),
-            Event::Highlight(row) => self.highlight(row),
-            Event::ToggleRow(row) => self.toggle_row(row),
+            Event::SetQuery(value) => self.set_query(value, effects),
+            Event::Nav(nav) => self.nav(nav, effects),
+            Event::Highlight(row) => self.highlight(row, effects),
+            Event::ToggleRow(row) => self.toggle_row(row, effects),
             Event::Perform(index) => {
                 if let Some(binding) = self.options.configuration.bindings().get(index.0).cloned() {
-                    self.perform(binding);
+                    self.perform(binding, effects);
                 }
             }
-            Event::SwitchSource(id) => self.switch_source(&id),
+            Event::SwitchSource(id) => self.switch_source(&id, effects),
             Event::StdinItems(batch) => {
                 self.root_mut().store.extend(batch);
-                self.stdin_changed();
+                self.stdin_changed(effects);
             }
             Event::StdinDone => {
                 self.root_mut().ingestion = Ingestion::Complete;
-                self.stdin_changed();
+                self.stdin_changed(effects);
             }
             Event::StdinFailed(error) => {
                 self.stdin_error = Some(error);
@@ -557,33 +556,33 @@ impl Model {
                 root.ingestion = Ingestion::Failed;
                 root.message = Some(Status::StdinFailed);
             }
-            Event::SourceDone { token, result } => self.source_done(token, result),
-            Event::SearchDone { token, results } => self.search_done(token, results),
+            Event::SourceDone { token, result } => self.source_done(token, result, effects),
+            Event::SearchDone { token, results } => self.search_done(token, results, effects),
             Event::PreviewDone { token, result } => self.preview.complete(token, result),
-            Event::OperationDone { token, result } => self.operation_done(token, result),
+            Event::OperationDone { token, result } => self.operation_done(token, result, effects),
         }
     }
 
-    fn nav(&mut self, nav: Nav) {
+    fn nav(&mut self, nav: Nav, effects: &mut Vec<Effect>) {
         let rows = self.options.rows as isize;
         match nav {
-            Nav::Up | Nav::BackTab => self.move_by(-1),
-            Nav::Down => self.move_by(1),
-            Nav::PageUp => self.move_by(-rows),
-            Nav::PageDown => self.move_by(rows),
-            Nav::Accept => { self.apply_intent(Intent::Accept("accept".into())); },
+            Nav::Up | Nav::BackTab => self.move_by(-1, effects),
+            Nav::Down => self.move_by(1, effects),
+            Nav::PageUp => self.move_by(-rows, effects),
+            Nav::PageDown => self.move_by(rows, effects),
+            Nav::Accept => { self.apply_intent(Intent::Accept("accept".into()), effects); },
             Nav::Back => {
-                if self.levels.is_empty() { self.cancel() } else { self.pop() }
+                if self.levels.is_empty() { self.cancel(effects) } else { self.pop(effects) }
             }
             Nav::PopIfEmpty => {
                 if self.query().is_empty() && !self.levels.is_empty() {
-                    self.pop();
+                    self.pop(effects);
                 }
             }
             Nav::Tab => {
-                if self.options.multi { self.toggle() } else { self.move_by(1) }
+                if self.options.multi { self.toggle(effects) } else { self.move_by(1, effects) }
             }
-            Nav::Cancel => self.cancel(),
+            Nav::Cancel => self.cancel(effects),
         }
     }
 
@@ -607,17 +606,17 @@ impl Model {
         self.current.shown.results.get(row).map(|&o| &self.current.shown.items[o])
     }
 
-    fn set_query(&mut self, value: String) {
+    fn set_query(&mut self, value: String, effects: &mut Vec<Effect>) {
         if value == self.query() {
             return;
         }
         self.current.query = value;
-        self.invalidate_preview(RetainPreview::Keep);
+        self.invalidate_preview(RetainPreview::Keep, effects);
         self.clear_transient_message();
-        self.request_search(false);
+        self.request_search(false, effects);
     }
 
-    fn highlight(&mut self, row: usize) {
+    fn highlight(&mut self, row: usize, effects: &mut Vec<Effect>) {
         if !self.can_navigate() || row >= self.listed_count() {
             return;
         }
@@ -626,109 +625,109 @@ impl Model {
         }
         let id = self.result(row).id.clone();
         self.current.shown.selection.highlight(row, id);
-        self.update_preview();
+        self.update_preview(effects);
     }
 
-    fn move_by(&mut self, delta: isize) {
+    fn move_by(&mut self, delta: isize, effects: &mut Vec<Effect>) {
         let count = self.listed_count();
         if count == 0 {
             return;
         }
         let row = (self.highlighted_row().unwrap_or(0) as isize + delta).clamp(0, count as isize - 1);
-        self.highlight(row as usize);
+        self.highlight(row as usize, effects);
     }
 
-    fn toggle(&mut self) {
+    fn toggle(&mut self, effects: &mut Vec<Effect>) {
         if !self.can_navigate() || !self.options.multi {
             return;
         }
         let Some(id) = self.highlighted().map(|i| i.id.clone()) else { return };
         self.current.shown.selection.toggle(&id);
-        self.move_by(1);
+        self.move_by(1, effects);
     }
 
-    fn toggle_row(&mut self, row: usize) {
+    fn toggle_row(&mut self, row: usize, effects: &mut Vec<Effect>) {
         if !self.can_navigate() || !self.options.multi || row >= self.listed_count() {
             return;
         }
         let id = self.result(row).id.clone();
         self.current.shown.selection.toggle(&id);
-        self.highlight(row);
+        self.highlight(row, effects);
     }
 
-    fn perform(&mut self, binding: MenuBinding) {
+    fn perform(&mut self, binding: MenuBinding, effects: &mut Vec<Effect>) {
         if !binding.applies(self.source_id()) {
             return;
         }
         match &binding.action {
-            BindingAction::Accept => { self.apply_intent(Intent::Accept(binding.action_name().to_owned())); },
+            BindingAction::Accept => { self.apply_intent(Intent::Accept(binding.action_name().to_owned()), effects); },
             BindingAction::Copy => {
                 if !self.can_act() {
-                    self.effects.push(Effect::Beep);
+                    effects.push(Effect::Beep);
                     return;
                 }
                 let values: Vec<String> = self.chosen().iter().map(|i| i.value().to_owned()).collect();
                 if values.is_empty() {
-                    self.effects.push(Effect::Beep);
+                    effects.push(Effect::Beep);
                     return;
                 }
-                self.effects.push(Effect::Copy(values.join("\n")));
+                effects.push(Effect::Copy(values.join("\n")));
                 self.current.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
-            BindingAction::Source { source } => self.switch_source(source),
-            BindingAction::Push { source } => { self.apply_intent(Intent::Push(source.clone())); },
-            BindingAction::Reload => self.reload(),
+            BindingAction::Source { source } => self.switch_source(source, effects),
+            BindingAction::Push { source } => { self.apply_intent(Intent::Push(source.clone()), effects); },
+            BindingAction::Reload => self.reload(effects),
             BindingAction::TogglePreview => {
                 if self.preview_command().is_none() {
                     return;
                 }
                 self.preview.enabled = !self.preview.enabled;
-                self.invalidate_preview(RetainPreview::Discard);
-                self.update_preview();
+                self.invalidate_preview(RetainPreview::Discard, effects);
+                self.update_preview(effects);
             }
             BindingAction::Run { command, reload } => {
                 if self.operation.is_some() || !self.can_act() || self.chosen().is_empty() {
-                    self.effects.push(Effect::Beep);
+                    effects.push(Effect::Beep);
                     return;
                 }
-                self.run_operation(command.clone(), binding.action_name().to_owned(), *reload);
+                self.run_operation(command.clone(), binding.action_name().to_owned(), *reload, effects);
             }
         }
     }
 
-    fn switch_source(&mut self, id: &SourceId) {
+    fn switch_source(&mut self, id: &SourceId, effects: &mut Vec<Effect>) {
         if !self.levels.is_empty() || self.source_id() == Some(id) {
             return;
         }
         let Some(source) = self.options.configuration.source(id).filter(|s| !s.hidden).cloned() else { return };
-        self.load(&source, LoadKind::Replace);
+        self.load(&source, LoadKind::Replace, effects);
     }
 
-    fn apply_intent(&mut self, intent: Intent) -> IntentOutcome {
+    fn apply_intent(&mut self, intent: Intent, effects: &mut Vec<Effect>) -> IntentOutcome {
         let blocked = matches!(intent, Intent::Accept(_)) && self.operation.is_some();
         if !self.can_act() && self.can_navigate() && !blocked {
             self.current.phase.defer(intent);
             return IntentOutcome::Deferred;
         }
         if !self.can_act() || blocked {
-            self.effects.push(Effect::Beep);
+            effects.push(Effect::Beep);
             return IntentOutcome::Refused;
         }
         let picked = self.chosen();
         if picked.is_empty() {
-            self.effects.push(Effect::Beep);
+            effects.push(Effect::Beep);
             return IntentOutcome::Refused;
         }
         match intent {
-            Intent::Accept(action) => self.accept(action, picked),
+            Intent::Accept(action) => self.accept(action, picked, effects),
             Intent::Push(source) => {
-                self.push(source, picked);
+                self.push(source, picked, effects);
                 IntentOutcome::Applied
             }
         }
     }
 
-    fn push(&mut self, source: SourceId, picked: Vec<MenuItem>) {
+    fn push(&mut self, source: SourceId, picked: Vec<MenuItem>, effects: &mut Vec<Effect>) {
         let stdin_changed = matches!(self.current.input, Input::Stdin)
             && matches!(self.current.phase, Phase::Matching(_) | Phase::CatchUp);
         let child = Level::new(String::new(), self.current.shown.clone());
@@ -736,34 +735,34 @@ impl Model {
         parent.phase = Phase::Ready;
         self.levels.push(SuspendedLevel { level: parent, chosen: picked, stdin_changed });
         let target = self.options.configuration.source(&source).expect("validated push source").clone();
-        self.load(&target, LoadKind::Replace);
+        self.load(&target, LoadKind::Replace, effects);
     }
 
-    fn pop(&mut self) {
+    fn pop(&mut self, effects: &mut Vec<Effect>) {
         let Some(parent) = self.levels.pop() else { return };
-        self.effects.extend([TaskKind::Source, TaskKind::Search].map(Effect::Cancel));
+        effects.extend([TaskKind::Source, TaskKind::Search].map(Effect::Cancel));
         self.current = parent.level;
         self.current.source_generation = SourceGeneration(self.fresh());
         self.current.shown.source_generation = Some(self.current.source_generation);
-        self.invalidate_preview(RetainPreview::Discard);
+        self.invalidate_preview(RetainPreview::Discard, effects);
         self.result_revision += 1;
-        self.update_preview();
+        self.update_preview(effects);
         if parent.stdin_changed {
-            self.request_search(true);
+            self.request_search(true, effects);
         }
     }
 
-    fn reload(&mut self) {
+    fn reload(&mut self, effects: &mut Vec<Effect>) {
         match self.source().cloned() {
-            Some(source) => self.load(&source, LoadKind::Reload),
+            Some(source) => self.load(&source, LoadKind::Reload, effects),
             None => {
                 self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
-                self.effects.push(Effect::Beep);
+                effects.push(Effect::Beep);
             }
         }
     }
 
-    fn load(&mut self, source: &MenuSource, kind: LoadKind) {
+    fn load(&mut self, source: &MenuSource, kind: LoadKind, effects: &mut Vec<Effect>) {
         let reset_pending = matches!(self.current.phase,
             Phase::AwaitingSource { selection: SelectionPolicy::Reset }
             | Phase::Matching(SearchRun { publication: Publication::Source(SelectionPolicy::Reset), .. }));
@@ -778,11 +777,11 @@ impl Model {
         self.current.store = Items::default();
         self.current.ingestion = Ingestion::Reading;
         self.current.message = None;
-        self.effects.push(Effect::Cancel(TaskKind::Search));
+        effects.push(Effect::Cancel(TaskKind::Search));
         if kind == LoadKind::Replace {
-            self.invalidate_preview(RetainPreview::Discard);
+            self.invalidate_preview(RetainPreview::Discard, effects);
         }
-        self.update_preview();
+        self.update_preview(effects);
         let context = ActionContext {
             action: "source".into(),
             query: self.query().to_owned(),
@@ -790,7 +789,7 @@ impl Model {
             items: self.levels.last().map(|l| l.chosen.clone()).unwrap_or_default(),
             path: self.ancestors(),
         };
-        self.effects.push(Effect::Start(Task::Source {
+        effects.push(Effect::Start(Task::Source {
             token: self.current.source_generation.0,
             argv: source.command.clone(),
             input: context.json(),
@@ -799,7 +798,7 @@ impl Model {
         }));
     }
 
-    fn source_done(&mut self, token: Token, result: Result<Vec<MenuItem>, String>) {
+    fn source_done(&mut self, token: Token, result: Result<Vec<MenuItem>, String>, effects: &mut Vec<Effect>) {
         if SourceGeneration(token) != self.current.source_generation {
             return;
         }
@@ -808,7 +807,7 @@ impl Model {
             Ok(items) => {
                 self.current.store = Items::from(items);
                 self.current.ingestion = Ingestion::Complete;
-                self.invalidate_preview(RetainPreview::Keep);
+                self.invalidate_preview(RetainPreview::Keep, effects);
             }
             Err(error) => {
                 self.current.store = Items::default();
@@ -816,17 +815,17 @@ impl Model {
                 self.current.message = Some(Status::Error(error));
             }
         }
-        self.start_search(Publication::Source(selection), None);
+        self.start_search(Publication::Source(selection), None, effects);
     }
 
-    fn stdin_changed(&mut self) {
+    fn stdin_changed(&mut self, effects: &mut Vec<Effect>) {
         match self.levels.first_mut() {
             Some(root) => root.stdin_changed = true,
-            None => self.request_search(true),
+            None => self.request_search(true, effects),
         }
     }
 
-    fn request_search(&mut self, data_changed: bool) {
+    fn request_search(&mut self, data_changed: bool, effects: &mut Vec<Effect>) {
         match &mut self.current.phase {
             Phase::AwaitingSource { .. } => return,
             Phase::Matching(run) if data_changed => {
@@ -839,10 +838,10 @@ impl Model {
             Phase::Matching(run) => (run.publication, run.intent),
             _ => (Publication::Query, None),
         };
-        self.start_search(publication, intent);
+        self.start_search(publication, intent, effects);
     }
 
-    fn start_search(&mut self, publication: Publication, intent: Option<Intent>) {
+    fn start_search(&mut self, publication: Publication, intent: Option<Intent>, effects: &mut Vec<Effect>) {
         let token = self.fresh();
         let query = self.query().to_owned();
         self.current.phase = Phase::Matching(SearchRun {
@@ -853,7 +852,7 @@ impl Model {
             catch_up: false,
             intent,
         });
-        self.effects.push(Effect::Start(Task::Search {
+        effects.push(Effect::Start(Task::Search {
             token,
             index: self.current.store.clone(),
             query,
@@ -861,7 +860,7 @@ impl Model {
         }));
     }
 
-    fn search_done(&mut self, token: Token, results: Vec<RowOffset>) {
+    fn search_done(&mut self, token: Token, results: Vec<RowOffset>, effects: &mut Vec<Effect>) {
         if !matches!(&self.current.phase, Phase::Matching(run) if run.token == token) {
             return;
         }
@@ -885,19 +884,19 @@ impl Model {
         shown.selection.reconcile(&shown.items, &shown.results[..listed], marks);
         shown.query = Some(run.query);
         shown.source_generation = Some(self.current.source_generation);
-        self.update_preview();
+        self.update_preview(effects);
         if self.can_act()
             && let Some(intent) = run.intent
-            && self.apply_intent(intent) == IntentOutcome::Applied
+            && self.apply_intent(intent, effects) == IntentOutcome::Applied
         {
             return;
         }
         if run.catch_up {
-            self.request_search(true);
+            self.request_search(true, effects);
         }
     }
 
-    fn update_preview(&mut self) {
+    fn update_preview(&mut self, effects: &mut Vec<Effect>) {
         let identity = self.highlighted().filter(|_| self.preview_visible() && self.can_act()).map(|item| PreviewIdentity {
             source: self.current.source_generation,
             item: item.clone(),
@@ -910,7 +909,7 @@ impl Model {
             return;
         }
         let (Some(argv), Some(identity)) = (self.preview_command(), identity) else {
-            self.invalidate_preview(RetainPreview::Discard);
+            self.invalidate_preview(RetainPreview::Discard, effects);
             return;
         };
         let context = ActionContext {
@@ -922,7 +921,7 @@ impl Model {
         };
         let token = self.fresh();
         self.preview.start(identity, token);
-        self.effects.push(Effect::Start(Task::Preview {
+        effects.push(Effect::Start(Task::Preview {
             token,
             argv,
             env: context.environment(),
@@ -936,12 +935,12 @@ impl Model {
         }
     }
 
-    fn invalidate_preview(&mut self, retention: RetainPreview) {
+    fn invalidate_preview(&mut self, retention: RetainPreview, effects: &mut Vec<Effect>) {
         self.preview.invalidate(retention);
-        self.effects.push(Effect::Cancel(TaskKind::Preview));
+        effects.push(Effect::Cancel(TaskKind::Preview));
     }
 
-    fn run_operation(&mut self, argv: Vec<String>, action: String, reload: bool) {
+    fn run_operation(&mut self, argv: Vec<String>, action: String, reload: bool, effects: &mut Vec<Effect>) {
         let chosen = self.chosen();
         let context = ActionContext {
             action: action.clone(),
@@ -959,7 +958,7 @@ impl Model {
             reload,
             source_generation: self.current.source_generation,
         });
-        self.effects.push(Effect::Start(Task::Operation {
+        effects.push(Effect::Start(Task::Operation {
             token,
             argv,
             input: context.json(),
@@ -967,13 +966,13 @@ impl Model {
         }));
     }
 
-    fn operation_done(&mut self, token: Token, result: Result<CommandResult, String>) {
+    fn operation_done(&mut self, token: Token, result: Result<CommandResult, String>, effects: &mut Vec<Effect>) {
         let Some(operation) = self.operation.take_if(|o| o.token == token) else { return };
         match result {
             Ok(r) if r.status.success() => {
                 self.current.message = Some(Status::Ack(format!("{} completed", operation.action)));
                 if operation.reload && operation.source_generation == self.current.source_generation {
-                    self.reload();
+                    self.reload(effects);
                 }
             }
             Ok(r) => self.current.message = Some(Status::Error(command_failure(&r))),
@@ -981,7 +980,7 @@ impl Model {
         }
     }
 
-    fn accept(&mut self, action: String, picked: Vec<MenuItem>) -> IntentOutcome {
+    fn accept(&mut self, action: String, picked: Vec<MenuItem>, effects: &mut Vec<Effect>) -> IntentOutcome {
         let items = match self.options.configuration.marks() {
             MarkScope::Level => picked.clone(),
             MarkScope::Global => {
@@ -1008,23 +1007,23 @@ impl Model {
             if items.iter().any(|i| i.value().contains(delimiter)) {
                 let hint = if self.options.output == OutputFormat::Nul { "" } else { " or --print0" };
                 self.current.message = Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
-                self.effects.push(Effect::Beep);
+                effects.push(Effect::Beep);
                 return IntentOutcome::Refused;
             }
             items.iter().map(|i| format!("{}{delimiter}", i.value())).collect::<String>().into_bytes()
         };
-        self.finish(Outcome::Chosen(output));
+        self.finish(Outcome::Chosen(output), effects);
         IntentOutcome::Applied
     }
 
-    fn cancel(&mut self) {
+    fn cancel(&mut self, effects: &mut Vec<Effect>) {
         let outcome = self.stdin_error.clone().map_or(Outcome::Cancelled, Outcome::Failed);
-        self.finish(outcome);
+        self.finish(outcome, effects);
     }
 
-    fn finish(&mut self, outcome: Outcome) {
+    fn finish(&mut self, outcome: Outcome, effects: &mut Vec<Effect>) {
         self.closing = true;
-        self.effects.push(Effect::Finish(outcome));
+        effects.push(Effect::Finish(outcome));
     }
 
     fn path(&self, current: Vec<MenuItem>) -> Vec<PathEntry> {
