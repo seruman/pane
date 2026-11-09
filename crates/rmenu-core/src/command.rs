@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn nil_input_connects_stdin_to_dev_null() {
+    fn no_input_connects_stdin_to_dev_null() {
         let check = ["/bin/sh", "-c", "if [ -c /dev/stdin ]; then echo chardev; else echo pipe; fi; /bin/cat"];
         let result = run_with(&check, None, &[], Duration::from_secs(10), 1 << 20).unwrap();
         assert_eq!(text(&result.stdout), "chardev\n");
