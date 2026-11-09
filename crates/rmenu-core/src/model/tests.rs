@@ -120,7 +120,11 @@ impl Harness {
     }
 
     fn source_runs(&self, id: &str) -> usize {
-        self.started.iter().filter(|t| matches!(t, Task::Source { argv, .. } if argv[1] == id)).count()
+        self.started.iter().filter(|task| {
+            let Task::Source { input, .. } = task else { return false };
+            let context: ActionContext = serde_json::from_slice(input).expect("source action context");
+            context.source.as_deref() == Some(id)
+        }).count()
     }
 
     fn settled(&self) -> bool { self.model.can_act() && !self.model.is_searching() }
@@ -552,7 +556,13 @@ fn hidden(id: &str, extra: Value) -> Value {
 
 #[test]
 fn push_then_pop_restores_the_parent_without_rerunning_it() {
-    let mut h = start(json!({"sources": [repos(json!({"prompt": "Repos"})), hidden("child", json!({}))], "bindings": [push_binding()]}));
+    let mut h = start(json!({
+        "sources": [
+            repos(json!({"prompt": "Repos", "command": ["root-program"]})),
+            hidden("child", json!({"command": ["child-program"]})),
+        ],
+        "bindings": [push_binding()],
+    }));
     h.load(&jsonl(&REPOS));
     h.query("a");
     h.settle();
