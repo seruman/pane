@@ -1,3 +1,5 @@
+#![deny(clippy::undocumented_unsafe_blocks)]
+
 use std::ffi::{CString, OsStr, OsString};
 use std::fmt;
 use std::fs::File;
@@ -127,6 +129,7 @@ fn pipe() -> Result<(File, File), CommandError> {
 }
 
 fn set_cloexec(fd: RawFd) -> Result<(), CommandError> {
+    // SAFETY: F_SETFD takes an integer flag, not a pointer. Invalid descriptors return EBADF.
     if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
         return Err(system("close-on-exec pipe", io::Error::last_os_error()));
     }
@@ -142,13 +145,16 @@ struct SpawnActions(libc::posix_spawn_file_actions_t);
 impl SpawnActions {
     fn new() -> Result<Self, CommandError> {
         let mut actions = std::mem::MaybeUninit::uninit();
+        // SAFETY: actions points to writable storage for one file-actions object.
         spawn_call(unsafe { libc::posix_spawn_file_actions_init(actions.as_mut_ptr()) }, "spawn actions")?;
+        // SAFETY: initialization succeeded before this value is read.
         Ok(Self(unsafe { actions.assume_init() }))
     }
 }
 
 impl Drop for SpawnActions {
     fn drop(&mut self) {
+        // SAFETY: self owns the initialized actions and destroys them only once.
         unsafe { libc::posix_spawn_file_actions_destroy(&raw mut self.0) };
     }
 }
@@ -158,13 +164,16 @@ struct SpawnAttributes(libc::posix_spawnattr_t);
 impl SpawnAttributes {
     fn new() -> Result<Self, CommandError> {
         let mut attrs = std::mem::MaybeUninit::uninit();
+        // SAFETY: attrs points to writable storage for one spawn-attributes object.
         spawn_call(unsafe { libc::posix_spawnattr_init(attrs.as_mut_ptr()) }, "spawn attributes")?;
+        // SAFETY: initialization succeeded before this value is read.
         Ok(Self(unsafe { attrs.assume_init() }))
     }
 }
 
 impl Drop for SpawnAttributes {
     fn drop(&mut self) {
+        // SAFETY: self owns the initialized attributes and destroys them only once.
         unsafe { libc::posix_spawnattr_destroy(&raw mut self.0) };
     }
 }
@@ -191,32 +200,44 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
     let mut attrs = SpawnAttributes::new()?;
     match &stdin {
         Some((read, _)) => spawn_call(
+            // SAFETY: actions is initialized and read owns a live descriptor.
             unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, read.as_raw_fd(), 0) },
             "spawn dup2",
         )?,
         None => spawn_call(
+            // SAFETY: actions is initialized and null is a live NUL-terminated path.
             unsafe { libc::posix_spawn_file_actions_addopen(&raw mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) },
             "spawn open",
         )?,
     }
     spawn_call(
+        // SAFETY: actions is initialized and out_w owns a live descriptor.
         unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, out_w.as_raw_fd(), 1) },
         "spawn dup2",
     )?;
     spawn_call(
+        // SAFETY: actions is initialized and err_w owns a live descriptor.
         unsafe { libc::posix_spawn_file_actions_adddup2(&raw mut actions.0, err_w.as_raw_fd(), 2) },
         "spawn dup2",
     )?;
+    // SAFETY: attrs is initialized. A zero group ID requests the child's own process group.
     spawn_call(unsafe { libc::posix_spawnattr_setpgroup(&raw mut attrs.0, 0) }, "spawn process group")?;
+    // SAFETY: sigset_t is an integer type on the supported Apple targets.
     let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
+    // SAFETY: empty points to writable storage for one signal set.
     unsafe { libc::sigemptyset(&raw mut empty) };
+    // SAFETY: attrs and empty are initialized locals that remain live during the call.
     spawn_call(unsafe { libc::posix_spawnattr_setsigmask(&raw mut attrs.0, &raw const empty) }, "spawn signal mask")?;
+    // SAFETY: sigset_t is an integer type on the supported Apple targets.
     let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
+    // SAFETY: defaults points to writable storage for one signal set.
     unsafe { libc::sigemptyset(&raw mut defaults) };
     for signal in DEFAULT_SIGNALS {
+        // SAFETY: defaults is initialized and signal is a valid signal number.
         unsafe { libc::sigaddset(&raw mut defaults, signal) };
     }
     spawn_call(
+        // SAFETY: attrs and defaults are initialized locals that remain live during the call.
         unsafe { libc::posix_spawnattr_setsigdefault(&raw mut attrs.0, &raw const defaults) },
         "spawn signal defaults",
     )?;
@@ -226,11 +247,14 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
         | libc::POSIX_SPAWN_SETSIGDEF
         | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
     spawn_call(
+        // SAFETY: attrs is initialized and flags contains supported spawn flags.
         unsafe { libc::posix_spawnattr_setflags(&raw mut attrs.0, flags.try_into().expect("spawn flags fit c_short")) },
         "spawn flags",
     )?;
     let mut pid: libc::pid_t = 0;
     spawn_call(
+        // SAFETY: all pointers reference live locals. The argument and environment arrays
+        // end in null pointers and reference live CStrings. posix_spawn does not modify them.
         unsafe {
             libc::posix_spawn(
                 &raw mut pid,
@@ -267,7 +291,9 @@ fn environment(env: &[(String, String)]) -> Result<(Vec<CString>, Option<OsStrin
 }
 
 fn set_nonblocking(fd: RawFd) -> Result<(), CommandError> {
+    // SAFETY: F_GETFL takes no variadic argument and does not dereference pointers.
     let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    // SAFETY: F_SETFL takes integer flags, not a pointer. Invalid descriptors return EBADF.
     if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
         return Err(system("nonblocking pipe", io::Error::last_os_error()));
     }
@@ -435,6 +461,7 @@ fn pump(
             (stdin.as_ref(), libc::POLLOUT),
         ]
         .map(|(file, events)| libc::pollfd { fd: file.map_or(-1, AsRawFd::as_raw_fd), events, revents: 0 });
+        // SAFETY: fds is a live array with the supplied length and writable revents fields.
         if unsafe {
             libc::poll(
                 fds.as_mut_ptr(),
@@ -594,9 +621,11 @@ mod tests {
             return;
         }
         let file = std::fs::File::open("/dev/null").unwrap();
+        // SAFETY: this test runs in a child process. LEAK_FD has no Rust owner.
         let fd = unsafe { libc::dup2(file.as_raw_fd(), LEAK_FD) };
         assert_eq!(fd, LEAK_FD);
         let result = quick(&["/bin/ls", "/dev/fd"]).unwrap();
+        // SAFETY: fd came from dup2 and has no Rust owner.
         unsafe { libc::close(fd) };
         let out = text(&result.stdout);
         assert!(!out.lines().any(|l| l == fd.to_string()), "fd {fd} leaked into the command: {out}");
@@ -615,6 +644,8 @@ mod tests {
             let stop = stop.clone();
             std::thread::spawn(move || {
                 while !stop.load(Ordering::Relaxed) {
+                    // SAFETY: null remains alive until this thread joins. The child process
+                    // isolates LEAK_FD from other tests, and no Rust value owns that descriptor.
                     unsafe {
                         libc::dup2(raw, LEAK_FD);
                         libc::close(LEAK_FD);
@@ -954,8 +985,13 @@ printf '%s\n' "$$" > "$1/leader"
     fn assert_gone(pids: &[libc::pid_t]) {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let alive: Vec<_> = pids.iter().copied()
-                .filter(|&p| unsafe { libc::kill(p, 0) } == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH))
+            let alive: Vec<_> = pids
+                .iter()
+                .copied()
+                .filter(|&p| {
+                    // SAFETY: signal zero only queries process existence and permission.
+                    (unsafe { libc::kill(p, 0) }) == 0 || io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+                })
                 .collect();
             if alive.is_empty() {
                 return;
@@ -1105,6 +1141,7 @@ printf '%s\n' "$$" > "$1/leader"
     fn pipe_ends_have_close_on_exec_set() {
         let (read, write) = pipe().unwrap();
         for end in [read, write] {
+            // SAFETY: end owns a live descriptor. F_GETFD takes no variadic argument.
             let flags = unsafe { libc::fcntl(end.as_raw_fd(), libc::F_GETFD) };
             assert!(flags >= 0);
             assert_ne!(flags & libc::FD_CLOEXEC, 0);
