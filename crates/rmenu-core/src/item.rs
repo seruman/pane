@@ -1,4 +1,4 @@
-//! Rows and the context handed to commands. Port of `Sources/MenuCore/MenuItem.swift`.
+//! This module defines rows and the context passed to commands.
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -7,8 +7,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub struct MenuItem {
     pub id: String,
     title: String,
-    /// Set only when it differs from the title: a plain line's value is its title, and
-    /// storing it twice would double a large input's memory.
     value: Option<String>,
     pub subtitle: Option<String>,
     pub search: Option<String>,

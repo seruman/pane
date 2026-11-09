@@ -1,4 +1,4 @@
-//! The highlight and marks, by identity. Port of `Sources/MenuCore/Selection.swift`.
+//! Selection tracks the highlight and marks by item identity.
 
 use std::collections::HashSet;
 
