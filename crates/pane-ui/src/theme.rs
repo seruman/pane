@@ -1,11 +1,11 @@
-//! The theme: a terminal [`Palette`] and the [`Theme`] tokens derived from it. Components read
-//! only these tokens, so changing a field restyles every component that uses it.
+//! A terminal [`Palette`] and a snapshot of the shared [`Theme`] tokens derived from it.
+//! Components also use fixed sizes, type styles, and opacity values.
 
 use rune::color::{srgb_decode, srgb_encode};
 use rune::{Color, TerminalColors, TextStyle};
 use rune_kit::Kit;
 
-/// A terminal theme: the colours a Rex theme is defined by.
+/// The background, foreground, cursor, and ANSI colours of a terminal theme.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct Palette {
@@ -14,7 +14,7 @@ pub struct Palette {
     pub foreground: Color,
     /// The cursor colour, which Rex uses as the interface accent.
     pub cursor: Color,
-    /// ANSI 0–7, then the bright 8–15.
+    /// ANSI 0 to 7, then the bright 8 to 15.
     pub ansi: [Color; 16],
     pub dark: bool,
 }
@@ -30,7 +30,7 @@ pub fn rgb(value: u32) -> Color {
     }
 }
 
-/// `a` moved `t` of the way toward `b`, mixed as sRGB values the way Rex's greys were measured.
+/// Mix `a` toward `b` by `t` in sRGB space.
 pub fn mix(a: Color, b: Color, t: f32) -> Color {
     let m = |x: f32, y: f32| srgb_decode(srgb_encode(x) + (srgb_encode(y) - srgb_encode(x)) * t);
     Color {
@@ -161,7 +161,7 @@ impl Palette {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct Radius {
-    /// Text fields, swatches and small boxes.
+    /// Text fields, select triggers, and small boxes.
     pub field: f32,
     /// Menu and palette rows.
     pub row: f32,
@@ -180,7 +180,7 @@ pub struct Type {
     /// A settings row's or menu row's title.
     pub row: TextStyle,
     pub caption: TextStyle,
-    /// Small labels: menu sections, badges.
+    /// Small labels, such as menu section headings.
     pub label: TextStyle,
     /// A heading above a group of controls.
     pub heading: TextStyle,
@@ -188,16 +188,17 @@ pub struct Type {
     pub mono: TextStyle,
 }
 
-/// Every token a component reads: colours derived from a [`Palette`], radii, type, and
-/// rune-kit's tokens in the same colours for the rune-kit components used inside.
+/// Shared colour, radius, and text-style tokens, plus a rune-kit theme in the same colours.
+/// Components also use fixed visual values that have no theme token.
 ///
-/// Build one per view with [`Theme::current`] or [`Theme::new`], then change any field to restyle:
-/// `let mut theme = Theme::current(dark); theme.radius.group = 8.0;`.
+/// [`Theme::current`] and [`Theme::new`] derive the fields and kit once. Rebuild the theme
+/// after changing its palette. Direct field edits affect subsequently built elements that
+/// read that field, but do not update other derived fields, the kit, or existing elements.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct Theme {
     pub palette: Palette,
-    /// The pane: the terminal background.
+    /// The pane's background colour, taken from the terminal.
     pub background: Color,
     /// Settings groups and cards, a shade off the pane.
     pub group: Color,

@@ -1,5 +1,5 @@
-//! Layout: the pane's page, sections, columns that stack when narrow, and the layers toasts and
-//! modals float on. None of them take a width: they wrap and stack by the room they get.
+//! Pages, columns that wrap in narrow panes, and layers for toasts and modals.
+//! These layouts fit the available width.
 
 use rune::{El, ScrollSpec, col, el, row, text};
 

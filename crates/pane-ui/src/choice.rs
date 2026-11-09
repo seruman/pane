@@ -1,5 +1,4 @@
-//! Picking one of several: a segmented control (which also serves as tabs) and a select that
-//! drops a menu from its trigger.
+//! Choose an option with a segmented control, also used as tabs, or a select menu.
 
 use std::rc::Rc;
 
