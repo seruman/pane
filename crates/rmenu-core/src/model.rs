@@ -56,9 +56,15 @@ pub enum TaskKind {
     Operation,
 }
 
+// Command limits match mmenu 7c8f662, Sources/MMenu/MenuModel.swift.
 pub const SOURCE_LIMITS: Limits = Limits { timeout: Duration::from_secs(30), output_bytes: 16 * 1024 * 1024 };
 pub const PREVIEW_LIMITS: Limits = Limits { timeout: Duration::from_secs(5), output_bytes: 512 * 1024 };
 pub const OPERATION_LIMITS: Limits = Limits { timeout: Duration::from_secs(30), output_bytes: 1024 * 1024 };
+
+// Preserve mmenu 7c8f662 MenuModel.swift preview debounce and stderr truncation.
+// These are compatibility choices, not measured optima for terminal interaction.
+const PREVIEW_DELAY: Duration = Duration::from_millis(60);
+const COMMAND_ERROR_BYTES: usize = 2048;
 
 #[derive(Clone, Debug)]
 pub enum Task {
@@ -167,7 +173,7 @@ pub enum Target {
 
 /// How a nonzero exit is shown: `Command exited 3: <first 2 KiB of stderr, trimmed>`.
 pub fn command_failure(result: &CommandResult) -> String {
-    let stderr = &result.stderr[..result.stderr.len().min(2048)];
+    let stderr = &result.stderr[..result.stderr.len().min(COMMAND_ERROR_BYTES)];
     let detail = String::from_utf8_lossy(stderr);
     let detail = detail.trim();
     if detail.is_empty() {
@@ -886,7 +892,7 @@ impl Model {
             token: self.preview_generation,
             argv,
             env: context.environment(),
-            delay: Duration::from_millis(60),
+            delay: PREVIEW_DELAY,
         }));
     }
 

@@ -183,6 +183,7 @@ impl Menu {
     }
 }
 
+// The 16 ms publication target comes from mmenu 7c8f662, Sources/MMenu/MenuModel.swift.
 // Target roughly one stdin publication per 60 Hz frame. Spend at most half that interval
 // draining queued messages before yielding to input and drawing. A reducer call can overrun it.
 // The ignored poll_budget_measurement test measures draining and verifies the follow-up wake.
