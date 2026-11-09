@@ -2,11 +2,13 @@ mod cli;
 mod host;
 mod view;
 
+use std::cell::RefCell;
 use std::io::{IsTerminal, Write};
+use std::rc::Rc;
 
 use clap::Parser;
 
-use host::{Menu, OUTCOME};
+use host::Menu;
 use rmenu_core::model::Outcome;
 use rune::{App, AppSpec, Tx};
 
@@ -24,14 +26,16 @@ fn main() {
         on_key: Some(view::key),
         ..AppSpec::new("rmenu", (640.0, 400.0), || unreachable!("init is given"), view::view)
     };
+    let outcome = Rc::new(RefCell::new(None));
+    let menu_outcome = outcome.clone();
     let started = App::new(spec)
         .terminal()
-        .init(move || Menu::new(launch))
+        .init(move || Menu::new(launch, menu_outcome))
         .args(Vec::new())
         .on_quit(Menu::quit)
         .try_run();
     if let Err(error) = started { exit(Outcome::Failed(error)); }
-    let outcome = OUTCOME.lock().unwrap().take().unwrap_or(Outcome::Cancelled);
+    let outcome = outcome.borrow_mut().take().unwrap_or(Outcome::Cancelled);
     exit(outcome);
 }
 

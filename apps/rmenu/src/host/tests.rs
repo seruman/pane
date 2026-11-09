@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 fn menu_without_stdin() -> Menu {
     let launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
-    let mut menu = Menu::new(launch);
+    let mut menu = Menu::new(launch, Rc::default());
     assert!(matches!(menu.events.try_recv().unwrap(), Message::Start(effects)
         if effects.iter().any(|e| matches!(e, Effect::ReadStdin))));
     assert!(menu.events.try_recv().is_err());
@@ -20,6 +20,23 @@ fn poll_until(menu: &mut Menu, ready: impl Fn(&Menu) -> bool) {
         std::thread::yield_now();
     }
     menu.stop();
+}
+
+#[test]
+fn each_menu_owns_its_result_and_finishes_only_once() {
+    let mut first = menu_without_stdin();
+    let mut second = menu_without_stdin();
+    let first_result = first.outcome.clone();
+    let second_result = second.outcome.clone();
+    first.apply(vec![Effect::Finish(Outcome::Chosen(b"chosen\\n".to_vec()))], &mut Tx::default());
+    first.quit(&mut Tx::default());
+    first.apply(vec![Effect::Finish(Outcome::Failed("late".into()))], &mut Tx::default());
+    assert!(second_result.borrow().is_none());
+    second.quit(&mut Tx::default());
+    drop(first);
+    drop(second);
+    assert_eq!(first_result.borrow_mut().take(), Some(Outcome::Chosen(b"chosen\\n".to_vec())));
+    assert_eq!(second_result.borrow_mut().take(), Some(Outcome::Cancelled));
 }
 
 #[test]

@@ -4,8 +4,9 @@
 #[cfg(test)]
 mod tests;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -16,8 +17,6 @@ use rmenu_core::item::MenuItem;
 use rmenu_core::model::{Effect, Event, Model, Outcome, Task, TaskKind, command_failure, SOURCE_LIMITS, PREVIEW_LIMITS, OPERATION_LIMITS};
 use rmenu_core::record::RecordDecoder;
 use rune::{TextEdit, Tx, Waker};
-
-pub static OUTCOME: Mutex<Option<Outcome>> = Mutex::new(None);
 
 struct Running {
     cancel: Cancel,
@@ -36,6 +35,7 @@ pub struct Menu {
     pub model: std::mem::ManuallyDrop<Model>,
     pub field: TextEdit,
     pub appearance: crate::cli::Appearance,
+    outcome: Rc<RefCell<Option<Outcome>>>,
     events: Receiver<Message>,
     sender: Sender<Message>,
     waker: Option<Waker>,
@@ -48,13 +48,13 @@ pub struct Menu {
 }
 
 impl Menu {
-    pub fn new(launch: crate::cli::Launch) -> Menu {
+    pub fn new(launch: crate::cli::Launch, outcome: Rc<RefCell<Option<Outcome>>>) -> Menu {
         let (model, effects) = Model::new(launch.options);
         let (sender, events) = channel();
         sender.send(Message::Start(effects)).expect("receiver was just created");
         let mut field = TextEdit::new(model.query());
         field.focused = true;
-        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, events, sender, waker: None,
+        Menu { model: std::mem::ManuallyDrop::new(model), field, appearance: launch.appearance, outcome, events, sender, waker: None,
                tasks: HashMap::new(), stdin: None, retired: Vec::new(), revealed: None }
     }
 
@@ -91,7 +91,7 @@ impl Menu {
                 None => break,
             }
             changed = true;
-            if OUTCOME.lock().unwrap().is_some() { break; }
+            if self.outcome.borrow().is_some() { break; }
         }
         changed
     }
@@ -133,7 +133,7 @@ impl Menu {
                 Effect::Beep => {}
                 Effect::Finish(result) => {
                     self.stop();
-                    let mut outcome = OUTCOME.lock().unwrap();
+                    let mut outcome = self.outcome.borrow_mut();
                     if outcome.is_none() { *outcome = Some(result); }
                     tx.quit();
                 }
@@ -175,7 +175,7 @@ impl Menu {
     /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at
     /// the root would, with no output.
     pub fn quit(&mut self, tx: &mut Tx) {
-        if OUTCOME.lock().unwrap().is_none() {
+        if self.outcome.borrow().is_none() {
             self.handle(Event::Nav(rmenu_core::model::Nav::Cancel), tx);
         }
     }
