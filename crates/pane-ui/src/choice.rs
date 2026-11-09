@@ -139,8 +139,7 @@ pub struct Select {
     placeholder: String,
     open: bool,
     width: Option<f32>,
-    toggle: Option<Rc<dyn Fn(El) -> El>>,
-    close: Option<Rc<dyn Fn(El) -> El>>,
+    toggle: Option<(Transform, Transform)>,
     choose: Option<Rc<dyn Fn(usize) -> Transform>>,
 }
 
@@ -153,7 +152,6 @@ impl Select {
             open: false,
             width: Some(200.0),
             toggle: None,
-            close: None,
             choose: None,
         }
     }
@@ -184,14 +182,10 @@ impl Select {
     pub fn on_toggle<S: 'static>(mut self, f: impl Fn(&mut S) + 'static) -> Self {
         let f = Rc::new(f);
         let close = f.clone();
-        self.toggle = Some(Rc::new(move |e: El| {
-            let f = f.clone();
-            e.on_press(move |s: &mut S| f(s))
-        }));
-        self.close = Some(Rc::new(move |e: El| {
-            let f = close.clone();
-            e.modal(true, move |s: &mut S| f(s))
-        }));
+        self.toggle = Some((
+            Box::new(move |e: El| e.on_press(move |s: &mut S| f(s))),
+            Box::new(move |e: El| e.modal(true, move |s: &mut S| close(s))),
+        ));
         self
     }
 
@@ -242,9 +236,10 @@ impl Select {
             Some(w) => trigger.w(w).shrink(),
             None => trigger.w_full(),
         };
-        if let Some(toggle) = &self.toggle {
-            trigger = toggle(trigger);
-        }
+        let (trigger, close) = match self.toggle {
+            Some((toggle, close)) => (toggle(trigger), Some(close)),
+            None => (trigger, None),
+        };
         if self.open {
             let mut menu = popover(&format!("{key}-menu"), theme)
                 .min_w(180.0)
@@ -261,7 +256,7 @@ impl Select {
                 }
                 menu = menu.child(item);
             }
-            if let Some(close) = &self.close {
+            if let Some(close) = close {
                 menu = close(menu);
             }
             layer.push(menu);

@@ -153,6 +153,46 @@ fn an_open_select_reads_as_expanded_not_checked() {
 }
 
 #[test]
+fn select_toggle_opens_and_escape_closes_repeatedly() {
+    #[derive(Default)]
+    struct State {
+        open: bool,
+        toggles: usize,
+    }
+    fn view(s: &State, _: &mut rune::Cx<State>) -> rune::El {
+        let theme = Theme::new(Palette::merino_dark());
+        let mut layer = Vec::new();
+        let select = crate::Select::new(["Light", "Dark"])
+            .open(s.open)
+            .on_toggle(|s: &mut State| {
+                s.open = !s.open;
+                s.toggles += 1;
+            })
+            .build("theme", &theme, &mut layer);
+        crate::Page::new()
+            .child(select)
+            .overlays(layer)
+            .build(&theme)
+    }
+    let mut rt = rune::Runtime::new(State::default(), view, (400.0, 300.0), rune::Env::default());
+    for cycle in 0..2 {
+        rt.frame(cycle as f64);
+        let (x, y) = rt.find("theme").unwrap();
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+        rt.frame(cycle as f64 + 0.1);
+        assert!(rt.state.open);
+        rt.key(rune::KeyEvent {
+            key: rune::Key::Escape,
+            mods: rune::Mods::default(),
+        });
+        rt.frame(cycle as f64 + 0.2);
+        assert!(!rt.state.open);
+        assert_eq!(rt.state.toggles, 2 * (cycle + 1));
+    }
+}
+
+#[test]
 fn a_menu_item_reads_as_checked_until_checked_false() {
     let on = a11y(
         |t| crate::MenuItem::new("Wrap").checked(true).build("wrap", t),
