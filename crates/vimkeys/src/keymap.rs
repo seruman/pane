@@ -263,16 +263,25 @@ impl<A> Command<A> {
     }
 
     /// Hints list the app's bindings first, then Vim's commands, then its motions.
-    fn group(&self) -> usize {
+    fn group(&self) -> HintGroup {
         match self {
             Command::App(_)
             | Command::Operator(Operator::App(_))
-            | Command::Lines(Operator::App(_)) => 0,
-            Command::Motion(_) => 2,
-            _ => 1,
+            | Command::Lines(Operator::App(_)) => HintGroup::App,
+            Command::Motion(_) => HintGroup::Motion,
+            _ => HintGroup::Vim,
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HintGroup {
+    App,
+    Vim,
+    Motion,
+}
+
+pub type HintGroups = Vec<(HintGroup, Vec<Hint>)>;
 
 /// A key that can come next and what it does, for a which-key panel.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -617,8 +626,11 @@ impl<A: Clone> Keymap<A> {
     /// Every described binding in `table`, grouped as [`Vim::hints`](crate::Vim::hints) groups
     /// them: the app's, then Vim's commands. Motions are left out; they'd crowd a list of
     /// everything.
-    pub fn hints(&self, table: Table) -> Vec<Vec<Hint>> {
-        self.next(table, &[], false)
+    pub fn hints(&self, table: Table) -> HintGroups {
+        self.next(table, &[])
+            .into_iter()
+            .filter(|(group, _)| *group != HintGroup::Motion)
+            .collect()
     }
 
     pub(crate) fn render(&self, keys: &[Stroke]) -> String {
@@ -641,22 +653,28 @@ impl<A: Clone> Keymap<A> {
         lookup(&self.objects, typed, self.leader)
     }
 
-    /// The described bindings in `table` that `typed` starts, each by the keys still to come,
-    /// grouped: the app's, Vim's commands, Vim's motions. With nothing typed, motions only when
-    /// `motions` is set.
-    pub(crate) fn next(&self, table: Table, typed: &[Stroke], motions: bool) -> Vec<Vec<Hint>> {
-        let mut groups = vec![Vec::new(), Vec::new(), Vec::new()];
+    pub(crate) fn next(&self, table: Table, typed: &[Stroke]) -> HintGroups {
+        let (mut app, mut vim, mut motion) = (Vec::new(), Vec::new(), Vec::new());
         for b in self.list(table) {
             let Some(what) = b.what else { continue };
-            let group = b.command.group();
-            if !starts(&b.keys, typed, self.leader) || (typed.is_empty() && group == 2 && !motions)
-            {
+            if !starts(&b.keys, typed, self.leader) {
                 continue;
             }
-            groups[group].push(hint(&self.render(&b.keys[typed.len()..]), what));
+            let group = match b.command.group() {
+                HintGroup::App => &mut app,
+                HintGroup::Vim => &mut vim,
+                HintGroup::Motion => &mut motion,
+            };
+            group.push(hint(&self.render(&b.keys[typed.len()..]), what));
         }
-        groups.retain(|g| !g.is_empty());
-        groups
+        vec![
+            (HintGroup::App, app),
+            (HintGroup::Vim, vim),
+            (HintGroup::Motion, motion),
+        ]
+        .into_iter()
+        .filter(|(_, hints)| !hints.is_empty())
+        .collect()
     }
 
     pub(crate) fn next_objects(&self, typed: &[Stroke]) -> Vec<Hint> {

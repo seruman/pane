@@ -18,7 +18,8 @@ use rune::{Key, KeyEvent};
 
 use keymap::Lookup;
 pub use keymap::{
-    Command, Find, Hint, Keymap, Motion, NoAction, Object, Operator, Stroke, Table, hint,
+    Command, Find, Hint, HintGroup, HintGroups, Keymap, Motion, NoAction, Object, Operator, Stroke,
+    Table, hint,
 };
 
 /// The largest count Vim takes, as Vim caps its own. A motion repeats once per count, so a
@@ -246,7 +247,7 @@ impl<A: Clone> Vim<A> {
     /// `gy`, `yi`, `]`, the leader) or the visual mode, and the bound keys that can come next,
     /// grouped: the app's, then Vim's commands, then motions. `None` in Normal mode with
     /// nothing half typed, and while a search is being typed.
-    pub fn hints(&self) -> Option<(String, Vec<Vec<Hint>>)> {
+    pub fn hints(&self) -> Option<(String, HintGroups)> {
         let header = self.pending();
         match &self.pending {
             Pending::None if self.visual() && self.count.is_none() => Some((
@@ -256,33 +257,45 @@ impl<A: Clone> Vim<A> {
                     "v-line"
                 }
                 .into(),
-                self.keymap.next(Table::Visual, &[], false),
+                self.keymap.hints(Table::Visual),
             )),
             // A count waits for what it counts: a motion, an operator, an action.
             Pending::None if self.count.is_some() => {
-                Some((header, self.keymap.next(self.table(), &[], true)))
+                Some((header, self.keymap.next(self.table(), &[])))
             }
             Pending::None => None,
-            Pending::Keys(keys) => Some((header, self.keymap.next(self.table(), keys, true))),
-            Pending::Operator { keys, typed, .. } => {
+            Pending::Keys(keys) => Some((header, self.keymap.next(self.table(), keys))),
+            Pending::Operator {
+                op, keys, typed, ..
+            } => {
                 let mut groups = Vec::new();
                 if typed.is_empty() {
-                    groups.push(vec![hint(&self.keymap.render(keys), "The line")]);
+                    let group = match op {
+                        Operator::App(_) => HintGroup::App,
+                        _ => HintGroup::Vim,
+                    };
+                    groups.push((group, vec![hint(&self.keymap.render(keys), "The line")]));
                 }
-                groups.extend(self.keymap.next(Table::Pending, typed, true));
+                groups.extend(self.keymap.next(Table::Pending, typed));
                 Some((header, groups))
             }
-            Pending::Object { typed, .. } => Some((header, vec![self.keymap.next_objects(typed)])),
+            Pending::Object { typed, .. } => Some((
+                header,
+                vec![(HintGroup::Motion, self.keymap.next_objects(typed))],
+            )),
             Pending::Find { find, .. } => Some((
                 header,
-                vec![vec![hint(
-                    "any",
-                    if find.till() {
-                        "The character to stop before"
-                    } else {
-                        "The character to go to"
-                    },
-                )]],
+                vec![(
+                    HintGroup::Motion,
+                    vec![hint(
+                        "any",
+                        if find.till() {
+                            "The character to stop before"
+                        } else {
+                            "The character to go to"
+                        },
+                    )],
+                )],
             )),
         }
     }

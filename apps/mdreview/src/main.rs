@@ -35,7 +35,9 @@ use rune::{
 };
 use rune_kit::markdown::Highlight;
 use rune_kit::{Markdown, MarkdownStyle};
-use vimkeys::{Hint, Keymap, Operator, Stroke, Table, Vim, VimEffect, VimMode, hint};
+use vimkeys::{
+    Hint, HintGroup, HintGroups, Keymap, Operator, Stroke, Table, Vim, VimEffect, VimMode, hint,
+};
 
 use page::Page;
 use review::{Comment, CommentId, Kind, Review};
@@ -868,17 +870,20 @@ fn view(s: &App_, cx: &mut Cx<App_>) -> El {
 /// The keys that can follow what's been typed, for the which-key panel, all from the keymap:
 /// what Vim has half typed (`y`, `gy`, `ci`, `]`, the leader) or the visual mode, or every key
 /// after `\\?`. `None` when nothing is half typed.
-fn pending_keys(s: &App_) -> Option<(String, Vec<Vec<Hint>>)> {
+fn pending_keys(s: &App_) -> Option<(String, HintGroups)> {
     if s.composer.is_some() || s.cmdline.is_some() {
         return None;
     }
     if s.all_keys {
         let mut groups = s.vim.keymap().hints(Table::Normal);
-        groups.push(vec![
-            hint(":wq", "Send the review and quit"),
-            hint(":q", "Quit, with nothing to send"),
-            hint(":q!", "Quit without sending"),
-        ]);
+        groups.push((
+            HintGroup::App,
+            vec![
+                hint(":wq", "Send the review and quit"),
+                hint(":q", "Quit, with nothing to send"),
+                hint(":q!", "Quit without sending"),
+            ],
+        ));
         return Some(("keys".into(), groups));
     }
     s.vim.hints()
@@ -908,7 +913,7 @@ fn which_key(s: &App_, theme: &Theme) -> Option<El> {
             )
     };
     let mut list = col().w_full();
-    for (i, group) in groups.iter().enumerate() {
+    for (i, (_, group)) in groups.iter().enumerate() {
         if i > 0 {
             list = list.child(el().h(1.0).w_full().my(6.0).fill(theme.separator));
         }

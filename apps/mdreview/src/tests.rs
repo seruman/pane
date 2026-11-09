@@ -338,19 +338,27 @@ fn quitting() {
 
 #[test]
 fn which_key_shows_what_can_follow() {
-    let keys = |rt: &Runtime<App_>, group: usize| -> Vec<String> {
-        pending_keys(&rt.state).unwrap().1[group]
-            .iter()
-            .map(|h| h.keys.clone())
+    let keys = |rt: &Runtime<App_>, kind: HintGroup| -> Vec<String> {
+        pending_keys(&rt.state)
+            .unwrap()
+            .1
+            .into_iter()
+            .filter(|(group, _)| *group == kind)
+            .flat_map(|(_, hints)| hints)
+            .map(|h| h.keys)
             .collect()
     };
     let mut rt = runtime(SRC);
     assert!(rt.find("which-key").is_none());
     press(&mut rt, "v");
     assert!(rt.find("which-key").is_some(), "a selection lists its keys");
-    assert_eq!(keys(&rt, 0), ["c", "d"], "the review's operators first");
+    assert_eq!(
+        keys(&rt, HintGroup::App),
+        ["c", "d"],
+        "the review's operators first"
+    );
     assert!(
-        keys(&rt, 1).contains(&"gy".to_owned()),
+        keys(&rt, HintGroup::Vim).contains(&"gy".to_owned()),
         "then Vim's, Markdown yank included"
     );
     key(&mut rt, Key::Escape);
@@ -365,19 +373,26 @@ fn which_key_shows_what_can_follow() {
     press(&mut rt, "]");
     assert_eq!(
         pending_keys(&rt.state).unwrap(),
-        ("]".to_owned(), vec![vec![hint("c", "Next comment")]])
+        (
+            "]".to_owned(),
+            vec![(HintGroup::App, vec![hint("c", "Next comment")])]
+        )
     );
     key(&mut rt, Key::Escape);
     press(&mut rt, "\\");
-    assert_eq!(keys(&rt, 0), ["x", "?"], "the leader's bindings");
+    assert_eq!(
+        keys(&rt, HintGroup::App),
+        ["x", "?"],
+        "the leader's bindings"
+    );
     key(&mut rt, Key::Escape);
 
     // `c` is an operator: it waits for a motion, `c` takes the line.
     press(&mut rt, "c");
     let (typed, groups) = pending_keys(&rt.state).unwrap();
     assert_eq!(
-        (typed.as_str(), groups[0][0].clone()),
-        ("c", hint("c", "The line"))
+        (typed.as_str(), groups[0].clone()),
+        ("c", (HintGroup::App, vec![hint("c", "The line")]))
     );
     key(&mut rt, Key::Escape);
     assert!(

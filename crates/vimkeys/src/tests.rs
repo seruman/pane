@@ -320,6 +320,14 @@ fn gy_text_object_after_a_visual_yank() {
     assert_eq!(&TEXT[range], "fn");
 }
 
+fn hints_for(groups: &HintGroups, kind: HintGroup) -> Vec<Hint> {
+    groups
+        .iter()
+        .filter(|(group, _)| *group == kind)
+        .flat_map(|(_, hints)| hints.iter().cloned())
+        .collect()
+}
+
 #[test]
 fn hints_follow_what_is_typed() {
     let mut v = Vim::default();
@@ -327,7 +335,7 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "y");
-    assert_eq!(groups[0][0], hint("y", "The line"));
+    assert_eq!(hints_for(&groups, HintGroup::Vim)[0], hint("y", "The line"));
     press(&mut v, "i");
     assert_eq!(v.hints().unwrap().0, "yi");
     v.key(
@@ -342,7 +350,10 @@ fn hints_follow_what_is_typed() {
     press(&mut v, "y");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(
-        (typed.as_str(), groups[0][0].clone()),
+        (
+            typed.as_str(),
+            hints_for(&groups, HintGroup::Vim)[0].clone()
+        ),
         ("gy", hint("gy", "The line"))
     );
     press(&mut v, "a");
@@ -355,7 +366,7 @@ fn hints_follow_what_is_typed() {
     assert!(
         groups
             .iter()
-            .flatten()
+            .flat_map(|(_, hints)| hints)
             .any(|h| *h == hint("gy", "Yank as source"))
     );
 }
@@ -494,38 +505,68 @@ fn app_actions_sequences_and_the_leader() {
 }
 
 #[test]
+fn hint_groups_keep_their_kind_when_other_groups_are_empty() {
+    let mut v = Vim::default();
+    press(&mut v, "v");
+    let groups = v.hints().unwrap().1;
+    assert_eq!(groups, v.keymap().hints(Table::Visual));
+    assert_eq!(
+        groups.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+        [HintGroup::Vim]
+    );
+    press(&mut v, "2");
+    let groups = v.hints().unwrap().1;
+    assert_eq!(
+        groups.iter().map(|(kind, _)| *kind).collect::<Vec<_>>(),
+        [HintGroup::Vim, HintGroup::Motion]
+    );
+}
+
+#[test]
 fn hints_come_from_the_keymap() {
     let mut v = app_vim();
     press_app(&mut v, "]");
     assert_eq!(
         v.hints().unwrap(),
-        ("]".to_owned(), vec![vec![hint("c", "Next comment")]])
+        (
+            "]".to_owned(),
+            vec![(HintGroup::App, vec![hint("c", "Next comment")])]
+        )
     );
     press_app(&mut v, "x");
     press_app(&mut v, "\\");
-    assert_eq!(v.hints().unwrap().1, vec![vec![hint("q", "Quit")]]);
+    assert_eq!(
+        v.hints().unwrap().1,
+        vec![(HintGroup::App, vec![hint("q", "Quit")])]
+    );
     press_app(&mut v, "x");
 
     // In Visual mode the app's operator comes first, then Vim's.
     press_app(&mut v, "v");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "visual");
-    assert_eq!(groups[0], vec![hint("c", "Comment")]);
-    assert!(groups[1].contains(&hint("gy", "Yank as source")));
-    assert!(groups[1].contains(&hint("o", "Go to the other end")));
+    assert_eq!(
+        hints_for(&groups, HintGroup::App),
+        vec![hint("c", "Comment")]
+    );
+    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("gy", "Yank as source")));
+    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("o", "Go to the other end")));
     press_app(&mut v, "v");
 
     // After an operator: the line, then text objects and motions.
     press_app(&mut v, "c");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "c");
-    assert_eq!(groups[0], vec![hint("c", "The line")]);
-    assert!(groups[1].contains(&hint("i", "Inside an object…")));
-    assert!(groups[2].contains(&hint("w", "To the next word")));
+    assert_eq!(
+        hints_for(&groups, HintGroup::App),
+        vec![hint("c", "The line")]
+    );
+    assert!(hints_for(&groups, HintGroup::Vim).contains(&hint("i", "Inside an object…")));
+    assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("w", "To the next word")));
     press_app(&mut v, "i");
     let (typed, groups) = v.hints().unwrap();
     assert_eq!(typed, "ci");
-    assert!(groups[0].contains(&hint("p", "Paragraph")));
+    assert!(hints_for(&groups, HintGroup::Motion).contains(&hint("p", "Paragraph")));
 }
 
 #[test]
@@ -782,11 +823,15 @@ fn hints_show_what_a_count_can_take() {
     let (typed, groups) = v.hints().expect("a count is half typed");
     assert_eq!(typed, "3");
     assert!(
-        groups.iter().flatten().any(|h| h.keys == "w"),
+        hints_for(&groups, HintGroup::Motion)
+            .iter()
+            .any(|h| h.keys == "w"),
         "motions take a count"
     );
     assert!(
-        groups.iter().flatten().any(|h| h.keys == "y"),
+        hints_for(&groups, HintGroup::Vim)
+            .iter()
+            .any(|h| h.keys == "y"),
         "so do operators"
     );
     v.key(
