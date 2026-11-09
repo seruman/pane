@@ -303,6 +303,13 @@ enum Intent {
     Push(SourceId),
 }
 
+#[derive(PartialEq, Eq)]
+enum IntentOutcome {
+    Deferred,
+    Refused,
+    Applied,
+}
+
 pub struct Model {
     options: Options,
     effects: Vec<Effect>,
@@ -507,7 +514,7 @@ impl Model {
             Nav::Down => self.move_by(1),
             Nav::PageUp => self.move_by(-rows),
             Nav::PageDown => self.move_by(rows),
-            Nav::Accept => self.accept("accept".into()),
+            Nav::Accept => { self.apply_intent(Intent::Accept("accept".into())); },
             Nav::Back => {
                 if self.levels.is_empty() { self.cancel() } else { self.pop() }
             }
@@ -597,7 +604,7 @@ impl Model {
             return;
         }
         match &binding.action {
-            BindingAction::Accept => self.accept(binding.action_name().to_owned()),
+            BindingAction::Accept => { self.apply_intent(Intent::Accept(binding.action_name().to_owned())); },
             BindingAction::Copy => {
                 if !self.can_act() {
                     self.effects.push(Effect::Beep);
@@ -612,7 +619,7 @@ impl Model {
                 self.current.message = Some(Status::Ack(format!("Copied {}", values.len())));
             }
             BindingAction::Source { source } => self.switch_source(source),
-            BindingAction::Push { source } => self.push(source.clone()),
+            BindingAction::Push { source } => { self.apply_intent(Intent::Push(source.clone())); },
             BindingAction::Reload => self.reload(),
             BindingAction::TogglePreview => {
                 if self.preview_command().is_none() {
@@ -641,20 +648,31 @@ impl Model {
         self.load(&source, LoadKind::Replace);
     }
 
-    fn push(&mut self, source: SourceId) {
-        if !self.can_act() && self.can_navigate() {
-            self.current.phase.defer(Intent::Push(source));
-            return;
+    fn apply_intent(&mut self, intent: Intent) -> IntentOutcome {
+        let blocked = matches!(intent, Intent::Accept(_)) && self.operation.is_some();
+        if !self.can_act() && self.can_navigate() && !blocked {
+            self.current.phase.defer(intent);
+            return IntentOutcome::Deferred;
         }
-        if !self.can_act() {
+        if !self.can_act() || blocked {
             self.effects.push(Effect::Beep);
-            return;
+            return IntentOutcome::Refused;
         }
         let picked = self.chosen();
         if picked.is_empty() {
             self.effects.push(Effect::Beep);
-            return;
+            return IntentOutcome::Refused;
         }
+        match intent {
+            Intent::Accept(action) => self.accept(action, picked),
+            Intent::Push(source) => {
+                self.push(source, picked);
+                IntentOutcome::Applied
+            }
+        }
+    }
+
+    fn push(&mut self, source: SourceId, picked: Vec<MenuItem>) {
         let stdin_changed = matches!(self.current.input, Input::Stdin)
             && matches!(self.current.phase, Phase::Matching(_) | Phase::CatchUp);
         let child = Level::new(String::new(), self.current.shown.clone());
@@ -814,22 +832,11 @@ impl Model {
         shown.query = Some(run.query);
         shown.source_generation = Some(self.current.source_generation);
         self.update_preview();
-        if self.can_act() && let Some(intent) = run.intent {
-            match intent {
-                Intent::Accept(action) => {
-                    self.accept(action);
-                    if self.closing {
-                        return;
-                    }
-                }
-                Intent::Push(source) => {
-                    let depth = self.levels.len();
-                    self.push(source);
-                    if self.levels.len() != depth {
-                        return;
-                    }
-                }
-            }
+        if self.can_act()
+            && let Some(intent) = run.intent
+            && self.apply_intent(intent) == IntentOutcome::Applied
+        {
+            return;
         }
         if run.catch_up {
             self.request_search(true);
@@ -922,20 +929,7 @@ impl Model {
         }
     }
 
-    fn accept(&mut self, action: String) {
-        if !self.can_act() && self.can_navigate() && self.operation.is_none() {
-            self.current.phase.defer(Intent::Accept(action));
-            return;
-        }
-        if !self.can_act() || self.operation.is_some() {
-            self.effects.push(Effect::Beep);
-            return;
-        }
-        let picked = self.chosen();
-        if picked.is_empty() {
-            self.effects.push(Effect::Beep);
-            return;
-        }
+    fn accept(&mut self, action: String, picked: Vec<MenuItem>) -> IntentOutcome {
         let items = match self.options.configuration.marks() {
             MarkScope::Level => picked.clone(),
             MarkScope::Global => {
@@ -963,11 +957,12 @@ impl Model {
                 let hint = if self.options.output == OutputFormat::Nul { "" } else { " or --print0" };
                 self.current.message = Some(Status::Error(format!("A selected value contains the output delimiter; use --json{hint}")));
                 self.effects.push(Effect::Beep);
-                return;
+                return IntentOutcome::Refused;
             }
             items.iter().map(|i| format!("{}{delimiter}", i.value())).collect::<String>().into_bytes()
         };
         self.finish(Outcome::Chosen(output));
+        IntentOutcome::Applied
     }
 
     fn cancel(&mut self) {
