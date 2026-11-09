@@ -19,6 +19,15 @@ pub enum OutputFormat { Lines, Nul, Json }
 /// its list API can key only visible rows.
 pub const DEFAULT_LIST_CAP: usize = 5_000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListState<'a> {
+    Rows(usize),
+    Failed(&'a str),
+    Loading,
+    Searching,
+    Empty,
+}
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub configuration: MenuConfiguration,
@@ -339,6 +348,15 @@ impl Model {
 
     /// How many result rows are shown.
     pub fn result_count(&self) -> usize { self.shown.results.len() }
+
+    pub fn list_state(&self) -> ListState<'_> {
+        let count = self.listed_count();
+        if count > 0 { ListState::Rows(count) }
+        else if self.input_failed() { ListState::Failed(self.message().unwrap_or("Input failed")) }
+        else if self.loading() { ListState::Loading }
+        else if self.is_searching() { ListState::Searching }
+        else { ListState::Empty }
+    }
 
     pub fn listed_row(&self, id: &str) -> Option<usize> {
         (0..self.listed_count()).find(|&row| self.result(row).id == id)

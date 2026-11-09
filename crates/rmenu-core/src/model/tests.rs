@@ -11,6 +11,27 @@ use crate::record::RecordDecoder;
 use crate::command::ExitStatus;
 
 #[test]
+fn list_state_tracks_loading_search_empty_rows_and_failure() {
+    let mut h = Harness::new(options(json!({})));
+    assert_eq!(h.model.list_state(), ListState::Loading);
+    h.stdin_done();
+    assert_eq!(h.model.list_state(), ListState::Searching);
+    h.settle();
+    assert_eq!(h.model.list_state(), ListState::Empty);
+    let mut h = Harness::new(options(json!({})));
+    h.stdin("alpha\n");
+    h.stdin_done();
+    h.settle();
+    assert_eq!(h.model.list_state(), ListState::Rows(1));
+    h.query("missing");
+    assert_eq!(h.model.list_state(), ListState::Rows(1));
+    h.settle();
+    assert_eq!(h.model.list_state(), ListState::Empty);
+    h.send(Event::StdinFailed("broken input".into()));
+    assert_eq!(h.model.list_state(), ListState::Failed("broken input"));
+}
+
+#[test]
 fn preview_results_are_stored_as_plain_text() {
     let mut h = Harness::new(options(json!({"preview": ["preview"]})));
     h.stdin("alpha\nbeta\n");

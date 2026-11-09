@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use rmenu_core::config::KeyChord;
-use rmenu_core::model::{Event, Nav, Target};
+use rmenu_core::model::{Event, ListState, Nav, Target};
 use rune::tok;
 use rune::{Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, Span, TextStyle, Tx, col, el, rich, row, text, text_input};
 
@@ -132,21 +132,15 @@ fn source_strip(menu: &Menu, c: &Palette) -> El {
 
 fn results(menu: &Menu, c: &Palette) -> El {
     let model = &menu.model;
-    let count = model.listed_count();
-    if count == 0 {
-        let (message, color) = if model.input_failed() {
-            // The whole error, wrapped, where there's room for it; the footer only has a line.
-            (model.message().unwrap_or("Input failed"), c.error)
-        } else if model.loading() {
-            ("Loading…", c.secondary)
-        } else if model.is_searching() {
-            ("", c.secondary)
-        } else {
-            ("No matches", c.secondary)
-        };
-        return col().grow(1.0).pt(28.0).px(24.0).items_center()
-            .child(text(message.to_owned()).font(TITLE).color(color).wrap().max_lines(6));
-    }
+    let empty = |message: &str, color| col().grow(1.0).pt(28.0).px(24.0).items_center()
+        .child(text(message.to_owned()).font(TITLE).color(color).wrap().max_lines(6));
+    let count = match model.list_state() {
+        ListState::Rows(count) => count,
+        ListState::Failed(message) => return empty(message, c.error),
+        ListState::Loading => return empty("Loading…", c.secondary),
+        ListState::Searching => return empty("", c.secondary),
+        ListState::Empty => return empty("No matches", c.secondary),
+    };
     let c = *c;
     let rows = col().key(ROWS_KEY).w_full().items_stretch().growth(GrowthSpec::default())
         .virtual_rows(count, ROW_H,
