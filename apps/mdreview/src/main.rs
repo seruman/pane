@@ -1,24 +1,21 @@
-//! Review a Markdown document in a terminal pane, the way a pull request is reviewed: select
-//! text with Vim's keys, comment on it, and the comment shows under its block as a thread does on
-//! GitHub. `:wq` writes the review out as Markdown feedback, for the agent that wrote the
-//! document (or anyone).
+//! Review Markdown with Vim keys and write feedback as Markdown.
+//! Comments appear below the blocks they refer to.
 //!
 //! ```sh
-//! RUNE_TERMINAL=1 cargo run --release -p mdreview -- PLAN.md            # feedback to stdout
-//! RUNE_TERMINAL=1 cargo run --release -p mdreview -- PLAN.md -o out.md  # or to a file
-//! some-agent | RUNE_TERMINAL=1 mdreview -                               # read stdin
+//! RUNE_TERMINAL=1 cargo run --release -p mdreview -- README.md
+//! RUNE_TERMINAL=1 cargo run --release -p mdreview -- README.md -o out.md
+//! some-agent | RUNE_TERMINAL=1 mdreview -
 //! ```
 //!
-//! Read with `vimkeys`'s keys. `c` and `d` are operators. `c` comments on what its motion,
-//! object or selection covers, and `d` marks it to be removed. `cc` and `dd` take the cursor's
-//! line. `C` adds a general comment about the whole document. `]c` and `[c` step through the
-//! comments. On a comment, Enter or `\e` edits it and `\x` deletes it. `Tab` lists every
-//! comment beside the page. While keys are half typed (`y`, `gy`, `c`, a selection), a panel
-//! shows what can follow. `\?` shows every key.
+//! `c` comments on a motion, text object or selection. `d` marks it for removal.
+//! `cc` and `dd` act on the cursor's line. `C` adds a general comment.
+//! `]c` and `[c` step through comments. Enter or `\e` edits a comment. `\x` deletes it.
+//! Tab lists the comments. The key panel shows continuations for a prefix or selection.
+//! `\?` shows every binding.
 //!
-//! In a comment, Enter saves (Shift-Enter starts a new line) and Escape cancels. `:wq`, `:x`
-//! or `ZZ` quit and send the review; `:q` quits when there's nothing to send, `:q!` or `ZQ`
-//! quit without it. Ctrl-C quits without sending too.
+//! In the editor, Enter saves, Shift-Enter adds a line and Escape cancels.
+//! `:wq`, `:x` and `ZZ` send the review and quit.
+//! `:q` quits only when the review is empty. `:q!`, `ZQ` and Ctrl-C quit without sending.
 
 mod page;
 mod review;
@@ -45,8 +42,6 @@ use review::{Comment, CommentId, Kind, Review, Subject};
 
 const SAMPLE: &str = include_str!("sample.md");
 
-/// The document and where its review goes, read from the command line before the terminal is
-/// taken over, so a bad path is an error in the shell rather than a page.
 enum Origin {
     Sample,
     Stdin,
@@ -76,16 +71,15 @@ struct Input {
     out: Option<String>,
 }
 
-/// What the composer is writing.
 #[derive(Clone, Debug, PartialEq)]
 enum Target {
-    /// A new comment on this range of the page's text, or with `None`, a general one.
-    New { range: Option<Range<usize>> },
-    /// A saved comment, again.
+    /// `None` addresses the whole document.
+    New {
+        range: Option<Range<usize>>,
+    },
     Edit(CommentId),
 }
 
-/// What the review adds to Vim's keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Op {
     Comment,
@@ -94,27 +88,18 @@ enum Op {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Act {
-    /// `C`: a comment on the whole document.
     General,
-    /// `]c`, `[c`.
     NextComment,
     PreviousComment,
-    /// `\e`, Enter: edit the comment picked, or under the cursor.
     Edit,
-    /// `\x`: delete it.
     Delete,
-    /// Tab: the comment list.
     List,
-    /// `\?`: every key.
     Keys,
-    /// `:`: a command line.
     CommandLine,
-    /// `ZZ`, `ZQ`.
     SendAndQuit,
     QuitWithoutSending,
 }
 
-/// Vim's keys, and the review's on top of them.
 fn keymap() -> Keymap<Act, Op> {
     use Stroke::{Char as C, Leader};
     Keymap::vim()
@@ -177,18 +162,16 @@ enum Mode {
 
 struct Reviewer {
     origin: Origin,
-    /// Where the feedback goes: a file, or stdout when `None`.
+    /// `None` sends feedback to stdout.
     out: Option<String>,
     source: String,
     page: Page,
     vim: Vim<Act, Op>,
     review: Review,
-    /// The comment being written. Its text is `draft`, kept while the composer is closed too:
-    /// Rune reaches a field's `TextEdit` once more after it goes, to clear its focus.
     mode: Mode,
+    // Rune clears focus through on_edit after the composer closes.
     draft: TextEdit,
-    /// The comment `]c`, `[c` or a click went to, until the cursor moves; it tells comments
-    /// apart that start at the same place, and it's how a general comment is picked.
+    /// Distinguishes comments sharing an anchor and selects general comments.
     selected: Option<CommentId>,
     quit: Quit,
     send_failed: Rc<Cell<bool>>,
@@ -246,8 +229,6 @@ impl Reviewer {
         self.vim.cursor(self.page.text()).start
     }
 
-    /// The comment Enter, `ce` and `dc` act on, and the one the page marks: the comment list's
-    /// row while it's open, else the one stepped to, or the one under the cursor.
     fn current(&self) -> Option<CommentId> {
         if let Some(row) = self.list() {
             return self.review.at_position(row);
@@ -257,8 +238,7 @@ impl Reviewer {
             .or_else(|| self.review.at(self.cursor()))
     }
 
-    /// Shows comment `n` on the page without moving Vim's cursor: its text centred, or for a
-    /// general comment, its card.
+    /// Scrolls to the comment without moving Vim's cursor.
     fn show(&self, id: CommentId, tx: &mut Tx) {
         match self.review.get(id).map(|c| c.range().is_some()) {
             Some(true) => tx.scroll_center(CURRENT_MARK),
@@ -268,7 +248,6 @@ impl Reviewer {
     }
 
     fn open(&mut self, target: Target) {
-        // Like a Vim operator, commenting ends the selection: the cursor goes to its start.
         if let Target::New {
             range: Some(range), ..
         } = &target
@@ -288,7 +267,7 @@ impl Reviewer {
         self.note = None;
     }
 
-    /// Saves what the composer holds. A comment in words with nothing written is dropped.
+    /// Empty comments are discarded. Removals may have no body.
     fn save(&mut self) {
         let Some(target) = self.composer().cloned() else {
             return;
@@ -318,7 +297,6 @@ impl Reviewer {
         }
     }
 
-    /// Marks the selection (or the line) to be removed. Enter adds words to it.
     fn remove(&mut self, range: Range<usize>) {
         self.vim.set_cursor(range.start, self.page.text());
         let id = self.review.add(Comment::remove(range));
@@ -326,7 +304,6 @@ impl Reviewer {
         self.note = Some("Marked to remove. Enter adds a note.".into());
     }
 
-    /// Deletes comment `id`, and the editor with it when it's the one being edited.
     fn delete(&mut self, id: CommentId) {
         let number = self.number(id);
         if !self.review.remove(id) {
@@ -343,12 +320,11 @@ impl Reviewer {
         self.note = Some(format!("Comment #{number} deleted"));
     }
 
-    /// Comment `id`'s number on its card, from 1.
+    /// One-based display number.
     fn number(&self, id: CommentId) -> usize {
         self.review.position(id).map_or(0, |p| p + 1)
     }
 
-    /// Goes to comment `n`: the cursor to its start, and its card into view.
     fn jump(&mut self, id: CommentId, tx: &mut Tx) {
         let Some(c) = self.review.get(id) else {
             return;
@@ -365,8 +341,6 @@ impl Reviewer {
         tx.scroll_into_view(thread_key(id));
     }
 
-    /// Opens the comment list on the comment picked or under the cursor, or the first, and
-    /// shows that comment on the page.
     fn open_list(&mut self, tx: &mut Tx) {
         let row = self
             .current()
@@ -379,7 +353,6 @@ impl Reviewer {
         }
     }
 
-    /// Runs a `:` command.
     fn command(&mut self, cmd: &str, tx: &mut Tx) {
         let text = cmd.trim();
         if let Some(command) = Command::parse(text) {
@@ -406,15 +379,12 @@ impl Reviewer {
     }
 }
 
-/// The key of the current comment's mark on the page, to scroll to.
 const CURRENT_MARK: &str = "current-comment";
 
-/// The key a comment's card is drawn under, to scroll to.
 fn thread_key(id: CommentId) -> String {
     format!("thread-{id}")
 }
 
-/// The colour that marks a kind of comment: its text's tint and its badge.
 fn tone(c: &Comment) -> Tone {
     match c.subject {
         Subject::General => Tone::Neutral,
@@ -430,8 +400,6 @@ fn tint(kind: Kind, theme: &Theme) -> rune::Color {
     }
 }
 
-/// What's painted on block `index`: comments' ranges, then search matches, the selection and
-/// the cursor on top.
 fn highlights(s: &Reviewer, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize>>, Highlight)> {
     let page = &s.page;
     let text = page.text();
@@ -444,9 +412,7 @@ fn highlights(s: &Reviewer, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize
         };
         let mut h = Highlight::new().bg(tint(c.kind(), theme));
         if current == Some(id) {
-            // The same ring whether the cursor or the list picks it.
             h = h.ring(tint(c.kind(), theme).alpha(0.9), 1.0);
-            // Keyed in the block it starts in, for the list to scroll to.
             if page.block_at(range.start) == index {
                 h = h.key(CURRENT_MARK);
             }
@@ -470,7 +436,6 @@ fn highlights(s: &Reviewer, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize
     out
 }
 
-/// The comment box.
 fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &Theme) -> El {
     let field = text_input(draft, theme.ty.body)
         .key("composer-field")
@@ -547,7 +512,6 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
     )
 }
 
-/// What a comment is about, a line or two of it.
 fn quote_view(q: &str, theme: &Theme) -> El {
     row()
         .w_full()
@@ -563,7 +527,6 @@ fn quote_view(q: &str, theme: &Theme) -> El {
         )
 }
 
-/// A saved comment, as a card.
 fn comment_view(id: CommentId, number: usize, c: &Comment, current: bool, theme: &Theme) -> El {
     let edit = Button::icon_only(&icons::PENCIL, "Edit")
         .plain()
@@ -625,7 +588,6 @@ fn comment_view(id: CommentId, number: usize, c: &Comment, current: bool, theme:
     card
 }
 
-/// A thread: a column of cards with a rule down its left, as GitHub sets review comments off.
 fn thread(cards: Vec<El>, theme: &Theme) -> El {
     let mut c = col().w_full().gap(8.0).pl(12.0);
     for card in cards {
@@ -652,7 +614,6 @@ fn thread_card(s: &Reviewer, id: CommentId, number: usize, c: &Comment, theme: &
     }
 }
 
-/// The comments that end in block `index`, and the composer when it's for one there.
 fn block_thread(s: &Reviewer, index: usize, theme: &Theme) -> Option<El> {
     let page = &s.page;
     let ends_here =
@@ -672,7 +633,6 @@ fn block_thread(s: &Reviewer, index: usize, theme: &Theme) -> Option<El> {
     (!cards.is_empty()).then(|| thread(cards, theme))
 }
 
-/// The general comments, above the document, and the composer for a new one.
 fn general_thread(s: &Reviewer, theme: &Theme) -> Option<El> {
     let mut cards = Vec::new();
     for (number, (id, c)) in s.review.iter().enumerate() {
@@ -686,8 +646,6 @@ fn general_thread(s: &Reviewer, theme: &Theme) -> Option<El> {
     (!cards.is_empty()).then(|| thread(cards, theme).mb(20.0))
 }
 
-/// Every comment, general ones first, in a panel floating over the page's right side. The row
-/// `at` is on is tinted; Enter jumps to it.
 fn list_view(s: &Reviewer, at: usize, theme: &Theme) -> El {
     let mut rows = col().w_full().gap(2.0);
     if s.review.is_empty() {
@@ -812,7 +770,6 @@ fn list_item(
     item
 }
 
-/// The key of the list's row for comment `n`, to scroll it into view.
 fn list_key(n: usize) -> String {
     format!("list-{n}")
 }
@@ -849,8 +806,6 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         .scroll(ScrollSpec {
             stick_bottom: false,
         });
-    // The comment list floats over the page's right side and the which-key panel over its
-    // bottom right, as Rex's prefix panel does; neither moves the page.
     let mut body = el().w_full().grow(1.0).min_h(0.0).child(content);
     if let Some(at) = s.list() {
         body = body.child(
@@ -873,9 +828,6 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         .child(status_line(s, &theme))
 }
 
-/// The keys that can follow what's been typed, for the which-key panel, all from the keymap:
-/// what Vim has half typed (`y`, `gy`, `ci`, `]`, the leader) or the visual mode, or every key
-/// after `\\?`. `None` when nothing is half typed.
 fn pending_keys(s: &Reviewer) -> Option<(String, HintGroups)> {
     if matches!(s.mode, Mode::Composing(_) | Mode::Command(_)) {
         return None;
@@ -907,8 +859,6 @@ fn pending_keys(s: &Reviewer) -> Option<(String, HintGroups)> {
     })
 }
 
-/// The keys that can follow, in a floating panel: the mode or prefix as a pill, Escape to
-/// cancel, then each key's action with the key on the right.
 fn which_key(s: &Reviewer, theme: &Theme) -> Option<El> {
     let (prefix, groups) = pending_keys(s)?;
     let row_of = |r: &Hint| {
@@ -1068,8 +1018,7 @@ fn on_key(s: &mut Reviewer, k: &KeyEvent, tx: &mut Tx) -> bool {
     let effect = s.vim.key(k, s.page.text());
     match effect {
         Some(VimEffect::Consumed) => {
-            // The comment `]c` picked holds until the cursor moves; a key toward a command
-            // (the `]` of `]c`) isn't a move.
+            // Consuming a prefix must not change the selected comment.
             if (s.cursor(), s.vim.mode()) != before {
                 s.selected = None;
             }
@@ -1090,7 +1039,6 @@ fn on_key(s: &mut Reviewer, k: &KeyEvent, tx: &mut Tx) -> bool {
     true
 }
 
-/// An action the review bound.
 fn act(s: &mut Reviewer, action: Act, tx: &mut Tx) {
     match action {
         Act::General => s.open(Target::New { range: None }),
@@ -1119,9 +1067,6 @@ fn act(s: &mut Reviewer, action: Act, tx: &mut Tx) {
     }
 }
 
-/// A key while the comment list is open: `j` `k` (or the arrows) move its cursor, and the page
-/// marks that comment and scrolls to it. Enter puts Vim's cursor there and closes the list;
-/// Escape, Tab or `q` close it and scroll back to the cursor, which never moved.
 fn list_key_press(s: &mut Reviewer, at: usize, k: &KeyEvent, tx: &mut Tx) {
     s.mode = Mode::List(at);
     let n = s.review.len();
@@ -1171,9 +1116,7 @@ fn send(s: &mut Reviewer, _: &mut Tx) {
     }
 }
 
-/// Writes `feedback` to the file at `out`, or to `stdout` when there's none. When the file
-/// can't be written the review goes to `stdout` instead, so it isn't lost, and the error
-/// comes back.
+/// A failed file write sends feedback to stdout before returning the error.
 fn deliver(feedback: &str, out: Option<&str>, stdout: &mut impl Write) -> Result<(), String> {
     let to_stdout = |stdout: &mut dyn Write| {
         stdout
@@ -1196,14 +1139,12 @@ fn deliver(feedback: &str, out: Option<&str>, stdout: &mut impl Write) -> Result
     Err(format!("could not write the review to {path}: {e}{shown}"))
 }
 
-/// The command line: the document to read (`-` for stdin) and where the review goes.
 #[derive(Debug, Default, PartialEq)]
 struct Args {
     path: Option<String>,
     out: Option<String>,
 }
 
-/// Parses `[FILE | -] [-o OUT]`.
 fn parse_args(args: &[String]) -> Result<Args, String> {
     let mut parsed = Args::default();
     let mut args = args.iter();
@@ -1229,8 +1170,6 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     Ok(parsed)
 }
 
-/// Reads the command line: `[FILE | -] [-o OUT]`. Exits with a message when the document can't
-/// be read.
 fn read_input() -> Input {
     let mut stdin = std::io::stdin();
     let terminal = stdin.is_terminal();

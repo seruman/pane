@@ -1,6 +1,4 @@
-//! The review: comments anchored to ranges of the page's text, general comments about the whole
-//! document, and the feedback they make, as Markdown for whoever wrote the document (an agent,
-//! most often).
+//! Comments anchored to rendered text and Markdown feedback for the document's author.
 
 use std::fmt::Write as _;
 use std::ops::Range;
@@ -9,19 +7,15 @@ use crate::page::{Page, lines_of, source_of};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
-    /// A comment in words.
     Comment,
-    /// "Remove this".
     Remove,
 }
 
-/// A comment's identity, kept while others are added or deleted around it. Positions in
-/// [`Review::comments`] shift, so anything that holds on to a comment holds its id.
+/// Stable identity independent of comment order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CommentId(u32);
 
 impl std::fmt::Display for CommentId {
-    /// The id as element keys spell it (`thread-3`, `delete-3`).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(f)
     }
@@ -68,12 +62,11 @@ impl Subject {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Comment {
     pub subject: Subject,
-    /// What the reviewer wrote; may be empty for a removal.
+    /// Empty for a removal without an explanatory note.
     pub body: String,
 }
 
 impl Comment {
-    /// A comment in words on `range`.
     pub fn on(range: Range<usize>, body: impl Into<String>) -> Comment {
         Comment {
             subject: Subject::On(range),
@@ -81,7 +74,6 @@ impl Comment {
         }
     }
 
-    /// A general comment.
     pub fn general(body: impl Into<String>) -> Comment {
         Comment {
             subject: Subject::General,
@@ -108,7 +100,7 @@ impl Comment {
         self.subject.title()
     }
 
-    /// Where it sorts: general comments first, as written, then the rest in document order.
+    /// General comments sort before anchored comments.
     fn order(&self) -> (bool, usize, usize) {
         self.range()
             .map_or((false, 0, 0), |r| (true, r.start, r.end))
@@ -117,14 +109,12 @@ impl Comment {
 
 #[derive(Clone, Debug, Default)]
 pub struct Review {
-    /// General comments first, in the order they were written, then the rest in document order,
-    /// each with its id.
+    /// General comments in insertion order, then anchored comments in document order.
     comments: Vec<(CommentId, Comment)>,
     next_id: u32,
 }
 
 impl Review {
-    /// Adds `comment` in its place and returns its id.
     pub fn add(&mut self, comment: Comment) -> CommentId {
         let id = CommentId(self.next_id);
         self.next_id += 1;
@@ -134,7 +124,6 @@ impl Review {
         id
     }
 
-    /// Every comment with its id, in order.
     pub fn iter(&self) -> impl Iterator<Item = (CommentId, &Comment)> {
         self.comments.iter().map(|(id, c)| (*id, c))
     }
@@ -155,24 +144,22 @@ impl Review {
         true
     }
 
-    /// Where comment `id` is in the order, counted from 0, as the `#n` cards show it.
+    /// Zero-based position in display order.
     pub fn position(&self, id: CommentId) -> Option<usize> {
         self.comments.iter().position(|(i, _)| *i == id)
     }
 
-    /// The comment at `position` in the order.
     pub fn at_position(&self, position: usize) -> Option<CommentId> {
         self.comments.get(position).map(|(id, _)| *id)
     }
 
-    /// Deletes comment `id`; false when there's no such comment.
+    /// Returns false when the id is absent.
     pub fn remove(&mut self, id: CommentId) -> bool {
         let before = self.comments.len();
         self.comments.retain(|(i, _)| *i != id);
         self.comments.len() != before
     }
 
-    /// The comments on the page, with their ranges, in document order.
     fn anchored(&self) -> Vec<(CommentId, Range<usize>)> {
         self.comments
             .iter()
@@ -180,7 +167,7 @@ impl Review {
             .collect()
     }
 
-    /// The comment `at` (a byte of the page's text) falls in; the innermost when they nest.
+    /// Innermost comment containing rendered-text offset `at`.
     pub fn at(&self, at: usize) -> Option<CommentId> {
         self.anchored()
             .into_iter()
@@ -189,9 +176,8 @@ impl Review {
             .map(|(i, _)| i)
     }
 
-    /// The comment after comment `from` in the list (general comments first, then the page's in
-    /// document order), or with `back` the one before, wrapping round. With no comment to start
-    /// from, the first on the page starting after `at` (or the last before it).
+    /// Next comment in display order, wrapping at either end. `back` reverses direction.
+    /// With no `from`, chooses the next anchor after `at` or the previous anchor when reversed.
     pub fn step(&self, from: Option<CommentId>, at: usize, back: bool) -> Option<CommentId> {
         let n = self.comments.len();
         if n == 0 {
@@ -219,12 +205,10 @@ impl Review {
         self.comments.is_empty()
     }
 
-    /// The review as Markdown feedback: the general comments, then each comment on the page in
-    /// document order. Each says where it is (its lines, and the section's heading, which still
-    /// finds it once the lines have moved) and what it's about: the text as drawn, or the
-    /// Markdown source where that differs, and always for a removal, so it can be found and
-    /// cut as written. `name` is the document's, for the title; `None` for one read from stdin.
-    /// `None` when there's nothing to send.
+    /// General feedback precedes anchored feedback in document order.
+    /// Anchored feedback includes source lines and the nearest section.
+    /// Quotes Markdown when it differs from rendered text, and always for removals.
+    /// `name` supplies the document title. Returns `None` for an empty review.
     #[expect(clippy::expect_used, reason = "Formatting into a String cannot fail")]
     pub fn feedback(&self, source: &str, page: &Page, name: Option<&str>) -> Option<String> {
         if self.is_empty() {
@@ -268,7 +252,6 @@ impl Review {
                 Some((a, b)) => place.push(format!("lines {a} to {b}")),
                 None => {}
             }
-            // The section the comment starts in, unless it's on that heading itself.
             let block = page.block_at(range.start);
             if !matches!(page.blocks[block].kind, crate::page::BlockKind::Heading(_))
                 && let Some(section) = page.section(block)
@@ -283,13 +266,10 @@ impl Review {
             out.push_str("\n\n");
 
             let full = page.text();
-            // Whole lines of the page (a `V` selection, `cc`, `dd`) quote whole source lines,
-            // with the list marker or heading hashes on them.
-            let whole_lines = (range.start == 0 || full[..range.start].ends_with('\n'))
+            let ends_on_line_boundaries = (range.start == 0 || full[..range.start].ends_with('\n'))
                 && (range.end >= full.len() || full[range.end..].starts_with('\n'));
             let text = full.get(range).unwrap_or_default().trim();
-            if text.contains('\n') || (whole_lines && c.kind() == Kind::Remove) {
-                // More than a line reads best as the Markdown it came from, whole lines of it.
+            if text.contains('\n') || (ends_on_line_boundaries && c.kind() == Kind::Remove) {
                 out.push_str(&fenced(
                     "markdown",
                     source_of(source, &ranges, true).trim_end(),
@@ -316,14 +296,12 @@ impl Review {
     }
 }
 
-/// The longest run of backticks in `text`.
 fn longest_backticks(text: &str) -> usize {
     text.split(|c| c != '`').map(str::len).max().unwrap_or(0)
 }
 
-/// `text` as inline code, whatever it holds: the backticks around it outnumber any run inside,
-/// and a space pads a backtick at either end, as CommonMark reads code spans. Newlines become
-/// spaces.
+/// Delimiter backticks outnumber every run inside `text`.
+/// `CommonMark` requires padding when the text starts or ends with a backtick.
 pub fn inline_code(text: &str) -> String {
     let text = text.replace('\n', " ");
     let ticks = "`".repeat(longest_backticks(&text) + 1);
@@ -341,7 +319,6 @@ fn fenced(lang: &str, text: &str) -> String {
     format!("{fence}{lang}\n{text}\n{fence}\n\n")
 }
 
-/// `text` as a Markdown quote, every line of it.
 fn quoted(text: &str) -> String {
     text.lines()
         .map(|l| {

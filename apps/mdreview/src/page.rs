@@ -1,9 +1,6 @@
-//! A Markdown source cut into its top-level blocks, so the view can draw each block on its own
-//! and put comment threads between them, as a GitHub review does under the lines it's about.
-//!
-//! The page's text is what [`RenderedText`] draws for each block, the blocks joined by a blank
-//! line as one `RenderedText` of the whole source joins them: Vim moves over it, and comments
-//! keep ranges of it.
+//! Markdown blocks with rendered-text offsets for review anchors.
+//! Blocks render separately so comment threads can follow them.
+//! Blank lines separate their text, matching [`RenderedText`] for the whole document.
 
 use std::ops::Range;
 
@@ -12,7 +9,6 @@ pub use pane_ui::markdown::source_of;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rune_kit::markdown::RenderedText;
 
-/// What a top-level block is, for the space around it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BlockKind {
     Para,
@@ -27,7 +23,7 @@ pub enum BlockKind {
 }
 
 impl BlockKind {
-    /// The space above and below it, as `rune_kit`'s renderer puts between top-level blocks.
+    // Keep in sync with rune-kit's private top-level block margins.
     fn margins(self) -> (f32, f32) {
         match self {
             BlockKind::Para => (0.0, 12.0),
@@ -44,13 +40,11 @@ impl BlockKind {
     }
 }
 
-/// One top-level block.
 #[derive(Clone, Debug)]
 pub struct Block {
     /// Its bytes in the whole source, from the start of its first line.
     pub src: Range<usize>,
-    /// The Markdown it draws from: its own lines, then the document's link reference
-    /// definitions, so `[text][ref]` still links.
+    /// Block source plus link-reference definitions from the document.
     pub markdown: String,
     rendered: RenderedText,
     /// Where its text starts in [`Page::text`].
@@ -61,7 +55,6 @@ pub struct Block {
 }
 
 impl Block {
-    /// Its range of [`Page::text`].
     pub fn text_range(&self) -> Range<usize> {
         self.text_at..self.text_at + self.rendered.text().len()
     }
@@ -79,7 +72,6 @@ impl Page {
             Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
         let mut found: Vec<(BlockKind, Range<usize>)> = Vec::new();
         let mut depth = 0usize;
-        // Whether the top-level paragraph being read holds only an image so far.
         let mut only_image = None;
         let mut events = Parser::new_ext(source, options).into_offset_iter();
         for (event, range) in events.by_ref() {
@@ -135,8 +127,6 @@ impl Page {
             let markdown = format!("{}{refs}", source[src.clone()].trim_end());
             let rendered = RenderedText::new(&markdown);
             let (mt, mb) = kind.margins();
-            // As the renderer collapses margins: the larger of the two meet, except that a
-            // block under a heading keeps only the heading's. An image keeps its own.
             let top = match kind {
                 _ if page.blocks.is_empty() => 0.0,
                 BlockKind::Heading(_) | BlockKind::Rule | BlockKind::Image => mt.max(prev_bottom),
@@ -162,7 +152,6 @@ impl Page {
         page
     }
 
-    /// The text as drawn, as Vim reads it.
     pub fn text(&self) -> &str {
         &self.text
     }
@@ -199,8 +188,7 @@ impl Page {
             .collect()
     }
 
-    /// The heading of the section block `index` is in: the nearest heading at or before it,
-    /// as drawn. `None` before the first heading.
+    /// Nearest heading at or before a valid block index. `None` before the first heading.
     pub fn section(&self, index: usize) -> Option<&str> {
         self.blocks[..=index]
             .iter()

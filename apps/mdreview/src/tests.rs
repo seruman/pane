@@ -111,7 +111,6 @@ fn range(s: &Reviewer, needle: &str) -> Range<usize> {
 
 #[test]
 fn the_page_text_is_the_whole_documents() {
-    // Cut into blocks, the page reads as one RenderedText of the whole source reads.
     let page = Page::new(SRC);
     let whole = rune_kit::markdown::RenderedText::new(SRC);
     assert_eq!(page.text(), whole.text());
@@ -275,7 +274,6 @@ fn feedback_names_the_nearest_section_and_quotes_safely() {
         "# Review\n\nI've reviewed the document and have 1 piece of feedback:\n\n## 1. Comment (line 1)\n\nOn ```a ``b`` c```\n\n> Keep the ticks.\n"
     );
 
-    // Removing a whole list item quotes its source line, marker and all.
     let s = app("## Later\n\n- Sharing by link\n- Replies\n");
     let mut review = Review::default();
     review.add(Comment::remove(range(&s, "Sharing by link")));
@@ -286,7 +284,6 @@ fn feedback_names_the_nearest_section_and_quotes_safely() {
 #[test]
 fn select_comment_save_edit_and_delete() {
     let mut rt = runtime(SRC);
-    // Down to the paragraph, select "Some bold", comment.
     press(&mut rt, "jveec");
     assert!(
         rt.find("composer-field").is_some(),
@@ -304,7 +301,6 @@ fn select_comment_save_edit_and_delete() {
     assert_eq!(feedback(&rt).as_deref(), Some(expected));
     assert!(texts_under(&rt, &card_key(&rt, 1)).contains(&"Too loud".to_owned()));
 
-    // Enter on the comment edits it; Escape leaves it as it was.
     key(&mut rt, Key::Enter);
     assert!(texts_under(&rt, "composer").contains(&"Edit #1 · Comment".to_owned()));
     press(&mut rt, "!");
@@ -312,7 +308,6 @@ fn select_comment_save_edit_and_delete() {
     assert!(rt.find("composer").is_none());
     assert_eq!(feedback(&rt).as_deref(), Some(expected));
 
-    // Shift-Enter adds a line inside the editor opened by `\e`.
     press(&mut rt, "\\e");
     rt.key(KeyEvent {
         key: Key::Enter,
@@ -356,7 +351,6 @@ fn several_general_comments_listed_and_stepped_through() {
     );
     key(&mut rt, Key::Escape);
 
-    // ]c reaches a general comment, and Enter edits it.
     press(&mut rt, "]c");
     key(&mut rt, Key::Enter);
     assert!(texts_under(&rt, "composer").contains(&"Edit #1 · General".to_owned()));
@@ -365,7 +359,6 @@ fn several_general_comments_listed_and_stepped_through() {
 
 #[test]
 fn stepping_visits_comments_that_start_together() {
-    // The case from the screenshot: three comments starting at the same place.
     let mut rt = runtime(SRC);
     press(&mut rt, "jVd");
     press(&mut rt, "vd");
@@ -392,11 +385,11 @@ fn stepping_visits_comments_that_start_together() {
 #[test]
 fn removals_and_jumps() {
     let mut rt = runtime(SRC);
-    press(&mut rt, "jjVc"); // the list's first line
+    press(&mut rt, "jjVc");
     press(&mut rt, "check");
     key(&mut rt, Key::Enter);
     press(&mut rt, "gg");
-    press(&mut rt, "dd"); // the heading, "Remove this"
+    press(&mut rt, "dd");
     assert!(texts_under(&rt, &card_key(&rt, 1)).contains(&"Remove".to_owned()));
     assert!(texts_under(&rt, &card_key(&rt, 2)).contains(&"Comment".to_owned()));
 
@@ -407,7 +400,6 @@ fn removals_and_jumps() {
     press(&mut rt, "[c");
     assert_eq!(position(&rt), Some(1));
 
-    // Moving drops the comment picked; the cursor's own picks the comment under it again.
     press(&mut rt, "gg");
     assert_eq!(position(&rt), Some(0));
 }
@@ -497,7 +489,6 @@ fn which_key_shows_what_can_follow() {
     key(&mut rt, Key::Escape);
     assert!(rt.find("which-key").is_none());
 
-    // Prefixes, the review's and Vim's, come from the keymap.
     press(&mut rt, "gy");
     assert_eq!(texts_under(&rt, "which-key")[0], "gy");
     press(&mut rt, "i");
@@ -514,7 +505,6 @@ fn which_key_shows_what_can_follow() {
     hint_shown(&rt, "?", "Every key");
     key(&mut rt, Key::Escape);
 
-    // `c` is an operator: it waits for a motion, `c` takes the line.
     press(&mut rt, "c");
     assert_eq!(texts_under(&rt, "which-key")[0], "c");
     hint_shown(&rt, "c", "The line");
@@ -522,7 +512,6 @@ fn which_key_shows_what_can_follow() {
     assert!(rt.find("which-key").is_none(), "Escape cancels it");
     assert_eq!(feedback(&rt), None);
 
-    // `\?` lists every key; the next key closes it and does what it does.
     let before = cursor_line(&rt);
     press(&mut rt, "\\?");
     assert_eq!(texts_under(&rt, "which-key")[0], "keys");
@@ -539,7 +528,6 @@ fn which_key_shows_what_can_follow() {
 #[test]
 fn comment_and_remove_are_operators() {
     let mut rt = runtime(SRC);
-    // `cw` on the paragraph's first word.
     press(&mut rt, "jcw");
     assert!(texts_under(&rt, "composer").contains(&"Some".to_owned()));
     press(&mut rt, "a");
@@ -550,11 +538,9 @@ fn comment_and_remove_are_operators() {
             "# Review\n\nI've reviewed the document and have 1 piece of feedback:\n\n## 1. Comment (line 3, under `Title`)\n\nOn `Some`\n\n> a\n"
         )
     );
-    // `dip`: the list, as a paragraph.
     press(&mut rt, "jdip");
     assert!(texts_under(&rt, &card_key(&rt, 2)).contains(&"Remove".to_owned()));
     assert!(feedback(&rt).unwrap().ends_with("## 2. Remove this (lines 5 to 6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\nI don't want this in the document.\n"));
-    // `2cc`: two lines.
     press(&mut rt, "gg2cc");
     assert!(texts_under(&rt, "composer").contains(&"Title".to_owned()));
     press(&mut rt, "b");
@@ -588,7 +574,6 @@ fn opening_an_editor_replaces_the_comment_list() {
 #[test]
 fn the_comment_list_floats_and_jumps() {
     let mut rt = runtime(SRC);
-    // Three comments: on the heading, the paragraph and the list.
     press(&mut rt, "Vc");
     press(&mut rt, "one");
     key(&mut rt, Key::Enter);
@@ -613,7 +598,6 @@ fn the_comment_list_floats_and_jumps() {
         "the page doesn't move"
     );
 
-    // j and k move the list's cursor, not Vim's, and the page marks that comment.
     press(&mut rt, "jj");
     assert_eq!(position(&rt), Some(2), "the page marks the list's comment");
     assert!(rt.find(CURRENT_MARK).is_some(), "keyed, to scroll to");
@@ -623,13 +607,11 @@ fn the_comment_list_floats_and_jumps() {
     assert_eq!(position(&rt), Some(1));
     assert_eq!(cursor_line(&rt), cursor);
 
-    // Escape closes it where it was; the mark goes back to the cursor's comment.
     key(&mut rt, Key::Escape);
     assert!(rt.find("comment-list").is_none());
     assert_eq!(cursor_line(&rt), cursor);
     assert_eq!(position(&rt), Some(0));
 
-    // Enter goes to the comment in the document.
     key(&mut rt, Key::Tab);
     press(&mut rt, "G");
     key(&mut rt, Key::Enter);
@@ -637,7 +619,6 @@ fn the_comment_list_floats_and_jumps() {
     assert_eq!(position(&rt), Some(2));
     assert_eq!(cursor_line(&rt).split(':').next(), Some("5"));
 
-    // A click on a row goes there too.
     key(&mut rt, Key::Tab);
     let (x, y) = rt.find("list-0").unwrap();
     rt.pointer_down(x, y);
@@ -649,7 +630,6 @@ fn the_comment_list_floats_and_jumps() {
 
 #[test]
 fn moving_in_the_list_scrolls_the_page_to_the_comment() {
-    // A page far taller than the window, with a comment near its end.
     let src = (0..80).fold(String::new(), |mut source, i| {
         write!(source, "Paragraph number {i} of filler.\n\n").unwrap();
         source
@@ -692,7 +672,6 @@ fn moving_in_the_list_scrolls_the_page_to_the_comment() {
         rt.find(CURRENT_MARK)
     );
 
-    // Escape scrolls back to the cursor, which stayed at the top.
     key(&mut rt, Key::Escape);
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
@@ -705,7 +684,6 @@ fn moving_in_the_list_scrolls_the_page_to_the_comment() {
 
 #[test]
 fn counts_work_in_visual_mode() {
-    // With no labels on the number keys, a count grows the selection as in Vim.
     let mut rt = runtime(SRC);
     press(&mut rt, "jv2e");
     assert_eq!(feedback(&rt), None);
@@ -752,7 +730,6 @@ fn click(rt: &mut Runtime<Reviewer>, key_name: &str) {
     rt.frame(1.0 / 60.0);
 }
 
-/// Two comments, `first` on the heading and `second` on the paragraph.
 fn two_comments() -> Runtime<Reviewer> {
     let mut rt = runtime(SRC);
     press(&mut rt, "cc");
@@ -978,7 +955,6 @@ fn the_command_line_takes_one_document_and_an_output() {
     );
 }
 
-/// Every text the app shows, gathered from the element tree.
 fn shown(rt: &Runtime<Reviewer>) -> Vec<String> {
     rt.elements()
         .into_iter()
@@ -1009,8 +985,7 @@ fn the_hints_name_the_keys_that_work() {
     );
 }
 
-/// The gap above each top-level block when rune-kit draws `src` as one document, measured from
-/// the layout: each block's top minus the bottom of the one before.
+/// Measures gaps between blocks in a single rune-kit document.
 fn rune_kit_gaps(src: &str) -> Vec<f32> {
     struct Doc(String);
     fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
@@ -1047,15 +1022,12 @@ fn block_gaps_match_what_rune_kit_draws() {
     let src = "# Title\n\nA paragraph.\n\n![logo](logo.png)\n\n## Section\n\n![logo](logo.png)\n\n- one\n- two\n\n> quoted\n\n```\ncode\n```\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n---\n\nThe end.\n";
     let ours: Vec<f32> = Page::new(src).blocks.iter().map(|b| b.top).collect();
     assert_eq!(ours, rune_kit_gaps(src));
-    // rune-kit splits a paragraph at each image, so these don't line up block for block.
-    // Drawn mdreview's way, a block at a time, the page still comes out as tall.
+    // rune-kit splits paragraphs at images, so compare total height rather than individual gaps.
     let src =
         "Intro.\n\nSee ![logo](logo.png) here.\n\n![a](a.png) ![b](b.png)\n\n## Then\n\nEnd.\n";
     assert_eq!(page_height(src, true), page_height(src, false), "{src:?}");
 }
 
-/// How tall `src` draws, as one rune-kit document or, with `by_block`, a block at a time with
-/// [`Page`]'s gaps between, as mdreview's view draws it.
 fn page_height(src: &str, by_block: bool) -> f32 {
     struct Doc(String, bool);
     fn view(d: &Doc, cx: &mut rune::Cx<Doc>) -> El {
