@@ -582,7 +582,7 @@ fn query_edit_during_replacement_matching_publishes_only_latest_query() {
 }
 
 #[test]
-fn keys_during_a_slow_search_are_not_lost() {
+fn navigation_and_accept_during_search_use_the_published_query_results() {
     let mut h = start(json!({"sources": [src("big", json!({}))]}));
     let rows: String = (0..1000).map(|i| format!("item-{i}-some/path/segment\n")).collect();
     h.load(&rows);
@@ -598,7 +598,7 @@ fn keys_during_a_slow_search_are_not_lost() {
     let context = h.context();
     assert_eq!(context.query, "item 9");
     assert_eq!(context.items.len(), 1);
-    assert!(context.items[0].value().contains('9'), "accepted a row matching the query typed before Enter");
+    assert_eq!(context.items[0].value(), "item-9-some/path/segment");
 }
 
 #[test]
