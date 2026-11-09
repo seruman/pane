@@ -318,11 +318,4 @@ mod tests {
             assert_eq!(other.append(&vec![b'a'; limit + 1]), Err(RecordError::RecordTooLarge { record: 1 }));
         }
     }
-
-    #[test]
-    fn input_format_names_users_write() {
-        for (name, format) in [("lines", Lines), ("jsonl", Jsonl), ("nul", Nul)] {
-            assert_eq!(serde_json::from_str::<InputFormat>(&format!("\"{name}\"")).unwrap(), format);
-        }
-    }
 }

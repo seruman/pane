@@ -248,3 +248,10 @@ fn preview_override_is_applied_before_command_validation() {
         matches!(MenuConfiguration::parse(b"{}", Some(vec![String::new()])), Err(ConfigurationError::MissingProgram { entry }) if entry == "Preview command")
     );
 }
+
+#[test]
+fn input_format_names_users_write() {
+    for (name, format) in [("lines", InputFormat::Lines), ("jsonl", InputFormat::Jsonl), ("nul", InputFormat::Nul)] {
+        assert_eq!(serde_json::from_str::<InputFormat>(&format!("\"{name}\"")).unwrap(), format);
+    }
+}
