@@ -69,6 +69,7 @@ impl std::error::Error for CommandError {
 
 /// Requests cancellation from another thread.
 /// On cancellation, `run` kills the command's process group and reaps its leader before returning.
+/// Descendants that create a new session escape the group signal.
 /// If cancellation precedes `run`, it spawns nothing.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel {
@@ -117,7 +118,7 @@ fn resolve(program: &str, path: Option<&OsStr>) -> Result<CString, CommandError>
 
 fn pipe() -> Result<(File, File), CommandError> {
     let mut fds = [0 as RawFd; 2];
-    // SAFETY: `fds` holds two descriptors, as pipe(2) requires.
+    // SAFETY: fds provides writable storage for the two descriptors pipe returns.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
         return Err(system("pipe", io::Error::last_os_error()));
     }
@@ -344,7 +345,7 @@ struct Group {
 
 impl Group {
     fn wait_for_exit(&self, limit: Duration) -> Result<(), CommandError> {
-        // SAFETY: kqueue takes no arguments and returns a new descriptor or -1.
+        // SAFETY: kqueue has no caller-side memory or ownership preconditions.
         let queue = unsafe { libc::kqueue() };
         if queue < 0 {
             return Err(system("kqueue", io::Error::last_os_error()));
@@ -386,7 +387,7 @@ impl Group {
     fn try_wait(&mut self) -> Result<Option<ExitStatus>, CommandError> {
         let mut status = 0;
         loop {
-            // SAFETY: waits on our own child without blocking.
+            // SAFETY: status points to a writable local, and pid names our unreaped child.
             let pid = unsafe { libc::waitpid(self.pid, &raw mut status, libc::WNOHANG) };
             if pid == 0 {
                 return Ok(None);
@@ -414,7 +415,7 @@ impl Drop for Group {
             return;
         }
         // Descendants that call setsid leave this process group.
-        // SAFETY: signals our own process group, then reaps its leader.
+        // SAFETY: the unreaped leader reserves the group ID. waitpid writes to a live status local.
         unsafe {
             libc::kill(-self.pid, libc::SIGKILL);
             let mut status = 0;
@@ -504,7 +505,6 @@ fn pump(
                         stdin = None;
                     }
                 }
-                // Rust's runtime ignores SIGPIPE, so a child that exits early surfaces here.
                 Err(e) if e.kind() == io::ErrorKind::BrokenPipe => stdin = None,
                 Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
                 Err(e) => return Err(system("write stdin", e)),

@@ -228,7 +228,6 @@ enum RawAction {
     TogglePreview,
 }
 
-/// mmenu decodes `null` as an absent key.
 fn null_as_false<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(false))
 }
