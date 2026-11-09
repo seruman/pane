@@ -44,6 +44,67 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
 }
 
 #[test]
+fn settle_lands_highlight_color_that_reduced_motion_fades() {
+    fn runtime() -> rune::Runtime<Menu> {
+        let mut menu = menu_without_stdin();
+        menu.handle(Event::StdinItems(vec![MenuItem::new("a", "alpha"), MenuItem::new("b", "beta")]), &mut Tx::default());
+        menu.handle(Event::StdinDone, &mut Tx::default());
+        poll_until(&mut menu, |m| m.model.result_count() == 2 && !m.model.is_searching());
+        let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+        rt.frame(0.0);
+        rt
+    }
+    fn row_fills(rt: &rune::Runtime<Menu>) -> Vec<(String, rune::Color)> {
+        rt.elements().into_iter().filter(|e| e.path.contains("/rows/")).map(|e| (e.path, e.fill)).collect()
+    }
+    let mut settled = runtime();
+    let mut reduced_only = runtime();
+    settled.update(|m, tx| m.handle(Event::Highlight(1), tx));
+    reduced_only.update(|m, tx| {
+        let effects = m.model.handle(Event::Highlight(1));
+        m.apply(effects, tx);
+        m.reveal(tx);
+    });
+    settled.frame(1.0 / 120.0);
+    reduced_only.frame(1.0 / 120.0);
+    let landed = row_fills(&settled);
+    let fading = row_fills(&reduced_only);
+    settled.frame(0.3);
+    reduced_only.frame(0.3);
+    assert_eq!(landed, row_fills(&settled), "settle paints the final highlight immediately");
+    assert_ne!(fading, row_fills(&reduced_only), "reduced motion alone still fades highlight colors");
+    assert_eq!(row_fills(&settled), row_fills(&reduced_only));
+}
+
+#[test]
+fn reduced_motion_and_settle_still_allow_hover_fades() {
+    let mut menu = menu_without_stdin();
+    menu.handle(Event::StdinItems((0..30).map(|i| MenuItem::new(format!("id{i}"), format!("row-{i}"))).collect()), &mut Tx::default());
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    poll_until(&mut menu, |m| m.model.result_count() == 30 && !m.model.is_searching());
+    let mut rt = rune::Runtime::new(menu, crate::view::view, (640.0, 300.0), rune::Env::new(true, 1.0));
+    rt.frame(0.0);
+    assert!(rt.reduced_motion);
+    let row = rt.elements().into_iter().find(|e| e.text.as_deref() == Some("row-1")).unwrap();
+    rt.pointer_move(row.rect[0] + 4.0, row.rect[1] + 4.0);
+    rt.frame(1.0 / 120.0);
+    rt.frame(1.0 / 120.0);
+    let hovered = rt.elements().into_iter().find(|e| e.hover == 1.0).expect("row hover enters immediately");
+    rt.pointer_leave();
+    rt.frame(0.02);
+    let fading = rt.elements().into_iter().find(|e| e.path == hovered.path).unwrap();
+    assert!(fading.hover > 0.0 && fading.hover < 1.0, "reduced motion retains opacity fades, got {}", fading.hover);
+    rt.update(|menu, tx| menu.handle(Event::Highlight(0), tx));
+    rt.frame(1.0 / 120.0);
+    rt.frame(1.0 / 120.0);
+    let after_event = rt.elements().into_iter().find(|e| e.path == hovered.path).unwrap();
+    assert!(after_event.hover > 0.0 && after_event.hover < fading.hover);
+    rt.frame(0.2);
+    let finished = rt.elements().into_iter().find(|e| e.path == hovered.path).unwrap();
+    assert_eq!(finished.hover, 0.0);
+}
+
+#[test]
 fn footer_fits_labels_then_keycaps_then_drops_bindings() {
     let mut launch = crate::cli::Cli::try_parse_from(["rmenu"]).unwrap().launch(false).unwrap();
     launch.options.configuration = serde_json::from_value(serde_json::json!({"bindings": [

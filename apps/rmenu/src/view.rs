@@ -66,7 +66,6 @@ fn palette(menu: &Menu, system_dark: bool) -> Palette {
 }
 
 pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
-    // A picker is a tool: every change lands in the frame it happens in.
     cx.reduced_motion(true);
     let c = palette(menu, cx.system_dark());
     let model = &menu.model;

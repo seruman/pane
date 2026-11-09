@@ -97,6 +97,7 @@ impl Menu {
     }
 
     pub fn handle(&mut self, event: Event, tx: &mut Tx) {
+        // Reduced motion still fades colors. Selection changes must use their final colors now.
         tx.settle();
         let effects = self.model.handle(event);
         self.apply(effects, tx);
