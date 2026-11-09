@@ -344,62 +344,60 @@ impl Drop for Group {
 fn pump(group: &mut Group, spawned: Spawned, input: &[u8], deadline: Option<Instant>, limit: usize, cancel: &Cancel)
         -> Result<CommandResult, CommandError> {
     let mut stdin = spawned.stdin.filter(|_| !input.is_empty());
-    let mut stdout = Some(spawned.stdout);
-    let mut stderr = Some(spawned.stderr);
-    for fd in [stdin.as_ref().map(|s| s.as_raw_fd()), stdout.as_ref().map(|s| s.as_raw_fd()),
-               stderr.as_ref().map(|s| s.as_raw_fd())].into_iter().flatten() {
-        set_nonblocking(fd)?;
+    let mut outputs = [(Some(spawned.stdout), Vec::new()), (Some(spawned.stderr), Vec::new())];
+    for file in [stdin.as_ref(), outputs[0].0.as_ref(), outputs[1].0.as_ref()].into_iter().flatten() {
+        set_nonblocking(file.as_raw_fd())?;
     }
     let mut written = 0;
-    let (mut out, mut err) = (Vec::new(), Vec::new());
     let mut buffer = [0u8; 16_384];
     loop {
         if cancel.is_cancelled() { return Err(CommandError::Cancelled); }
         if deadline.is_some_and(|d| Instant::now() >= d) { return Err(CommandError::TimedOut); }
-        if stdin.is_none() && stdout.is_none() && stderr.is_none() {
+        if stdin.is_none() && outputs.iter().all(|(file, _)| file.is_none()) {
             if let Some(status) = group.try_wait()? {
-                return Ok(CommandResult { stdout: out, stderr: err, status });
+                let [(_, stdout), (_, stderr)] = outputs;
+                return Ok(CommandResult { stdout, stderr, status });
             }
             // The pipes can close a moment before the leader is reaped.
             group.wait_for_exit(POLL_INTERVAL)?;
             continue;
         }
-        let mut fds: Vec<libc::pollfd> = [
-            stdout.as_ref().map(|s| (s.as_raw_fd(), libc::POLLIN)),
-            stderr.as_ref().map(|s| (s.as_raw_fd(), libc::POLLIN)),
-            stdin.as_ref().map(|s| (s.as_raw_fd(), libc::POLLOUT)),
-        ].into_iter().flatten().map(|(fd, events)| libc::pollfd { fd, events, revents: 0 }).collect();
+        let mut fds = [
+            (outputs[0].0.as_ref(), libc::POLLIN),
+            (outputs[1].0.as_ref(), libc::POLLIN),
+            (stdin.as_ref(), libc::POLLOUT),
+        ].map(|(file, events)| libc::pollfd { fd: file.map_or(-1, AsRawFd::as_raw_fd), events, revents: 0 });
         if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, POLL_INTERVAL.as_millis() as libc::c_int) } < 0 {
             let error = io::Error::last_os_error();
             if error.kind() == io::ErrorKind::Interrupted { continue; }
             return Err(system("poll", error));
         }
-        for ready in fds.iter().filter(|p| p.revents != 0) {
-            if stdin.as_ref().is_some_and(|s| s.as_raw_fd() == ready.fd) {
-                let pipe = stdin.as_mut().expect("matched above");
-                match pipe.write(&input[written..input.len().min(written + buffer.len())]) {
+        let mut remaining = limit - outputs.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
+        for ((file, bytes), ready) in outputs.iter_mut().zip(&fds) {
+            if ready.revents == 0 { continue; }
+            if let Some(pipe) = file {
+                match pipe.read(&mut buffer) {
+                    Ok(0) => *file = None,
                     Ok(n) => {
-                        written += n;
-                        if written == input.len() { stdin = None; }
+                        if n > remaining { return Err(CommandError::OutputLimitExceeded); }
+                        remaining -= n;
+                        bytes.extend_from_slice(&buffer[..n]);
                     }
-                    // Rust's runtime ignores SIGPIPE, so a child that exits early surfaces here.
-                    Err(e) if e.kind() == io::ErrorKind::BrokenPipe => stdin = None,
                     Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
-                    Err(e) => return Err(system("write stdin", e)),
+                    Err(e) => return Err(system("read output", e)),
                 }
-                continue;
             }
-            let is_stdout = stdout.as_ref().is_some_and(|s| s.as_raw_fd() == ready.fd);
-            let read = if is_stdout { stdout.as_mut().map(|s| s.read(&mut buffer)) }
-                       else { stderr.as_mut().map(|s| s.read(&mut buffer)) };
-            match read.expect("polled descriptors are open") {
-                Ok(0) => if is_stdout { stdout = None } else { stderr = None },
+        }
+        if let Some(pipe) = stdin.as_mut().filter(|_| fds[2].revents != 0) {
+            match pipe.write(&input[written..input.len().min(written + buffer.len())]) {
                 Ok(n) => {
-                    if out.len() + err.len() + n > limit { return Err(CommandError::OutputLimitExceeded); }
-                    if is_stdout { &mut out } else { &mut err }.extend_from_slice(&buffer[..n]);
+                    written += n;
+                    if written == input.len() { stdin = None; }
                 }
+                // Rust's runtime ignores SIGPIPE, so a child that exits early surfaces here.
+                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => stdin = None,
                 Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted) => {}
-                Err(e) => return Err(system("read output", e)),
+                Err(e) => return Err(system("write stdin", e)),
             }
         }
     }
@@ -603,6 +601,20 @@ mod tests {
         assert_eq!(result.stdout, [vec![0; 200_000], input].concat());
         assert_eq!(result.stderr, vec![0; 200_000]);
         assert!(result.status.success());
+    }
+
+    #[test]
+    fn closing_either_output_keeps_the_other_stream_and_stdin_active() {
+        let input = vec![b'x'; 100_000];
+        for (script, stdout, stderr) in [
+            ("printf out; exec 1>&-; /bin/cat >&2", b"out".as_slice(), input.as_slice()),
+            ("printf err >&2; exec 2>&-; /bin/cat", input.as_slice(), b"err".as_slice()),
+        ] {
+            let result = run_with(&["/bin/sh", "-c", script], Some(&input), &[], Duration::from_secs(10), 1 << 20).unwrap();
+            assert_eq!(result.stdout, stdout, "{script}");
+            assert_eq!(result.stderr, stderr, "{script}");
+            assert!(result.status.success(), "{script}");
+        }
     }
 
     #[test]
