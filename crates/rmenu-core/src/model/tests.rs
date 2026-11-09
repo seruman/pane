@@ -1225,6 +1225,46 @@ fn failed_run_reports_and_does_not_reload() {
 }
 
 #[test]
+fn operation_spawn_failure_remains_an_error_and_does_not_reload() {
+    let mut h = operations(json!([{"key": "ctrl+d", "action": "run", "command": ["missing"], "reload": true}]));
+    h.load("one\ntwo\n");
+    h.perform(0);
+    let Task::Operation { token, .. } = h.take(TaskKind::Operation) else { unreachable!() };
+    h.send(Event::OperationDone { token, result: Err("cannot spawn missing".into()) });
+    assert!(!h.model.running_operation());
+    assert!(h.model.message_is_error());
+    assert_eq!(h.model.message(), Some("cannot spawn missing"));
+    assert_eq!(h.source_runs("s"), 1);
+    h.nav(Nav::Down);
+    h.query("two");
+    h.settle();
+    assert!(h.model.message_is_error());
+    assert_eq!(h.model.message(), Some("cannot spawn missing"));
+}
+
+#[test]
+fn preview_failures_show_the_command_or_spawn_error() {
+    for (result, expected) in [
+        (
+            Ok(CommandResult {
+                stdout: b"partial output".to_vec(),
+                stderr: b"denied\n".to_vec(),
+                status: ExitStatus::Code(3),
+            }),
+            "Command exited 3: denied",
+        ),
+        (Err("cannot spawn preview".into()), "cannot spawn preview"),
+    ] {
+        let mut h = start(json!({"sources": [src("a", json!({}))], "preview": ["show"]}));
+        h.load("alpha\n");
+        let Task::Preview { token, .. } = h.take(TaskKind::Preview) else { unreachable!() };
+        h.send(Event::PreviewDone { token, result });
+        assert_eq!(h.model.preview(), Some(expected), "expected={expected}");
+        assert!(h.is_open(), "expected={expected}");
+    }
+}
+
+#[test]
 fn accept_waits_for_a_running_operation() {
     let mut h = operations(json!([{"key": "ctrl+d", "action": "run", "command": ["wait"]}]));
     h.load("one\n");
