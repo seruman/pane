@@ -15,7 +15,8 @@ fn deserialization_rejects_invalid_configuration() {
         r#"{"sources":[{"id":"a","label":"A","command":[]}]}"#,
         r#"{"bindings":[{"key":"ctrl+n","action":"copy"}]}"#,
     ] {
-        assert!(serde_json::from_str::<MenuConfiguration>(json).is_err(), "{json}");
+        let error = serde_json::from_str::<MenuConfiguration>(json).unwrap_err();
+        assert!(error.is_data(), "{json}: {error}");
     }
 }
 
@@ -59,12 +60,15 @@ fn chord_parsing() {
     assert_eq!(KeyChord::parse("shift+cmd+r").unwrap(), KeyChord::parse("cmd+shift+r").unwrap());
     assert_eq!(KeyChord::parse("cmd+shift+r").unwrap().display(), "⇧⌘R");
     assert_eq!(KeyChord::parse("Ctrl+Enter").unwrap().display(), "⌃↩");
-    for bad in ["cmd+cmd+r", "r", "cmd+", "cmd+foo", "hyper+r"] {
-        assert!(KeyChord::parse(bad).is_err(), "{bad}");
+    for bad in ["cmd+", "cmd+foo"] {
+        assert!(matches!(KeyChord::parse(bad), Err(ConfigurationError::InvalidChord(raw)) if raw == bad), "{bad}");
     }
-    assert!(matches!(KeyChord::parse("cmd+"), Err(ConfigurationError::InvalidChord(raw)) if raw == "cmd+"));
-    assert!(matches!(KeyChord::parse("hyper+r"), Err(ConfigurationError::InvalidModifiers(raw)) if raw == "hyper+r"));
-    assert!(matches!(KeyChord::parse("r"), Err(ConfigurationError::MissingModifier(raw)) if raw == "r"));
+    for bad in ["cmd+cmd+r", "hyper+r"] {
+        assert!(matches!(KeyChord::parse(bad), Err(ConfigurationError::InvalidModifiers(raw)) if raw == bad), "{bad}");
+    }
+    for bad in ["r", "shift+r"] {
+        assert!(matches!(KeyChord::parse(bad), Err(ConfigurationError::MissingModifier(raw)) if raw == bad), "{bad}");
+    }
     assert!(KeyChord::parse("enter").unwrap().is_reserved());
     assert!(KeyChord::parse("ctrl+n").unwrap().is_reserved());
     assert!(KeyChord::parse("ctrl+shift+n").unwrap().is_reserved());
