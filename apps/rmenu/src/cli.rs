@@ -122,7 +122,7 @@ impl Cli {
                 prompt,
                 query: self.query,
                 rows: usize::from(self.rows),
-                list_cap: crate::view::LIST_CAP,
+                list_cap: rmenu_core::model::DEFAULT_LIST_CAP,
             },
             appearance: self.appearance,
         })

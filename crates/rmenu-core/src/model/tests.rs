@@ -10,6 +10,26 @@ use super::*;
 use crate::record::RecordDecoder;
 use crate::command::ExitStatus;
 
+#[test]
+fn row_lookup_only_resolves_currently_listed_items() {
+    let mut o = options(json!({}));
+    o.list_cap = 2;
+    let mut h = Harness::new(o);
+    h.stdin("alpha\nbeta\ngamma\n");
+    h.stdin_done();
+    h.settle();
+    let beta = h.model.result(1).id.clone();
+    let gamma = h.model.result(2).id.clone();
+    assert_eq!(h.model.result_count(), 3);
+    assert_eq!(h.model.listed_count(), 2);
+    assert_eq!(h.model.listed_row(&beta), Some(1));
+    assert_eq!(h.model.listed_row(&gamma), None);
+    h.query("beta");
+    h.settle();
+    assert_eq!(h.model.listed_row(&beta), Some(0));
+    assert_eq!(h.model.listed_row(&gamma), None);
+}
+
 struct Harness {
     model: Model,
     /// The live task of each kind: starting one replaces the previous, Cancel removes it.

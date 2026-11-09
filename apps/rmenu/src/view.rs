@@ -18,10 +18,6 @@ const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
 const FOOTER_H: f32 = 30.0;
 const PREVIEW_W: f32 = 380.0;
-/// Rows the list lays out. Rune keys every row of a list on each change, so a million matches
-/// would cost a million strings per keystroke; nobody scrolls past the first few thousand of
-/// a ranked list, and the footer still counts them all.
-pub const LIST_CAP: usize = 5_000;
 
 const TITLE: TextStyle = TextStyle::new(13.0, 400.0).lh(18.0);
 const SMALL: TextStyle = TextStyle::new(11.0, 400.0).lh(15.0);
@@ -136,7 +132,7 @@ fn source_strip(menu: &Menu, c: &Palette) -> El {
 
 fn results(menu: &Menu, c: &Palette) -> El {
     let model = &menu.model;
-    let count = model.result_count().min(LIST_CAP);
+    let count = model.listed_count();
     if count == 0 {
         let (message, color) = if model.input_failed() {
             // The whole error, wrapped, where there's room for it; the footer only has a line.
@@ -187,8 +183,8 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
         line = line.child(text(detail.to_owned()).font(SMALL).color(meta).max_w(110.0).truncate());
     }
     let id = item.id.clone();
-    // Handlers find their row by item ID: the index a virtual row was built at can go stale.
-    let row_for = move |m: &Menu| (0..m.model.result_count()).find(|&r| m.model.result(r).id == id);
+    // A virtual row's position can change before its handler runs.
+    let row_for = move |m: &Menu| m.model.listed_row(&id);
     let line = if selected { line } else { line.hover(c.foreground.alpha(0.05)) };
     el().w_full().h(if subtitle.is_some() { ROW_SUB_H } else { ROW_H }).px(6.0).py(1.0)
         .on_press_tx(move |m: &mut Menu, tx: &mut Tx| {

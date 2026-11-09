@@ -15,6 +15,10 @@ use crate::selection::{Marks, MenuSelection};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputFormat { Lines, Nul, Json }
 
+/// Rune currently keys all virtual rows on each result change. Keep this bound until
+/// its list API can key only visible rows.
+pub const DEFAULT_LIST_CAP: usize = 5_000;
+
 #[derive(Clone, Debug)]
 pub struct Options {
     pub configuration: MenuConfiguration,
@@ -336,6 +340,10 @@ impl Model {
     /// How many result rows are shown.
     pub fn result_count(&self) -> usize { self.shown.results.len() }
 
+    pub fn listed_row(&self, id: &str) -> Option<usize> {
+        (0..self.listed_count()).find(|&row| self.result(row).id == id)
+    }
+
     pub fn result(&self, row: usize) -> &MenuItem { &self.shown.items[self.shown.results[row]] }
 
     /// Changes whenever the shown results are replaced, so a host can reset scrolling.
@@ -508,7 +516,7 @@ impl Model {
     fn preview_visible(&self) -> bool { self.preview_enabled && self.preview_command().is_some() }
 
     /// How many shown rows the host lists: the only rows a highlight or mark may land on.
-    fn listed(&self) -> usize { self.shown.results.len().min(self.options.list_cap) }
+    pub fn listed_count(&self) -> usize { self.shown.results.len().min(self.options.list_cap) }
 
     fn highlighted(&self) -> Option<&MenuItem> {
         let row = self.shown.selection.highlighted_row()?;
@@ -526,7 +534,7 @@ impl Model {
     }
 
     fn highlight(&mut self, row: usize) {
-        if !self.can_navigate() || row >= self.listed() {
+        if !self.can_navigate() || row >= self.listed_count() {
             return;
         }
         if self.shown.selection.highlighted_row() != Some(row) {
@@ -538,7 +546,7 @@ impl Model {
     }
 
     fn move_by(&mut self, delta: isize) {
-        let count = self.listed();
+        let count = self.listed_count();
         if count == 0 {
             return;
         }
@@ -556,7 +564,7 @@ impl Model {
     }
 
     fn toggle_row(&mut self, row: usize) {
-        if !self.can_navigate() || !self.options.multi || row >= self.listed() {
+        if !self.can_navigate() || !self.options.multi || row >= self.listed_count() {
             return;
         }
         let id = self.result(row).id.clone();
@@ -795,7 +803,7 @@ impl Model {
             self.shown.selection = MenuSelection::default();
         }
         let prune_now = self.pending_prune && !self.loading;
-        let listed = self.listed();
+        let listed = self.listed_count();
         self.shown.selection.reconcile(&self.shown.items, &self.shown.results[..listed], if prune_now { Marks::Prune } else { Marks::Keep });
         if prune_now {
             self.pending_prune = false;
