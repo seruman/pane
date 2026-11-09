@@ -310,6 +310,79 @@ enum IntentOutcome {
     Applied,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+struct PreviewIdentity {
+    source: SourceGeneration,
+    item: MenuItem,
+    query: String,
+}
+
+enum PreviewContent {
+    Empty,
+    Stale(String),
+    Pending { identity: PreviewIdentity, token: Token, text: String },
+    Ready { identity: PreviewIdentity, text: String },
+}
+
+#[derive(Clone, Copy)]
+enum RetainPreview {
+    Keep,
+    Discard,
+}
+
+struct Preview {
+    enabled: bool,
+    content: PreviewContent,
+}
+
+impl Preview {
+    fn identity(&self) -> Option<&PreviewIdentity> {
+        match &self.content {
+            PreviewContent::Pending { identity, .. } | PreviewContent::Ready { identity, .. } => Some(identity),
+            _ => None,
+        }
+    }
+
+    fn text(&self) -> &str {
+        match &self.content {
+            PreviewContent::Empty => "",
+            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => text,
+        }
+    }
+
+    fn take_text(&mut self) -> String {
+        match mem::replace(&mut self.content, PreviewContent::Empty) {
+            PreviewContent::Empty => String::new(),
+            PreviewContent::Stale(text) | PreviewContent::Pending { text, .. } | PreviewContent::Ready { text, .. } => text,
+        }
+    }
+
+    fn invalidate(&mut self, retention: RetainPreview) {
+        self.content = match retention {
+            RetainPreview::Keep => PreviewContent::Stale(self.take_text()),
+            RetainPreview::Discard => PreviewContent::Empty,
+        };
+    }
+
+    fn start(&mut self, identity: PreviewIdentity, token: Token) {
+        let text = self.take_text();
+        self.content = PreviewContent::Pending { identity, token, text };
+    }
+
+    fn complete(&mut self, token: Token, result: Result<CommandResult, String>) {
+        if !matches!(&self.content, PreviewContent::Pending { token: pending, .. } if *pending == token) {
+            return;
+        }
+        let PreviewContent::Pending { identity, .. } = mem::replace(&mut self.content, PreviewContent::Empty) else { unreachable!() };
+        let text = match result {
+            Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).into_owned(),
+            Ok(r) => command_failure(&r),
+            Err(error) => error,
+        };
+        self.content = PreviewContent::Ready { identity, text: crate::preview::plain_text(&text) };
+    }
+}
+
 pub struct Model {
     options: Options,
     effects: Vec<Effect>,
@@ -319,10 +392,7 @@ pub struct Model {
     result_revision: u64,
     stdin_error: Option<String>,
     operation: Option<Operation>,
-    preview_enabled: bool,
-    preview_text: String,
-    preview_identity: Option<(SourceGeneration, MenuItem, String)>,
-    preview_generation: Option<Token>,
+    preview: Preview,
     closing: bool,
 }
 
@@ -338,10 +408,7 @@ impl Model {
             result_revision: 0,
             stdin_error: None,
             operation: None,
-            preview_enabled: true,
-            preview_text: String::new(),
-            preview_identity: None,
-            preview_generation: None,
+            preview: Preview { enabled: true, content: PreviewContent::Empty },
             closing: false,
         };
         match model.options.configuration.root_source().cloned() {
@@ -416,7 +483,7 @@ impl Model {
 
     pub fn stdin_error(&self) -> Option<&str> { self.stdin_error.as_deref() }
 
-    pub fn preview(&self) -> Option<&str> { self.preview_visible().then_some(self.preview_text.as_str()) }
+    pub fn preview(&self) -> Option<&str> { self.preview_visible().then_some(self.preview.text()) }
 
     /// Match highlights use the query that produced the shown rows, not a pending edit.
     pub fn shown_query(&self) -> &str { self.current.shown.query.as_deref().unwrap_or("") }
@@ -492,17 +559,7 @@ impl Model {
             }
             Event::SourceDone { token, result } => self.source_done(token, result),
             Event::SearchDone { token, results } => self.search_done(token, results),
-            Event::PreviewDone { token, result } => {
-                if Some(token) != self.preview_generation {
-                    return;
-                }
-                let text = match result {
-                    Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).into_owned(),
-                    Ok(r) => command_failure(&r),
-                    Err(error) => error,
-                };
-                self.preview_text = crate::preview::plain_text(&text);
-            }
+            Event::PreviewDone { token, result } => self.preview.complete(token, result),
             Event::OperationDone { token, result } => self.operation_done(token, result),
         }
     }
@@ -541,7 +598,7 @@ impl Model {
         self.source().and_then(|s| s.preview.clone()).or_else(|| self.options.configuration.preview().map(<[String]>::to_vec))
     }
 
-    fn preview_visible(&self) -> bool { self.preview_enabled && self.preview_command().is_some() }
+    fn preview_visible(&self) -> bool { self.preview.enabled && self.preview_command().is_some() }
 
     pub fn listed_count(&self) -> usize { self.result_count().min(self.options.list_cap) }
 
@@ -555,7 +612,7 @@ impl Model {
             return;
         }
         self.current.query = value;
-        self.invalidate_preview();
+        self.invalidate_preview(RetainPreview::Keep);
         self.clear_transient_message();
         self.request_search(false);
     }
@@ -625,9 +682,8 @@ impl Model {
                 if self.preview_command().is_none() {
                     return;
                 }
-                self.preview_enabled = !self.preview_enabled;
-                self.invalidate_preview();
-                self.preview_text.clear();
+                self.preview.enabled = !self.preview.enabled;
+                self.invalidate_preview(RetainPreview::Discard);
                 self.update_preview();
             }
             BindingAction::Run { command, reload } => {
@@ -685,13 +741,11 @@ impl Model {
 
     fn pop(&mut self) {
         let Some(parent) = self.levels.pop() else { return };
-        self.effects.extend([TaskKind::Source, TaskKind::Search, TaskKind::Preview].map(Effect::Cancel));
+        self.effects.extend([TaskKind::Source, TaskKind::Search].map(Effect::Cancel));
         self.current = parent.level;
         self.current.source_generation = SourceGeneration(self.fresh());
         self.current.shown.source_generation = Some(self.current.source_generation);
-        self.preview_generation = None;
-        self.preview_identity = None;
-        self.preview_text.clear();
+        self.invalidate_preview(RetainPreview::Discard);
         self.result_revision += 1;
         self.update_preview();
         if parent.stdin_changed {
@@ -726,7 +780,7 @@ impl Model {
         self.current.message = None;
         self.effects.push(Effect::Cancel(TaskKind::Search));
         if kind == LoadKind::Replace {
-            self.preview_text.clear();
+            self.invalidate_preview(RetainPreview::Discard);
         }
         self.update_preview();
         let context = ActionContext {
@@ -754,7 +808,7 @@ impl Model {
             Ok(items) => {
                 self.current.store = Items::from(items);
                 self.current.ingestion = Ingestion::Complete;
-                self.invalidate_preview();
+                self.invalidate_preview(RetainPreview::Keep);
             }
             Err(error) => {
                 self.current.store = Items::default();
@@ -844,31 +898,30 @@ impl Model {
     }
 
     fn update_preview(&mut self) {
-        let item = self.highlighted().cloned();
-        let shown = self.preview_visible() && self.can_act();
-        let identity = item.clone().filter(|_| shown).map(|i| (self.current.source_generation, i, self.query().to_owned()));
-        if identity.is_none() && self.can_act() {
-            self.preview_text.clear();
-        }
-        if identity == self.preview_identity {
+        let identity = self.highlighted().filter(|_| self.preview_visible() && self.can_act()).map(|item| PreviewIdentity {
+            source: self.current.source_generation,
+            item: item.clone(),
+            query: self.query().to_owned(),
+        });
+        if identity.as_ref() == self.preview.identity() {
+            if identity.is_none() && self.can_act() {
+                self.preview.invalidate(RetainPreview::Discard);
+            }
             return;
         }
-        self.preview_identity = identity;
-        self.preview_generation = None;
-        let (Some(argv), Some(item), true) = (self.preview_command(), item, shown) else {
-            self.effects.push(Effect::Cancel(TaskKind::Preview));
-            self.preview_text.clear();
+        let (Some(argv), Some(identity)) = (self.preview_command(), identity) else {
+            self.invalidate_preview(RetainPreview::Discard);
             return;
         };
         let context = ActionContext {
             action: "preview".into(),
-            query: self.query().to_owned(),
+            query: identity.query.clone(),
             source: self.source_id().map(ToString::to_string),
-            items: vec![item.clone()],
-            path: self.path(vec![item]),
+            items: vec![identity.item.clone()],
+            path: self.path(vec![identity.item.clone()]),
         };
         let token = self.fresh();
-        self.preview_generation = Some(token);
+        self.preview.start(identity, token);
         self.effects.push(Effect::Start(Task::Preview {
             token,
             argv,
@@ -883,9 +936,8 @@ impl Model {
         }
     }
 
-    fn invalidate_preview(&mut self) {
-        self.preview_generation = None;
-        self.preview_identity = None;
+    fn invalidate_preview(&mut self, retention: RetainPreview) {
+        self.preview.invalidate(retention);
         self.effects.push(Effect::Cancel(TaskKind::Preview));
     }
 
