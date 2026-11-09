@@ -30,13 +30,13 @@ pub mod icons;
 
 mod button;
 mod choice;
+mod command_palette;
 mod dialog;
 mod display;
 mod form;
 mod layout;
 mod list;
 mod menu;
-mod palette;
 mod settings;
 mod theme;
 
@@ -45,13 +45,13 @@ mod tests;
 
 pub use button::*;
 pub use choice::*;
+pub use command_palette::*;
 pub use dialog::*;
 pub use display::*;
 pub use form::*;
 pub use layout::*;
 pub use list::*;
 pub use menu::*;
-pub use palette::*;
 pub use settings::*;
 pub use theme::*;
 
