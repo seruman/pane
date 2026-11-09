@@ -262,8 +262,7 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
 
 fn matched(content: &str, marks: Vec<std::ops::Range<usize>>, style: TextStyle, color: Color, mark: Color) -> El {
     let spans: Vec<Span> = marks.into_iter().map(|r| Span::new(r.start, r.end).color(mark).weight(650.0)).collect();
-    let line = if spans.is_empty() { text(content.to_owned()) } else { rich(content.to_owned(), spans).single_line() };
-    line.font(style).color(color).truncate_middle()
+    rich(content.to_owned(), spans).font(style).color(color).truncate_middle()
 }
 
 fn preview_pane(preview: &str, c: &Palette, width: f32) -> El {
