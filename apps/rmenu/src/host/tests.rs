@@ -44,6 +44,28 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
 }
 
 #[test]
+#[ignore = "timing probe, run with --ignored --nocapture"]
+fn poll_budget_measurement() {
+    let mut samples = Vec::new();
+    for _ in 0..21 {
+        let mut menu = menu_without_stdin();
+        let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = wakes.clone();
+        menu.setup(Arc::new(move || { count.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }));
+        for _ in 0..500_000 {
+            menu.sender.send(Message::Event(Event::StdinItems(Vec::new()))).unwrap();
+        }
+        let start = Instant::now();
+        assert!(menu.poll(&mut Tx::default()));
+        samples.push(start.elapsed().as_secs_f64() * 1000.0);
+        assert!(menu.events.try_recv().is_ok(), "the budget yields before draining a flood");
+        assert!(wakes.load(std::sync::atomic::Ordering::Relaxed) > 1, "pending messages schedule another frame");
+    }
+    samples.sort_by(f64::total_cmp);
+    eprintln!("poll drain only, 21 runs of 500000 queued empty stdin batches, milliseconds min={:.3} median={:.3} p90={:.3} max={:.3}", samples[0], samples[10], samples[18], samples[20]);
+}
+
+#[test]
 fn query_sync_preserves_edit_state_until_the_model_changes_the_value() {
     let mut menu = menu_without_stdin();
     menu.field.undo_group(|field| field.insert("alpha"));

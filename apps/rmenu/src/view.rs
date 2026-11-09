@@ -39,20 +39,29 @@ struct Palette {
     error: Color,
 }
 
+fn contrast_ink(background: Color) -> Color {
+    // WCAG relative-luminance contrast, https://www.w3.org/TR/WCAG22/#dfn-contrast-ratio
+    let luminance = background.luminance();
+    let black = (luminance + 0.05) / 0.05;
+    let white = 1.05 / (luminance + 0.05);
+    if black >= white { Color::BLACK } else { Color::WHITE }
+}
+
 fn palette(menu: &Menu, system_dark: bool) -> Palette {
     let terminal = rune::terminal_colors().unwrap_or_default();
     let dark = match menu.appearance {
         Appearance::Light => false,
         Appearance::Dark => true,
-        Appearance::System => terminal.dark.or(terminal.background.map(|b| b.luminance() < 0.18)).unwrap_or(system_dark),
+        Appearance::System => terminal.dark.or(terminal.background.map(|b| contrast_ink(b) == Color::WHITE)).unwrap_or(system_dark),
     };
     let theme = tok::theme(dark);
     let background = terminal.background.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.card);
     let foreground = terminal.foreground.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.text);
     let accent = terminal.cursor.or(terminal.palette[4]).unwrap_or_else(|| tok::accent(0, dark));
     // Text on the accent reads best as whichever of black and white contrasts more.
-    let selected_text = if accent.luminance() > 0.36 { Color { r: 0.02, g: 0.02, b: 0.02, a: 1.0 } } else { Color::WHITE };
+    let selected_text = contrast_ink(accent);
     let error = terminal.palette[if dark { 9 } else { 1 }].unwrap_or(Color { r: 0.85, g: 0.25, b: 0.2, a: 1.0 });
+    // Alpha tints set visual hierarchy. They are style choices, not contrast guarantees.
     Palette {
         background,
         foreground,
@@ -324,6 +333,21 @@ pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
 mod tests {
     use super::*;
     use rune::Mods;
+
+    #[test]
+    fn selection_ink_maximizes_contrast_and_meets_normal_text_minimum() {
+        for level in [0.0, 0.02, 0.18, 0.25, 0.36, 0.4, 0.8, 1.0] {
+            let background = Color { r: level, g: level, b: level, a: 1.0 };
+            let ink = contrast_ink(background);
+            let contrast = |color: Color| {
+                let l = color.luminance();
+                (l.max(level) + 0.05) / (l.min(level) + 0.05)
+            };
+            assert!(contrast(ink) >= contrast(Color::BLACK), "background={level}");
+            assert!(contrast(ink) >= contrast(Color::WHITE), "background={level}");
+            assert!(contrast(ink) >= 4.5, "background={level}");
+        }
+    }
 
     #[test]
     fn a_keycap_claims_the_room_its_text_takes() {

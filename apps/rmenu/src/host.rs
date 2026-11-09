@@ -183,10 +183,12 @@ impl Menu {
     }
 }
 
-/// Work `poll` does per frame before yielding to input and drawing.
-const POLL_BUDGET: Duration = Duration::from_millis(8);
-const STDIN_CHUNK: usize = 64 * 1024;
+// Target roughly one stdin publication per 60 Hz frame. Spend at most half that interval
+// draining queued messages before yielding to input and drawing. A reducer call can overrun it.
+// The ignored poll_budget_measurement test measures draining and verifies the follow-up wake.
 const STDIN_BATCH_INTERVAL: Duration = Duration::from_millis(16);
+const POLL_BUDGET: Duration = Duration::from_millis(STDIN_BATCH_INTERVAL.as_millis() as u64 / 2);
+const STDIN_CHUNK: usize = 64 * 1024;
 
 /// Emits the first decoded batch immediately, then batches at `STDIN_BATCH_INTERVAL`.
 fn read_stdin(format: InputFormat, cancel: &Cancel, emit: &dyn Fn(Event)) {

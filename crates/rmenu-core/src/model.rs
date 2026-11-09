@@ -16,7 +16,8 @@ use crate::selection::{Marks, MenuSelection};
 pub enum OutputFormat { Lines, Nul, Json }
 
 /// Rune currently keys all virtual rows on each result change. Keep this bound until
-/// its list API can key only visible rows.
+/// its list API can key only visible rows. The existing 5,000-row safety bound is not a
+/// measured usability limit.
 pub const DEFAULT_LIST_CAP: usize = 5_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
