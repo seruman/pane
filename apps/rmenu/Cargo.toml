@@ -1,5 +1,6 @@
 [package]
 name = "rmenu"
+publish = false
 description = "mmenu's command-line contract, drawn by Rune inside a terminal."
 edition.workspace = true
 version.workspace = true
