@@ -1,5 +1,3 @@
-# ghqm drawn by rmenu in a Rex floating layer: source this file, then `ghqr [query]`.
-# Same levels and keys as mmenu's examples/ghqm.fish. Outside Rex it draws in this terminal.
 set -l examples (path resolve -- (path dirname -- (status filename)) | string collect)
 source $examples/_mmenu_git.fish
 
