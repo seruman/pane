@@ -197,7 +197,6 @@ pub struct Type {
 #[non_exhaustive]
 pub struct Theme {
     pub palette: Palette,
-    pub dark: bool,
     /// The pane: the terminal background.
     pub background: Color,
     /// Settings groups and cards, a shade off the pane.
@@ -334,7 +333,6 @@ impl Theme {
                 title: TextStyle::new(15.0, 600.0),
                 mono: TextStyle::new(12.0, 500.0).mono(),
             },
-            dark,
             kit,
             palette,
         }

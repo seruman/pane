@@ -101,7 +101,7 @@ impl SegmentedControl {
                 );
             option = if on {
                 option
-                    .fill(if theme.dark {
+                    .fill(if theme.palette.dark {
                         crate::mix(theme.background, theme.text, 0.16)
                     } else {
                         rune::Color::WHITE
