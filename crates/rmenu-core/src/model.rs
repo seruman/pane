@@ -642,9 +642,9 @@ impl Model {
             }
             Nav::Back => {
                 if self.levels.is_empty() {
-                    self.cancel(effects)
+                    self.cancel(effects);
                 } else {
-                    self.pop(effects)
+                    self.pop(effects);
                 }
             }
             Nav::PopIfEmpty => {
@@ -654,9 +654,9 @@ impl Model {
             }
             Nav::Tab => {
                 if self.options.multi {
-                    self.toggle(effects)
+                    self.toggle(effects);
                 } else {
-                    self.move_by(1, effects)
+                    self.move_by(1, effects);
                 }
             }
             Nav::Cancel => self.cancel(effects),
@@ -843,7 +843,7 @@ impl Model {
 
     fn reload(&mut self, effects: &mut Vec<Effect>) {
         if let Some(source) = self.source().cloned() {
-            self.load(&source, LoadKind::Reload, effects)
+            self.load(&source, LoadKind::Reload, effects);
         } else {
             self.current.message = Some(Status::Error("Piped input cannot be re-run".into()));
             effects.push(Effect::Beep);

@@ -1048,7 +1048,7 @@ printf '%s\n' "$$" > "$1/leader"
                         &cancel,
                     ) {
                         Ok(result) => {
-                            assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0)))
+                            assert_eq!((result.stdout, result.status), (input.into_bytes(), ExitStatus::Code(0)));
                         }
                         Err(CommandError::Cancelled) => assert_eq!(i % 2, 0),
                         Err(e) => panic!("{e}"),
