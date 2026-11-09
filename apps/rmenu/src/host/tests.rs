@@ -44,6 +44,29 @@ fn each_menu_owns_its_result_and_finishes_only_once() {
 }
 
 #[test]
+fn query_sync_preserves_edit_state_until_the_model_changes_the_value() {
+    let mut menu = menu_without_stdin();
+    menu.field.undo_group(|field| field.insert("alpha"));
+    menu.handle(Event::SetQuery(menu.field.text.clone()), &mut Tx::default());
+    menu.field.anchor = 1;
+    menu.field.focus = 3;
+    menu.field.preedit = Some(("候補".into(), Some((0, 3))));
+    menu.handle(Event::StdinDone, &mut Tx::default());
+    assert_eq!(menu.model.query(), "alpha");
+    assert_eq!((menu.field.anchor, menu.field.focus), (1, 3));
+    assert_eq!(menu.field.preedit.as_ref().map(|p| p.0.as_str()), Some("候補"));
+    menu.field.undo();
+    assert!(menu.field.preedit.is_none());
+    menu.field.undo();
+    assert_eq!(menu.field.text, "");
+    menu.handle(Event::SetQuery("replacement".into()), &mut Tx::default());
+    assert_eq!(menu.field.text, menu.model.query());
+    assert_eq!((menu.field.anchor, menu.field.focus), (11, 11));
+    assert!(menu.field.preedit.is_none());
+    menu.stop();
+}
+
+#[test]
 fn settle_lands_highlight_color_that_reduced_motion_fades() {
     fn runtime() -> rune::Runtime<Menu> {
         let mut menu = menu_without_stdin();

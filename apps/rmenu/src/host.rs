@@ -101,6 +101,7 @@ impl Menu {
         tx.settle();
         let effects = self.model.handle(event);
         self.apply(effects, tx);
+        // The model owns the query value. The field keeps selection, composition, and undo state.
         if self.field.text != self.model.query() {
             self.field.replace_text(self.model.query());
         }
