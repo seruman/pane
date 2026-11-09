@@ -16,6 +16,7 @@ pub mod config;
 pub mod item;
 mod items;
 pub mod model;
+mod preview;
 pub mod record;
 pub mod search;
 mod selection;

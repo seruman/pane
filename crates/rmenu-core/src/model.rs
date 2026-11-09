@@ -469,11 +469,12 @@ impl Model {
                 if token != self.preview_generation {
                     return;
                 }
-                self.preview_text = match result {
+                let text = match result {
                     Ok(r) if r.status.success() => String::from_utf8_lossy(&r.stdout).into_owned(),
                     Ok(r) => command_failure(&r),
                     Err(error) => error,
                 };
+                self.preview_text = crate::preview::plain_text(&text);
             }
             Event::OperationDone { token, result } => self.operation_done(token, result),
         }

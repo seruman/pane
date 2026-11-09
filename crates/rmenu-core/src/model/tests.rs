@@ -11,6 +11,29 @@ use crate::record::RecordDecoder;
 use crate::command::ExitStatus;
 
 #[test]
+fn preview_results_are_stored_as_plain_text() {
+    let mut h = Harness::new(options(json!({"preview": ["preview"]})));
+    h.stdin("alpha\nbeta\n");
+    h.settle();
+    let (event, _) = h.preview_event("\u{1b}[31mred\u{1b}[m\rOK");
+    h.send(event);
+    assert_eq!(h.model.preview(), Some("OKd"));
+    h.highlight(1);
+    let (mut event, _) = h.preview_event("");
+    let Event::PreviewDone { result, .. } = &mut event else { unreachable!() };
+    *result = Err("\u{1b}[31mfailure\u{1b}[m".into());
+    h.send(event);
+    assert_eq!(h.model.preview(), Some("failure"));
+    h.highlight(0);
+    let (mut event, _) = h.preview_event("");
+    let Event::PreviewDone { result, .. } = &mut event else { unreachable!() };
+    *result = Ok(CommandResult { stdout: Vec::new(), stderr: b"\x1b[31mfailed\x1b[m".to_vec(), status: ExitStatus::Code(1) });
+    h.send(event);
+    assert!(h.model.preview().unwrap().contains("failed"));
+    assert!(!h.model.preview().unwrap().contains('\u{1b}'));
+}
+
+#[test]
 fn row_lookup_only_resolves_currently_listed_items() {
     let mut o = options(json!({}));
     o.list_cap = 2;
