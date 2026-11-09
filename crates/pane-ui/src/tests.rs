@@ -34,6 +34,12 @@ fn up_and_down_wrap_at_the_ends() {
 }
 
 #[test]
+#[should_panic(expected = "index out of bounds")]
+fn ansi_indices_outside_the_palette_are_rejected() {
+    Theme::new(Palette::merino_dark()).ansi(16);
+}
+
+#[test]
 fn text_on_a_fill_contrasts_with_it() {
     let theme = Theme::new(Palette::merino_light());
     assert_eq!(theme.on(Color::BLACK), Color::WHITE);

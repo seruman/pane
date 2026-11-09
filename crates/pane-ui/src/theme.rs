@@ -344,9 +344,9 @@ impl Theme {
         on_fill(fill, &self.palette)
     }
 
-    /// One of the theme's 16 ANSI colours.
+    /// One of the theme's 16 ANSI colours. Panics if `index` is outside `0..16`.
     pub fn ansi(&self, index: usize) -> Color {
-        self.palette.ansi[index % 16]
+        self.palette.ansi[index]
     }
 }
 
