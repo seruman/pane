@@ -4,31 +4,40 @@ use std::ops::Index;
 use std::sync::Arc;
 
 use crate::item::MenuItem;
+use nucleo_matcher::Utf32String;
 
-const CHUNK: usize = 8_192;
+pub(crate) const CHUNK: usize = 8_192;
+
+#[derive(Clone, Debug)]
+pub(crate) struct Chunk {
+    items: Vec<MenuItem>,
+    pub(crate) text: Vec<Utf32String>,
+}
 
 /// Rows in shared fixed-size chunks. Cloning copies one pointer, and appending while a clone
 /// is alive (a search running over a snapshot) copies at most the last, partial chunk, so
 /// streaming N rows costs O(N) however many snapshots are taken along the way.
 #[derive(Clone, Debug, Default)]
 pub struct Items {
-    chunks: Arc<Vec<Arc<Vec<MenuItem>>>>,
-    len: usize,
+    pub(crate) chunks: Arc<Vec<Arc<Chunk>>>,
+    pub(crate) len: usize,
 }
 
 impl Items {
     pub fn extend(&mut self, items: impl IntoIterator<Item = MenuItem>) {
         let chunks = Arc::make_mut(&mut self.chunks);
         for item in items {
-            if chunks.last().is_none_or(|c| c.len() == CHUNK) {
-                chunks.push(Arc::new(Vec::with_capacity(CHUNK)));
+            if chunks.last().is_none_or(|c| c.items.len() == CHUNK) {
+                chunks.push(Arc::new(Chunk { items: Vec::new(), text: Vec::new() }));
             }
-            Arc::make_mut(chunks.last_mut().expect("pushed above")).push(item);
+            let chunk = Arc::make_mut(chunks.last_mut().expect("pushed above"));
+            chunk.text.push(Utf32String::from(item.search_text()));
+            chunk.items.push(item);
             self.len += 1;
         }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &MenuItem> { self.chunks.iter().flat_map(|c| c.iter()) }
+    pub fn iter(&self) -> impl Iterator<Item = &MenuItem> { self.chunks.iter().flat_map(|c| c.items.iter()) }
 }
 
 impl From<Vec<MenuItem>> for Items {
@@ -41,7 +50,7 @@ impl From<Vec<MenuItem>> for Items {
 
 impl Index<usize> for Items {
     type Output = MenuItem;
-    fn index(&self, i: usize) -> &MenuItem { &self.chunks[i / CHUNK][i % CHUNK] }
+    fn index(&self, i: usize) -> &MenuItem { &self.chunks[i / CHUNK].items[i % CHUNK] }
 }
 
 #[cfg(test)]
@@ -61,6 +70,20 @@ mod tests {
         assert_eq!(items[CHUNK].title(), format!("t{CHUNK}"));
         assert_eq!(snapshot.iter().count(), CHUNK + 5);
         assert_eq!(titles(&snapshot).last().unwrap(), &format!("t{}", CHUNK + 4));
+    }
+
+    #[test]
+    fn appends_keep_search_offsets_and_item_payloads_together() {
+        let mut items = Items::default();
+        items.extend((0..CHUNK - 1).map(|i| MenuItem::new(i.to_string(), "old")));
+        let snapshot = items.clone();
+        items.extend((CHUNK - 1..CHUNK + 2).map(|i| MenuItem::new(i.to_string(), "new").with_value(format!("value-{i}"))));
+        let offsets = items.search("new", false, &|| false).unwrap();
+        assert_eq!(offsets, [(CHUNK - 1) as u32, CHUNK as u32, (CHUNK + 1) as u32]);
+        for offset in offsets {
+            assert_eq!(items[offset as usize].value(), format!("value-{offset}"));
+        }
+        assert!(snapshot.search("new", false, &|| false).unwrap().is_empty());
     }
 
     #[test]

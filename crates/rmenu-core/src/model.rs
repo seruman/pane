@@ -161,13 +161,6 @@ pub fn command_failure(result: &CommandResult) -> String {
     }
 }
 
-/// Rows of one source generation. Append-only; a reload gets a new store.
-#[derive(Default)]
-struct Store {
-    items: Items,
-    index: SearchIndex,
-}
-
 /// The rows on screen and what was matched to produce them. They may belong to an older
 /// source generation than the level's `store` while its replacement loads.
 #[derive(Clone, Default)]
@@ -184,7 +177,7 @@ struct Shown {
 /// without re-running its command.
 struct Level {
     source_id: Option<SourceId>,
-    store: Store,
+    store: Items,
     shown: Shown,
     query: String,
     loading: bool,
@@ -239,7 +232,7 @@ pub struct Model {
 
     levels: Vec<Level>,
     source_id: Option<SourceId>,
-    store: Store,
+    store: Items,
     shown: Shown,
     query: String,
     loading: bool,
@@ -278,7 +271,7 @@ impl Model {
             next_token: 0,
             levels: Vec::new(),
             source_id: None,
-            store: Store::default(),
+            store: Items::default(),
             shown: Shown::default(),
             query,
             loading: true,
@@ -441,8 +434,7 @@ impl Model {
                     Some(root) => &mut root.store,
                     None => &mut self.store,
                 };
-                store.index.append(&batch);
-                store.items.extend(batch);
+                store.extend(batch);
                 self.stdin_changed();
             }
             Event::StdinDone => {
@@ -706,7 +698,7 @@ impl Model {
         self.search = None;
         self.pending_data_search = false;
         self.pending_prune = true;
-        self.store = Store::default();
+        self.store = Items::default();
         self.loading = true;
         self.awaiting_source_data = true;
         self.input_failed = false;
@@ -742,13 +734,13 @@ impl Model {
         self.awaiting_source_data = false;
         match result {
             Ok(items) => {
-                self.store = Store { index: SearchIndex::new(&items), items: Items::from(items) };
+                self.store = Items::from(items);
                 // A reload can change preview content without changing an item's ID/value.
                 self.invalidate_preview();
             }
             Err(error) => {
                 // Failure is a settled empty source, published like a successful empty one.
-                self.store = Store::default();
+                self.store = Items::default();
                 self.input_failed = true;
                 self.message = Some(Status::Error(error));
             }
@@ -779,10 +771,10 @@ impl Model {
         self.pending_data_search = false;
         self.pending_prune |= prune;
         self.generation = self.fresh();
-        self.search = Some(SearchRun { query: self.query.clone(), items: self.store.items.clone() });
+        self.search = Some(SearchRun { query: self.query.clone(), items: self.store.clone() });
         self.effects.push(Effect::Start(Task::Search {
             token: self.generation,
-            index: self.store.index.clone(),
+            index: self.store.clone(),
             query: self.query.clone(),
             sorted: self.options.sorted,
         }));

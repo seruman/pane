@@ -1,29 +1,20 @@
 //! Fuzzy-ranked matching on nucleo-matcher.
 
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str, Utf32String};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::item::MenuItem;
 
-const CHUNK: usize = 8_192;
+use crate::items::CHUNK;
+pub use crate::items::Items as SearchIndex;
 const MATCHER_CONFIG: Config = Config::DEFAULT;
 
 fn pattern(query: &str) -> Pattern {
     Pattern::parse(query, CaseMatching::Smart, Normalization::Smart)
-}
-
-/// Prepared search text for a list of rows. Cloning is cheap (shared; append makes a new
-/// generation), so a host can search a snapshot on another thread while input keeps arriving.
-#[derive(Clone, Debug, Default)]
-pub struct SearchIndex {
-    // Chunked so an append while a snapshot is alive copies at most one chunk, not every row.
-    chunks: Arc<Vec<Arc<Vec<Utf32String>>>>,
-    len: usize,
 }
 
 /// Byte ranges of `text` the query matched, merged and in order.
@@ -81,27 +72,6 @@ pub fn item_highlights(query: &str, item: &MenuItem) -> (Vec<Range<usize>>, Vec<
 pub struct Cancelled;
 
 impl SearchIndex {
-    pub fn new(items: &[MenuItem]) -> Self {
-        let mut index = SearchIndex::default();
-        index.append(items);
-        index
-    }
-
-    pub fn append(&mut self, items: &[MenuItem]) {
-        let chunks = Arc::make_mut(&mut self.chunks);
-        let mut pending = items;
-        while !pending.is_empty() {
-            if chunks.last().is_none_or(|c| c.len() == CHUNK) {
-                chunks.push(Arc::new(Vec::with_capacity(CHUNK.min(pending.len()))));
-            }
-            let chunk = Arc::make_mut(chunks.last_mut().expect("pushed above"));
-            let (taken, rest) = pending.split_at((CHUNK - chunk.len()).min(pending.len()));
-            chunk.extend(taken.iter().map(|i| Utf32String::from(i.search_text())));
-            self.len += taken.len();
-            pending = rest;
-        }
-    }
-
     /// Offsets of matching rows, with nucleo's pattern syntax and smart case.
     /// Sorted: summed score, then shorter text, then input order. Unsorted: input order.
     /// Workers poll `cancelled` while matching. Single-chunk searches run on the caller.
@@ -147,7 +117,7 @@ impl SearchIndex {
             let Some(chunk) = self.chunks.get(index) else { break };
             let base = index * CHUNK;
             let mut rows = Vec::new();
-            for (local, text) in chunk.iter().enumerate() {
+            for (local, text) in chunk.text.iter().enumerate() {
                 if local % 256 == 0 && cancelled() { return Err(Cancelled); }
                 if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
                     rows.push(Ranked { score, len: text.len() as u32, offset: (base + local) as u32 });

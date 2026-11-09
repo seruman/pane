@@ -4,7 +4,7 @@ use super::*;
 
 fn index(titles: &[&str]) -> SearchIndex {
     let items: Vec<MenuItem> = titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), *t)).collect();
-    SearchIndex::new(&items)
+    SearchIndex::from(items)
 }
 
 fn search(index: &SearchIndex, query: &str) -> Vec<u32> { index.search(query, true, &|| false).unwrap() }
@@ -77,7 +77,7 @@ fn scalars_match_whole() {
 fn empty_queries_append_and_snapshots() {
     let mut rows = index(&["zfoo", "foo", "foo"]);
     let snapshot = rows.clone();
-    rows.append(&[MenuItem::new("3", "foo")]);
+    rows.extend([MenuItem::new("3", "foo")]);
     assert_eq!(search(&rows, ""), [0, 1, 2, 3]);
     assert_eq!(search(&rows, "   "), [0, 1, 2, 3]);
     assert_eq!(unsorted(&rows, "foo"), [0, 1, 2, 3]);
@@ -90,9 +90,9 @@ fn empty_queries_append_and_snapshots() {
 fn appends_past_a_chunk_leave_snapshots_alone() {
     let titles: Vec<String> = (0..CHUNK + 10).map(|i| format!("row-{i}")).collect();
     let items: Vec<MenuItem> = titles.iter().map(|t| MenuItem::new(t.clone(), t.clone())).collect();
-    let mut rows = SearchIndex::new(&items[..CHUNK - 5]);
+    let mut rows = SearchIndex::from(items[..CHUNK - 5].to_vec());
     let snapshot = rows.clone();
-    rows.append(&items[CHUNK - 5..]);
+    rows.extend(items[CHUNK - 5..].iter().cloned());
     assert_eq!(search(&rows, "").len(), CHUNK + 10);
     assert_eq!(unsorted(&rows, &format!("row-{}", CHUNK + 9)), [(CHUNK + 9) as u32]);
     assert_eq!(search(&snapshot, "").len(), CHUNK - 5);
@@ -108,7 +108,7 @@ fn uses_menu_item_search_text() {
     b.search = Some("Override".into());
     let mut c = MenuItem::new("c", "Other").with_value("Secret");
     c.detail = Some("Private".into());
-    let rows = SearchIndex::new(&[a, b, c]);
+    let rows = SearchIndex::from(vec![a, b, c]);
     assert_eq!(search(&rows, "visible"), [0]);
     assert_eq!(search(&rows, "searchable"), [0]);
     assert_eq!(search(&rows, "override"), [1]);
@@ -146,7 +146,7 @@ fn cancellation_mid_scan_stops_early() {
 fn large_indexes_keep_input_order_for_ties() {
     let titles: Vec<String> = (0..50_000).map(|i| format!("src/module{}/file.swift", i % 13)).collect();
     let items: Vec<MenuItem> = titles.iter().enumerate().map(|(i, t)| MenuItem::new(i.to_string(), t.clone())).collect();
-    let rows = SearchIndex::new(&items);
+    let rows = SearchIndex::from(items);
     let ranked = search(&rows, "module1 swift");
     let module1: Vec<u32> = (0..50_000).filter(|i| i % 13 == 1).collect();
     assert_eq!(ranked.len(), (0..50_000).filter(|i| i % 13 == 1 || i % 13 >= 10).count());
@@ -202,7 +202,7 @@ fn item_highlights_follow_the_text_the_row_matched() {
     };
     let mut item = MenuItem::new("1", "a");
     item.subtitle = Some("b".into());
-    assert_eq!(search(&SearchIndex::new(std::slice::from_ref(&item)), "ab"), [0], "fixture: the row matches");
+    assert_eq!(search(&SearchIndex::from(vec![item.clone()]), "ab"), [0], "fixture: the row matches");
     assert_eq!(marked("ab", &item), (vec!["a".into()], vec!["b".into()]), "a token spanning both fields marks both");
     let mut item = MenuItem::new("1", "src/rune");
     item.subtitle = Some("seruman".into());

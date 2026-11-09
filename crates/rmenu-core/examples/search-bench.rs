@@ -31,7 +31,7 @@ fn bench(count: usize, runs: usize, calls: usize) {
         })
         .collect();
     let start = Instant::now();
-    let index = SearchIndex::new(&items);
+    let index = SearchIndex::from(items);
     println!("{count} paths, index {:.3} ms, {runs} runs, {calls} calls per run", ms(start.elapsed()));
     let queries = ["", "swift", "srchidx", "mcore srch", "tests cache", "project-42 settings", "不存在", "zzzz-no-match"];
     for sorted in [true, false] {

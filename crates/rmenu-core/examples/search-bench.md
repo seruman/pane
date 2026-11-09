@@ -28,3 +28,7 @@ Separate, unreported timing runs used macOS `sample` and `/usr/bin/time -lp`. Th
 The candidate sample instead reached nucleo pattern scoring and fuzzy-match matrix setup. A 10,000-call-per-query candidate run took 0.28 seconds elapsed, 0.23 seconds user CPU, and 0.04 seconds system CPU. Its limiter is CPU work in matching and allocation. Removing the approximately 0.315 ms wait explains the small-list saving without requiring impossible matching throughput. Full matching still runs inside each timed call. The million-row results retain the existing parallel path.
 
 The experiment does not measure terminal rendering or command startup. Those remain gaps for an end-to-end latency claim. The deterministic cancellation test fails on the baseline because workers cannot consult the callback, then passes with direct worker checks.
+
+## Shared row storage check
+
+A later structural change puts item payloads and prepared text in the same shared chunks. Each chunk keeps text in a separate contiguous vector. Five alternating million-row runs compare that change with the direct-cancellation candidate above, using the same command and verification checks. Ranked `swift` medians were 37.572 ms before and 38.526 ms after, with ranges of 36.659 to 41.509 ms and 36.469 to 38.985 ms. Input-order medians were 18.411 ms before and 18.106 ms after, with ranges of 17.090 to 18.987 ms and 17.242 to 20.004 ms. Both comparisons show no measurable difference. Snapshot tests also confirm that appends retain full shared chunks and leave earlier searches and payloads unchanged.
