@@ -133,12 +133,6 @@ impl Review {
         id
     }
 
-    /// The comments in order, without their ids.
-    #[cfg(test)]
-    pub fn comments(&self) -> Vec<&Comment> {
-        self.comments.iter().map(|(_, c)| c).collect()
-    }
-
     /// Every comment with its id, in order.
     pub fn iter(&self) -> impl Iterator<Item = (CommentId, &Comment)> {
         self.comments.iter().map(|(id, c)| (*id, c))

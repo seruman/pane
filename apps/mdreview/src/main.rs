@@ -24,7 +24,7 @@ mod page;
 mod review;
 
 use std::cell::Cell;
-use std::io::{IsTerminal as _, Read as _, Write};
+use std::io::{IsTerminal as _, Write};
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -1226,29 +1226,40 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
 /// Reads the command line: `[FILE | -] [-o OUT]`. Exits with a message when the document can't
 /// be read.
 fn read_input() -> Input {
-    let Args { path, out } = parse_args(rune::extra_args()).unwrap_or_else(|e| fail(&e));
+    let mut stdin = std::io::stdin();
+    let terminal = stdin.is_terminal();
+    load_input(rune::extra_args(), &mut stdin, terminal).unwrap_or_else(|error| fail(&error))
+}
+
+fn load_input(
+    args: &[String],
+    stdin: &mut impl std::io::Read,
+    terminal: bool,
+) -> Result<Input, String> {
+    let Args { path, out } = parse_args(args)?;
     let (origin, source) = match path.as_deref() {
         Some("-") => {
-            if std::io::stdin().is_terminal() {
-                fail("`-` reads the document from stdin, but stdin is the terminal");
+            if terminal {
+                return Err("`-` reads the document from stdin, but stdin is the terminal".into());
             }
-            let mut s = String::new();
-            if let Err(e) = std::io::stdin().read_to_string(&mut s) {
-                fail(&format!("could not read stdin: {e}"));
-            }
-            (Origin::Stdin, s)
+            let mut source = String::new();
+            stdin
+                .read_to_string(&mut source)
+                .map_err(|error| format!("could not read stdin: {error}"))?;
+            (Origin::Stdin, source)
         }
-        Some(p) => match std::fs::read_to_string(p) {
-            Ok(s) => (Origin::File(p.to_owned()), s),
-            Err(e) => fail(&format!("could not read {p}: {e}")),
-        },
+        Some(path) => {
+            let source = std::fs::read_to_string(path)
+                .map_err(|error| format!("could not read {path}: {error}"))?;
+            (Origin::File(path.to_owned()), source)
+        }
         None => (Origin::Sample, SAMPLE.to_owned()),
     };
-    Input {
+    Ok(Input {
         origin,
         source,
         out,
-    }
+    })
 }
 
 fn fail(message: &str) -> ! {
