@@ -74,11 +74,9 @@ fn a_query_with_diacritics_matches_them_exactly() {
 
 #[test]
 fn scalars_match_whole() {
-    // These CJK characters contain bytes that could falsely match 丁 if a matcher
-    // allowed gaps inside a multibyte scalar.
     let cjk = index(&["一䁁", "丁"]);
-    assert_eq!(unsorted(&cjk, "丁"), [1]);
-    assert_eq!(search(&cjk, "丁"), [1]);
+    assert_eq!(unsorted(&cjk, "丁"), [1], "bytes from separate CJK scalars must not combine into a match");
+    assert_eq!(search(&cjk, "丁"), [1], "bytes from separate CJK scalars must not combine into a match");
 }
 
 #[test]
