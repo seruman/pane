@@ -269,44 +269,65 @@ mod tests {
             if path.is_empty() && source.kind() == std::io::ErrorKind::NotFound));
     }
 
+    fn config(contents: &str) -> tempfile::NamedTempFile {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), contents).unwrap();
+        file
+    }
+
     #[test]
-    fn preview_becomes_a_shell_argv_and_config_supplies_defaults() {
-        let dir = std::env::temp_dir().join(format!("rmenu-cli-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("c.json");
-        std::fs::write(
-            &path,
-            r#"{"prompt":"Pick","multi":true,"sources":[{"id":"a","label":"A","command":["true"]}]}"#,
-        )
-        .unwrap();
-        let launch = parse(&["--config", path.to_str().unwrap(), "--preview", "cat \"$MMENU_VALUE\""])
-            .unwrap()
-            .launch(true)
-            .unwrap();
-        let o = &launch.options;
+    fn config_fixture_is_removed_during_unwind() {
+        let file = config("{}");
+        let path = file.path().to_owned();
+        let result = std::panic::catch_unwind(move || {
+            let _file = file;
+            panic!("injected assertion failure");
+        });
+        assert!(result.is_err());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn preview_becomes_a_shell_argv() {
+        let launch = parse(&["--preview", "cat \"$MMENU_VALUE\""]).unwrap().launch(false).unwrap();
         assert_eq!(
-            o.configuration.preview(),
+            launch.options.configuration.preview(),
             Some(&["/bin/sh".to_owned(), "-c".into(), "cat \"$MMENU_VALUE\"".into()][..])
         );
-        assert_eq!((o.prompt.as_str(), o.multi), ("Pick", true));
-        let flagged = parse(&["--config", path.to_str().unwrap(), "--prompt", "Mine"]).unwrap().launch(true).unwrap();
+    }
+
+    #[test]
+    fn configuration_supplies_defaults_and_flags_override_them() {
+        let file = config(r#"{"prompt":"Pick","multi":true,"sources":[{"id":"a","label":"A","command":["true"]}]}"#);
+        let path = file.path().to_str().unwrap();
+        let launch = parse(&["--config", path]).unwrap().launch(true).unwrap();
+        assert_eq!(launch.options.prompt, "Pick");
+        assert!(launch.options.multi);
+        let flagged = parse(&["--config", path, "--prompt", "Mine"]).unwrap().launch(true).unwrap();
         assert_eq!(flagged.options.prompt, "Mine");
-        std::fs::write(&path, r#"{"preview":[]}"#).unwrap();
-        let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
+    }
+
+    #[test]
+    fn preview_override_is_validated_instead_of_the_replaced_command() {
+        let file = config(r#"{"preview":[]}"#);
+        let path = file.path().to_str().unwrap();
+        let error = parse(&["--config", path]).unwrap().launch(false).unwrap_err();
         assert!(
             matches!(error, LaunchError::Configuration { path: Some(ref file), source: ConfigurationError::MissingProgram { ref entry } }
-            if file == path.to_str().unwrap() && entry == "Preview command")
+            if file == path && entry == "Preview command")
         );
-        let overridden =
-            parse(&["--config", path.to_str().unwrap(), "--preview", "echo"]).unwrap().launch(false).unwrap();
+        let overridden = parse(&["--config", path, "--preview", "echo"]).unwrap().launch(false).unwrap();
         assert_eq!(
             overridden.options.configuration.preview(),
             Some(["/bin/sh".into(), "-c".into(), "echo".into()].as_slice())
         );
-        std::fs::write(&path, r#"{"theme":"sepia"}"#).unwrap();
-        let error = parse(&["--config", path.to_str().unwrap()]).unwrap().launch(false).unwrap_err();
+    }
+
+    #[test]
+    fn invalid_configuration_theme_names_the_rejected_value() {
+        let file = config(r#"{"theme":"sepia"}"#);
+        let error = parse(&["--config", file.path().to_str().unwrap()]).unwrap().launch(false).unwrap_err();
         assert!(matches!(error, LaunchError::Configuration { source: ConfigurationError::Json(_), .. }));
         assert!(error.to_string().contains("sepia"));
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
