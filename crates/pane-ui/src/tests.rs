@@ -116,14 +116,40 @@ fn a11y(content: fn(&Theme) -> rune::El, key: &str) -> serde_json::Value {
         rune::Env::default(),
     );
     rt.frame(0.0);
-    fn find(v: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
-        if v["key"] == key {
-            return Some(v.clone());
-        }
-        v["children"].as_array()?.iter().find_map(|c| find(c, key))
-    }
-    find(&rt.accessibility_json(), key)
+    accessibility_node(&rt.accessibility_json(), key)
         .unwrap_or_else(|| panic!("no {key} in the accessibility tree"))
+}
+
+fn accessibility_node(node: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
+    if node["key"] == key {
+        return Some(node.clone());
+    }
+    node["children"]
+        .as_array()?
+        .iter()
+        .find_map(|child| accessibility_node(child, key))
+}
+
+fn element<S: 'static>(rt: &rune::Runtime<S>, key: &str) -> rune::ElementInfo {
+    rt.elements()
+        .into_iter()
+        .find(|element| !element.exiting && element.key.as_deref() == Some(key))
+        .unwrap_or_else(|| panic!("no rendered element {key}"))
+}
+
+fn click<S: 'static>(rt: &mut rune::Runtime<S>, key: &str) {
+    let (x, y) = rt
+        .find(key)
+        .unwrap_or_else(|| panic!("no clickable element {key}"));
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+}
+
+fn press<S: 'static>(rt: &mut rune::Runtime<S>, key: rune::Key) {
+    rt.key(rune::KeyEvent {
+        key,
+        mods: rune::Mods::default(),
+    });
 }
 
 fn states(node: &serde_json::Value) -> Vec<String> {
@@ -185,20 +211,22 @@ fn select_height_uses_the_control_size() {
 }
 
 #[test]
-fn select_toggle_opens_and_escape_closes_repeatedly() {
+fn select_overlays_show_choices_apply_them_and_dismiss() {
     #[derive(Default)]
     struct State {
         open: bool,
-        toggles: usize,
+        current: usize,
     }
     fn view(s: &State, _: &mut rune::Cx<State>) -> rune::El {
         let theme = Theme::new(Palette::merino_dark());
         let mut layer = Vec::new();
         let select = crate::Select::new(["Light", "Dark"])
+            .current(s.current)
             .open(s.open)
-            .on_toggle(|s: &mut State| {
-                s.open = !s.open;
-                s.toggles += 1;
+            .on_toggle(|s: &mut State| s.open = !s.open)
+            .on_choose(|s: &mut State, index| {
+                s.current = index;
+                s.open = false;
             })
             .build("theme", &theme, &mut layer);
         crate::Page::new()
@@ -207,20 +235,38 @@ fn select_toggle_opens_and_escape_closes_repeatedly() {
             .build(&theme)
     }
     let mut rt = rune::Runtime::new(State::default(), view, (400.0, 300.0), rune::Env::default());
-    for cycle in 0..2 {
-        rt.frame(cycle as f64);
-        let (x, y) = rt.find("theme").unwrap();
-        rt.pointer_down(x, y);
-        rt.pointer_up(x, y);
-        rt.frame(cycle as f64 + 0.1);
-        assert!(rt.state.open);
-        rt.key(rune::KeyEvent {
-            key: rune::Key::Escape,
-            mods: rune::Mods::default(),
-        });
-        rt.frame(cycle as f64 + 0.2);
-        assert!(!rt.state.open);
-        assert_eq!(rt.state.toggles, 2 * (cycle + 1));
+    rt.frame(0.0);
+    assert_eq!(element(&rt, "theme").label.as_deref(), Some("Light"));
+    assert_eq!(rt.find("theme-menu"), None);
+    assert_eq!(rt.find("option-1"), None);
+    click(&mut rt, "theme");
+    rt.frame(0.1);
+    assert_eq!(element(&rt, "theme").expanded, Some(true));
+    assert!(rt.find("theme-menu").is_some());
+    assert_eq!(element(&rt, "option-0").label.as_deref(), Some("Light"));
+    assert_eq!(element(&rt, "option-1").label.as_deref(), Some("Dark"));
+    click(&mut rt, "option-1");
+    rt.frame(0.2);
+    assert_eq!(element(&rt, "theme").label.as_deref(), Some("Dark"));
+    assert_eq!(element(&rt, "theme").expanded, Some(false));
+    assert_eq!(rt.find("theme-menu"), None);
+    assert_eq!(rt.find("option-1"), None);
+    for (cycle, outside) in [false, true].into_iter().enumerate() {
+        let time = 1.0 + cycle as f64;
+        click(&mut rt, "theme");
+        rt.frame(time);
+        assert!(rt.find("theme-menu").is_some());
+        if outside {
+            rt.pointer_down(390.0, 290.0);
+            rt.pointer_up(390.0, 290.0);
+        } else {
+            press(&mut rt, rune::Key::Escape);
+        }
+        rt.frame(time + 0.1);
+        assert_eq!(rt.find("theme-menu"), None);
+        assert_eq!(rt.find("option-1"), None);
+        assert_eq!(element(&rt, "theme").expanded, Some(false));
+        assert_eq!(element(&rt, "theme").label.as_deref(), Some("Dark"));
     }
 }
 
@@ -420,4 +466,216 @@ fn an_app_can_build_its_own_palette() {
     assert!(!palette.dark, "dark comes from the colours");
     let theme = Theme::new(palette);
     assert_eq!(theme.accent, crate::rgb(0x0066cc));
+}
+
+#[test]
+fn disabled_controls_ignore_pointer_and_keyboard_actions() {
+    #[derive(Clone, Copy, Debug)]
+    enum Control {
+        Button,
+        ButtonTx,
+        Checkbox,
+        Toggle,
+        MenuItem,
+    }
+    struct State {
+        control: Control,
+        disabled: bool,
+        presses: usize,
+        hovers: usize,
+    }
+    fn view(s: &State, _: &mut rune::Cx<State>) -> rune::El {
+        let theme = Theme::new(Palette::merino_dark());
+        let action = |s: &mut State| s.presses += 1;
+        let control = match s.control {
+            Control::Button => crate::Button::new("Run")
+                .disabled(s.disabled)
+                .on_press(action)
+                .build("control", &theme),
+            Control::ButtonTx => crate::Button::new("Run")
+                .disabled(s.disabled)
+                .on_press_tx(|s: &mut State, _| s.presses += 1)
+                .build("control", &theme),
+            Control::Checkbox => crate::Checkbox::new(false)
+                .label("Notify")
+                .disabled(s.disabled)
+                .on_toggle(action)
+                .build("control", &theme),
+            Control::Toggle => crate::Toggle::new(false, "Notify")
+                .disabled(s.disabled)
+                .on_toggle(action)
+                .build(&theme)
+                .key("control"),
+            Control::MenuItem => crate::MenuItem::new("Run")
+                .disabled(s.disabled)
+                .on_press(action)
+                .on_hover(|s: &mut State| s.hovers += 1)
+                .build("control", &theme),
+        };
+        rune::col()
+            .child(control)
+            .child(rune::text(format!("Actions: {}", s.presses)).key("result"))
+    }
+    for control in [
+        Control::Button,
+        Control::ButtonTx,
+        Control::Checkbox,
+        Control::Toggle,
+        Control::MenuItem,
+    ] {
+        for disabled in [false, true] {
+            for keyboard in [false, true] {
+                let mut rt = rune::Runtime::new(
+                    State {
+                        control,
+                        disabled,
+                        presses: 0,
+                        hovers: 0,
+                    },
+                    view,
+                    (400.0, 300.0),
+                    rune::Env::default(),
+                );
+                rt.frame(0.0);
+                let node = accessibility_node(&rt.accessibility_json(), "control").unwrap();
+                assert_eq!(
+                    states(&node).iter().any(|state| state == "disabled"),
+                    disabled,
+                    "{control:?}, disabled={disabled}: {node}"
+                );
+                assert_eq!(element(&rt, "control").focusable, !disabled);
+                if keyboard {
+                    press(&mut rt, rune::Key::Tab);
+                    rt.frame(0.1);
+                    assert_eq!(element(&rt, "control").focused, !disabled, "{control:?}");
+                    press(&mut rt, rune::Key::Text(" ".to_owned()));
+                } else {
+                    let (x, y) = rt.find("control").unwrap();
+                    rt.pointer_move(x, y);
+                    rt.frame(0.1);
+                    click(&mut rt, "control");
+                }
+                rt.frame(0.2);
+                assert_eq!(
+                    element(&rt, "result").text.as_deref(),
+                    Some(if disabled { "Actions: 0" } else { "Actions: 1" }),
+                    "{control:?}, disabled={disabled}, keyboard={keyboard}"
+                );
+                if !keyboard {
+                    assert_eq!(
+                        rt.state.hovers,
+                        usize::from(!disabled && matches!(control, Control::MenuItem)),
+                        "{control:?}, disabled={disabled}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn controls_prefer_a_width_shrink_to_fit_and_fill_on_request() {
+    #[derive(Clone, Copy, Debug)]
+    enum Width {
+        Default,
+        Preferred,
+        Fill,
+        PreferredAfterFill,
+        FillAfterPreferred,
+    }
+    struct State {
+        width: Width,
+        edit: rune::TextEdit,
+    }
+    fn view(s: &State, _: &mut rune::Cx<State>) -> rune::El {
+        let theme = Theme::new(Palette::merino_dark());
+        let field = crate::TextField::new(&s.edit, |s: &mut State| &mut s.edit);
+        let select = crate::Select::new(["Light", "Dark"]);
+        let slider = crate::Slider::new(0.5);
+        let (field, select, slider) = match s.width {
+            Width::Default => (field, select, slider),
+            Width::Preferred => (field.width(160.0), select.width(160.0), slider.width(160.0)),
+            Width::Fill => (field.fill(), select.fill(), slider.fill()),
+            Width::PreferredAfterFill => (
+                field.fill().width(160.0),
+                select.fill().width(160.0),
+                slider.fill().width(160.0),
+            ),
+            Width::FillAfterPreferred => (
+                field.width(160.0).fill(),
+                select.width(160.0).fill(),
+                slider.width(160.0).fill(),
+            ),
+        };
+        rune::col()
+            .w_full()
+            .child(
+                rune::row()
+                    .w_full()
+                    .child(field.build("input", &theme).key("field")),
+            )
+            .child(
+                rune::row()
+                    .w_full()
+                    .child(select.build("select", &theme, &mut Vec::new())),
+            )
+            .child(rune::row().w_full().child(slider.build("slider", &theme)))
+    }
+    for width in [
+        Width::Default,
+        Width::Preferred,
+        Width::Fill,
+        Width::PreferredAfterFill,
+        Width::FillAfterPreferred,
+    ] {
+        for available in [120.0_f32, 600.0] {
+            let mut rt = rune::Runtime::new(
+                State {
+                    width,
+                    edit: rune::TextEdit::default(),
+                },
+                view,
+                (available, 300.0),
+                rune::Env::default(),
+            );
+            rt.frame(0.0);
+            for (key, default) in [("field", 200.0_f32), ("select", 200.0), ("slider", 240.0)] {
+                let expected = match width {
+                    Width::Default => default.min(available),
+                    Width::Preferred | Width::PreferredAfterFill => 160.0_f32.min(available),
+                    Width::Fill | Width::FillAfterPreferred => available,
+                };
+                assert_eq!(
+                    element(&rt, key).rect[2],
+                    expected,
+                    "{key}, {width:?}, available={available}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn filled_segments_share_the_available_width() {
+    fn view(fill: &bool, _: &mut rune::Cx<bool>) -> rune::El {
+        let theme = Theme::new(Palette::merino_dark());
+        let control = crate::SegmentedControl::new(["One", "Longer label"]);
+        let control = if *fill { control.fill() } else { control };
+        rune::col().w_full().child(control.build("tabs", &theme))
+    }
+    for fill in [false, true] {
+        let mut rt = rune::Runtime::new(fill, view, (400.0, 100.0), rune::Env::default());
+        rt.frame(0.0);
+        let track = element(&rt, "tabs").rect;
+        let first = element(&rt, "option-0").rect;
+        let second = element(&rt, "option-1").rect;
+        if fill {
+            assert_eq!(track[2], 400.0);
+            assert_eq!(first[2], second[2]);
+            assert_eq!(first[0], 2.0);
+            assert_eq!(second[0] + second[2], 398.0);
+        } else {
+            assert!(track[2] < 400.0, "natural segments do not stretch");
+        }
+    }
 }
