@@ -17,24 +17,26 @@ fn pattern(query: &str) -> Pattern {
     Pattern::parse(query, CaseMatching::Smart, Normalization::Smart)
 }
 
-/// Byte ranges of `text` the query matched, merged and in order.
+fn matched_indices_per_token(pattern: &Pattern, text: Utf32Str<'_>) -> Vec<u32> {
+    let mut matcher = Matcher::new(MATCHER_CONFIG);
+    let mut hits = Vec::new();
+    for atom in &pattern.atoms {
+        let mut found = Vec::new();
+        if atom.indices(text, &mut matcher, &mut found).is_some() {
+            hits.extend(found);
+        }
+    }
+    hits
+}
+
 fn highlights(query: &str, text: &str) -> Vec<Range<usize>> {
     let pattern = pattern(query);
     if pattern.atoms.is_empty() {
         return Vec::new();
     }
-    let mut matcher = Matcher::new(MATCHER_CONFIG);
     let mut buf = Vec::new();
     let haystack = Utf32Str::new(text, &mut buf);
-    let mut hits = Vec::new();
-    // Each token matches on its own here, so a row whose title holds only some of the
-    // query's tokens still shows which ones.
-    for atom in &pattern.atoms {
-        let mut found = Vec::new();
-        if atom.indices(haystack, &mut matcher, &mut found).is_some() {
-            hits.extend(found);
-        }
-    }
+    let hits = matched_indices_per_token(&pattern, haystack);
     let graphemes: Vec<Range<usize>> = text.grapheme_indices(true).map(|(start, g)| start..start + g.len()).collect();
     // `Utf32Str::new` keeps a text whose graphemes all start with ASCII as its bytes, so a hit
     // is a byte offset there. Otherwise nucleo keeps one char per grapheme and a hit counts graphemes.
