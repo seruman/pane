@@ -138,6 +138,7 @@ pub struct Select {
     current: Option<usize>,
     placeholder: String,
     open: bool,
+    size: ControlSize,
     width: Option<f32>,
     toggle: Option<(Transform, Transform)>,
     choose: Option<Rc<dyn Fn(usize) -> Transform>>,
@@ -150,6 +151,7 @@ impl Select {
             current: None,
             placeholder: "Choose…".to_owned(),
             open: false,
+            size: ControlSize::Regular,
             width: Some(200.0),
             toggle: None,
             choose: None,
@@ -168,6 +170,11 @@ impl Select {
         self.open = open;
         self
     }
+    pub fn size(mut self, size: ControlSize) -> Self {
+        self.size = size;
+        self
+    }
+
     /// The width it prefers, in points; it shrinks below it to fit. 200 by default.
     pub fn width(mut self, width: f32) -> Self {
         self.width = Some(width);
@@ -208,7 +215,7 @@ impl Select {
             .role("combobox")
             .label(shown.clone())
             .expanded(self.open)
-            .h(28.0)
+            .h(self.size.height())
             .pl(10.0)
             .pr(8.0)
             .gap(6.0)

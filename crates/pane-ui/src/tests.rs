@@ -153,6 +153,31 @@ fn an_open_select_reads_as_expanded_not_checked() {
 }
 
 #[test]
+fn select_height_uses_the_control_size() {
+    fn view(size: &crate::ControlSize, _: &mut rune::Cx<crate::ControlSize>) -> rune::El {
+        rune::col().child(crate::Select::new(["Light", "Dark"]).size(*size).build(
+            "select",
+            &Theme::new(Palette::merino_dark()),
+            &mut Vec::new(),
+        ))
+    }
+    for size in [
+        crate::ControlSize::Small,
+        crate::ControlSize::Regular,
+        crate::ControlSize::Large,
+    ] {
+        let mut rt = rune::Runtime::new(size, view, (400.0, 300.0), rune::Env::default());
+        rt.frame(0.0);
+        let select = rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some("select"))
+            .unwrap();
+        assert_eq!(select.rect[3], size.height());
+    }
+}
+
+#[test]
 fn select_toggle_opens_and_escape_closes_repeatedly() {
     #[derive(Default)]
     struct State {
