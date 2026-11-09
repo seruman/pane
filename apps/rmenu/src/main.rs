@@ -30,7 +30,7 @@ fn main() {
     let started = App::new(spec)
         .init(move || Menu::new(launch))
         .args(Vec::new())
-        .on_quit(|m: &mut Menu, _| m.quit())
+        .on_quit(Menu::quit)
         .try_run();
     if let Err(error) = started {
         eprintln!("rmenu: {error}");

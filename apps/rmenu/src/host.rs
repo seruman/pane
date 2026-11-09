@@ -183,13 +183,10 @@ impl Menu {
 
     /// The terminal went away or Ctrl-C quit before the model finished: cancel as Escape at
     /// the root would, with no output.
-    pub fn quit(&mut self) {
-        if OUTCOME.lock().unwrap().is_some() { return; }
-        let effects = self.model.handle(Event::Nav(rmenu_core::model::Nav::Cancel));
-        let status = effects.iter().find_map(|e| match e { Effect::Finish { status, .. } => Some(*status), _ => None }).unwrap_or(130);
-        let error = (status == 2).then(|| self.model.stdin_error().or(self.model.message()).map(str::to_owned)).flatten();
-        self.stop();
-        *OUTCOME.lock().unwrap() = Some(Outcome { status, output: Vec::new(), error });
+    pub fn quit(&mut self, tx: &mut Tx) {
+        if OUTCOME.lock().unwrap().is_none() {
+            self.handle(Event::Nav(rmenu_core::model::Nav::Cancel), tx);
+        }
     }
 }
 
