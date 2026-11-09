@@ -117,6 +117,38 @@ fn spawn_call(code: libc::c_int, operation: &'static str) -> Result<(), CommandE
     if code == 0 { Ok(()) } else { Err(system(operation, io::Error::from_raw_os_error(code))) }
 }
 
+struct SpawnActions(libc::posix_spawn_file_actions_t);
+
+impl SpawnActions {
+    fn new() -> Result<Self, CommandError> {
+        let mut actions = std::mem::MaybeUninit::uninit();
+        spawn_call(unsafe { libc::posix_spawn_file_actions_init(actions.as_mut_ptr()) }, "spawn actions")?;
+        Ok(Self(unsafe { actions.assume_init() }))
+    }
+}
+
+impl Drop for SpawnActions {
+    fn drop(&mut self) {
+        unsafe { libc::posix_spawn_file_actions_destroy(&mut self.0) };
+    }
+}
+
+struct SpawnAttributes(libc::posix_spawnattr_t);
+
+impl SpawnAttributes {
+    fn new() -> Result<Self, CommandError> {
+        let mut attrs = std::mem::MaybeUninit::uninit();
+        spawn_call(unsafe { libc::posix_spawnattr_init(attrs.as_mut_ptr()) }, "spawn attributes")?;
+        Ok(Self(unsafe { attrs.assume_init() }))
+    }
+}
+
+impl Drop for SpawnAttributes {
+    fn drop(&mut self) {
+        unsafe { libc::posix_spawnattr_destroy(&mut self.0) };
+    }
+}
+
 /// The started command: its process group leader and the parent's ends of its stdio pipes.
 struct Spawned {
     pid: libc::pid_t,
@@ -139,41 +171,27 @@ fn spawn(program: &CString, argv: &[CString], envp: &[CString], input: bool) -> 
     let (err_r, err_w) = pipe()?;
     let null = c"/dev/null";
 
-    // SAFETY: the file actions and attributes are initialised before use and destroyed below;
-    // every pointer passed stays alive until posix_spawn returns.
-    unsafe {
-        let mut actions: libc::posix_spawn_file_actions_t = std::mem::zeroed();
-        let mut attrs: libc::posix_spawnattr_t = std::mem::zeroed();
-        spawn_call(libc::posix_spawn_file_actions_init(&mut actions), "spawn actions")?;
-        spawn_call(libc::posix_spawnattr_init(&mut attrs), "spawn attributes").inspect_err(|_| {
-            libc::posix_spawn_file_actions_destroy(&mut actions);
-        })?;
-        let result = (|| {
-            match &stdin {
-                Some((read, _)) => spawn_call(libc::posix_spawn_file_actions_adddup2(&mut actions, read.as_raw_fd(), 0), "spawn dup2")?,
-                None => spawn_call(libc::posix_spawn_file_actions_addopen(&mut actions, 0, null.as_ptr(), libc::O_RDONLY, 0), "spawn open")?,
-            }
-            spawn_call(libc::posix_spawn_file_actions_adddup2(&mut actions, out_w.as_raw_fd(), 1), "spawn dup2")?;
-            spawn_call(libc::posix_spawn_file_actions_adddup2(&mut actions, err_w.as_raw_fd(), 2), "spawn dup2")?;
-            spawn_call(libc::posix_spawnattr_setpgroup(&mut attrs, 0), "spawn process group")?;
-            let mut empty: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut empty);
-            spawn_call(libc::posix_spawnattr_setsigmask(&mut attrs, &empty), "spawn signal mask")?;
-            let mut defaults: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut defaults);
-            for signal in DEFAULT_SIGNALS { libc::sigaddset(&mut defaults, signal); }
-            spawn_call(libc::posix_spawnattr_setsigdefault(&mut attrs, &defaults), "spawn signal defaults")?;
-            let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
-            spawn_call(libc::posix_spawnattr_setflags(&mut attrs, flags as libc::c_short), "spawn flags")?;
-            let mut pid: libc::pid_t = 0;
-            spawn_call(libc::posix_spawn(&mut pid, program.as_ptr(), &actions, &attrs, arg_ptrs.as_ptr(), env_ptrs.as_ptr()), "posix_spawn")?;
-            Ok(pid)
-        })();
-        libc::posix_spawn_file_actions_destroy(&mut actions);
-        libc::posix_spawnattr_destroy(&mut attrs);
-        let pid = result?;
-        Ok(Spawned { pid, stdin: stdin.map(|(_, write)| write), stdout: out_r, stderr: err_r })
+    let mut actions = SpawnActions::new()?;
+    let mut attrs = SpawnAttributes::new()?;
+    match &stdin {
+        Some((read, _)) => spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, read.as_raw_fd(), 0) }, "spawn dup2")?,
+        None => spawn_call(unsafe { libc::posix_spawn_file_actions_addopen(&mut actions.0, 0, null.as_ptr(), libc::O_RDONLY, 0) }, "spawn open")?,
     }
+    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, out_w.as_raw_fd(), 1) }, "spawn dup2")?;
+    spawn_call(unsafe { libc::posix_spawn_file_actions_adddup2(&mut actions.0, err_w.as_raw_fd(), 2) }, "spawn dup2")?;
+    spawn_call(unsafe { libc::posix_spawnattr_setpgroup(&mut attrs.0, 0) }, "spawn process group")?;
+    let mut empty: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut empty) };
+    spawn_call(unsafe { libc::posix_spawnattr_setsigmask(&mut attrs.0, &empty) }, "spawn signal mask")?;
+    let mut defaults: libc::sigset_t = unsafe { std::mem::zeroed() };
+    unsafe { libc::sigemptyset(&mut defaults) };
+    for signal in DEFAULT_SIGNALS { unsafe { libc::sigaddset(&mut defaults, signal) }; }
+    spawn_call(unsafe { libc::posix_spawnattr_setsigdefault(&mut attrs.0, &defaults) }, "spawn signal defaults")?;
+    let flags = libc::POSIX_SPAWN_SETPGROUP | libc::POSIX_SPAWN_SETSIGMASK | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_CLOEXEC_DEFAULT;
+    spawn_call(unsafe { libc::posix_spawnattr_setflags(&mut attrs.0, flags as libc::c_short) }, "spawn flags")?;
+    let mut pid: libc::pid_t = 0;
+    spawn_call(unsafe { libc::posix_spawn(&mut pid, program.as_ptr(), &actions.0, &attrs.0, arg_ptrs.as_ptr(), env_ptrs.as_ptr()) }, "posix_spawn")?;
+    Ok(Spawned { pid, stdin: stdin.map(|(_, write)| write), stdout: out_r, stderr: err_r })
 }
 
 #[cfg(not(target_vendor = "apple"))]
