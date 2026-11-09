@@ -727,7 +727,7 @@ impl Model {
     }
 
     fn toggle(&mut self, effects: &mut Vec<Effect>) {
-        if !self.can_navigate() || !self.options.multi {
+        if !self.can_navigate() {
             return;
         }
         let Some(id) = self.highlighted().map(|i| i.id.clone()) else { return };
