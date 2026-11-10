@@ -12,6 +12,9 @@ Rex, Superlogical's terminal multiplexer. They use the terminal's colours.
 | `mdview` | A Markdown reader with Vim navigation and task checkboxes that write changes to the open file. |
 | `mdreview` | A Markdown review app with comments under their document blocks. `:wq` writes the review as Markdown feedback. |
 
+Both Markdown apps draw images from files, with paths relative to the open document. They do
+not fetch remote images, which show their alt text instead.
+
 See the [component reference](crates/pane-ui/README.md) and the
 [gallery screenshot](docs/gallery.png).
 

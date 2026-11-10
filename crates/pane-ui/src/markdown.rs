@@ -1,8 +1,12 @@
 //! Shared presentation and source mapping for the Markdown apps.
 
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
 use std::ops::Range;
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use rune::{El, Key, KeyEvent, Mods, TextStyle, el, row, text};
+use rune::{El, Image, ImageCache, Key, KeyEvent, Mods, TextStyle, Waker, el, row, text};
 use rune_kit::{MarkdownStyle, markdown::Highlight};
 use vimkeys::{Vim, VimMode};
 
@@ -10,6 +14,69 @@ use crate::{Badge, Theme, Tone, icons, kbd};
 
 pub const VIM_CURSOR: &str = "vim-cursor";
 pub const FONT_FAMILIES: (&str, &str) = ("Inter", "ui-monospace, Menlo, Inter");
+
+/// The pictures a Markdown document names, read from files beside it.
+///
+/// Pass a clone to `Markdown::images`. Call [`Images::start`] from `AppSpec::setup` and
+/// [`Images::poll`] from `AppSpec::poll`. Remote addresses are not fetched, so those images
+/// keep showing their alt text.
+#[derive(Clone)]
+pub struct Images(Rc<ImagesInner>);
+
+struct ImagesInner {
+    base: PathBuf,
+    cache: OnceCell<ImageCache>,
+    // Rune's cache holds images weakly. Keeping them stops each frame from decoding again.
+    seen: RefCell<HashMap<String, Image>>,
+    settled: Cell<usize>,
+}
+
+impl Images {
+    /// Relative paths start from `document`'s folder, or the working folder without one.
+    pub fn beside(document: Option<&Path>) -> Self {
+        let base = document
+            .and_then(Path::parent)
+            .map_or_else(PathBuf::new, Path::to_path_buf);
+        Images(Rc::new(ImagesInner {
+            base,
+            cache: OnceCell::new(),
+            seen: RefCell::new(HashMap::new()),
+            settled: Cell::new(0),
+        }))
+    }
+
+    /// Starts decoding. Until then every image shows its alt text.
+    pub fn start(&self, waker: Waker) {
+        self.0.cache.get_or_init(|| ImageCache::new(waker));
+    }
+
+    /// The image at `src`, decoding in the background. `None` for a remote address.
+    pub fn get(&self, src: &str) -> Option<Image> {
+        let cache = self.0.cache.get()?;
+        let src = src.strip_prefix("file://").unwrap_or(src);
+        if src.is_empty() || src.contains("://") || src.starts_with("data:") {
+            return None;
+        }
+        let mut seen = self.0.seen.borrow_mut();
+        let image = seen.entry(src.to_owned()).or_insert_with(|| {
+            // The size only applies to an SVG, which fills the 880 pt page column.
+            cache.file(self.0.base.join(src), 440.0, 2.0)
+        });
+        Some(image.clone())
+    }
+
+    /// Whether an image finished loading or failed since the last call.
+    pub fn poll(&self) -> bool {
+        let settled = self
+            .0
+            .seen
+            .borrow()
+            .values()
+            .filter(|i| i.is_ready())
+            .count();
+        self.0.settled.replace(settled) != settled
+    }
+}
 
 pub fn style(theme: &Theme) -> MarkdownStyle {
     let heading = |size, line_height| TextStyle {

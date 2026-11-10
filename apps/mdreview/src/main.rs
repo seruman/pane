@@ -25,7 +25,7 @@ use std::io::{IsTerminal as _, Write};
 use std::ops::Range;
 use std::rc::Rc;
 
-use pane_ui::markdown::{self, VIM_CURSOR, find_text, style, type_keys};
+use pane_ui::markdown::{self, Images, VIM_CURSOR, find_text, style, type_keys};
 use pane_ui::{Badge, Button, Theme, Tone, icons};
 use rune::{
     App, AppSpec, Cx, El, Key, KeyEvent, ScrollSpec, TextEdit, Tx, col, el, row, text, text_input,
@@ -171,6 +171,7 @@ struct Reviewer {
     mode: Mode,
     // Rune clears focus through on_edit after the composer closes.
     draft: TextEdit,
+    images: Images,
     /// Distinguishes comments sharing an anchor and selects general comments.
     selected: Option<CommentId>,
     quit: Quit,
@@ -195,7 +196,12 @@ impl Reviewer {
             source,
             out,
         } = input;
+        let document = match &origin {
+            Origin::File(path) => Some(std::path::Path::new(path)),
+            Origin::Sample | Origin::Stdin => None,
+        };
         Reviewer {
+            images: Images::beside(document),
             origin,
             out,
             page: Page::new(&source),
@@ -782,11 +788,16 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         doc = doc.child(general);
     }
     for (i, block) in s.page.blocks.iter().enumerate() {
-        let md = Markdown::new(block.markdown.as_str())
+        let mut md = Markdown::new(block.markdown.as_str())
             .style(md_style.clone())
             .highlights(highlights(s, i, &theme))
-            .tasks_read_only()
-            .build(&theme.kit);
+            .tasks_read_only();
+        // rune-kit rebuilds a block with an image loader every frame, so only image blocks get one.
+        if block.markdown.contains("![") {
+            let images = s.images.clone();
+            md = md.images(move |src| images.get(src));
+        }
+        let md = md.build(&theme.kit);
         doc = doc.child(
             el().key(format!("block-{i}"))
                 .w_full()
@@ -1268,6 +1279,8 @@ fn main() {
                 type_keys(&mut s.vim, "c", s.page.text());
             }),
         ],
+        setup: Some(|s: &mut Reviewer, waker| s.images.start(waker)),
+        poll: Some(|s: &mut Reviewer, _, _| s.images.poll()),
         on_key: Some(on_key),
         families: markdown::FONT_FAMILIES,
         ..AppSpec::new("Review", (1000.0, 900.0), Reviewer::default, view)

@@ -1,6 +1,6 @@
 //! A Markdown reader with Vim navigation and the terminal's colours.
 //! It renders headings, tables, task lists, syntax-highlighted code, diff and Mermaid fences,
-//! quotes, and links.
+//! quotes, links, and images from files beside the document.
 //!
 //! ```sh
 //! RUNE_TERMINAL=1 cargo run --release -p mdview -- README.md
@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use pulldown_cmark::{Event, Options, Parser};
 
-use pane_ui::markdown::{self, VIM_CURSOR, style, type_keys};
+use pane_ui::markdown::{self, Images, VIM_CURSOR, style, type_keys};
 use pane_ui::{Button, Theme, icons};
 use rune::{App, AppSpec, Cx, El, KeyEvent, ScrollSpec, Tx, col, el, row};
 use rune_kit::markdown::RenderedText;
@@ -61,6 +61,7 @@ struct Doc {
     source: String,
     page: RenderedText,
     tasks: Vec<(usize, bool)>,
+    images: Images,
     vim: Vim<Act>,
     copied: Option<Copied>,
     /// A one-off note for the status line.
@@ -88,6 +89,7 @@ impl Doc {
 
     fn with_source(path: Option<String>, source: String) -> Doc {
         Doc {
+            images: Images::beside(path.as_deref().map(std::path::Path::new)),
             origin: path.map_or(Origin::Sample, |path| Origin::File(path.into())),
             page: RenderedText::new(&source),
             tasks: task_markers(&source),
@@ -217,6 +219,10 @@ fn view(s: &Doc, cx: &mut Cx<Doc>) -> El {
             &theme,
         ))
         .code_frame(code_frame(&theme, s.copied.map(|copied| copied.block)))
+        .images({
+            let images = s.images.clone();
+            move |src| images.get(src)
+        })
         .on_task_tx(|s: &mut Doc, _, offset, checked, tx| {
             s.tick_and_return_keys_to_vim(offset, checked, tx);
         })
@@ -284,13 +290,14 @@ fn on_key(s: &mut Doc, k: &KeyEvent, tx: &mut Tx) -> bool {
 
 /// Puts a copy button back to its icon once the check has shown long enough.
 fn poll(s: &mut Doc, _: f64, tx: &mut Tx) -> bool {
+    let loaded = s.images.poll();
     let Some(Copied { at, .. }) = s.copied else {
-        return false;
+        return loaded;
     };
     let left = COPIED_FOR.saturating_sub(at.elapsed());
     if !left.is_zero() {
         tx.wake_after(left);
-        return false;
+        return loaded;
     }
     s.copied = None;
     true
@@ -317,6 +324,7 @@ fn main() {
                 })
             }),
         ],
+        setup: Some(|s: &mut Doc, waker| s.images.start(waker)),
         on_key: Some(on_key),
         poll: Some(poll),
         families: markdown::FONT_FAMILIES,
@@ -370,6 +378,49 @@ mod tests {
             .content()
             .text()
             .to_owned()
+    }
+
+    #[test]
+    fn an_image_beside_the_document_draws_its_picture() {
+        let dir = std::env::temp_dir().join(format!("mdview-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("pic.png"),
+            [
+                137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0,
+                2, 8, 6, 0, 0, 0, 157, 116, 102, 26, 0, 0, 0, 17, 73, 68, 65, 84, 120, 156, 99, 56,
+                161, 161, 241, 31, 134, 25, 144, 57, 0, 161, 45, 12, 139, 63, 134, 202, 182, 0, 0,
+                0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+            ],
+        )
+        .unwrap();
+        let path = dir.join("doc.md");
+        std::fs::write(&path, "Intro.\n\n![a chart](pic.png)\n").unwrap();
+        let mut rt = runtime(Doc::open(Some(path.to_str().unwrap().into())).unwrap());
+        rt.poll = Some(poll);
+        let alt_shown = |rt: &rune::Runtime<Doc>| {
+            rt.elements()
+                .iter()
+                .any(|e| !e.exiting && e.text.as_deref() == Some("a chart"))
+        };
+        assert!(alt_shown(&rt), "the alt text shows until the picture loads");
+
+        rt.state.images.start(std::sync::Arc::new(|| {}));
+        rt.invalidate();
+        rt.frame(1.0 / 60.0);
+        rt.state.images.get("pic.png").unwrap().wait().unwrap();
+        // Poll reports the finished decode, and the swap from alt text settles.
+        for frame in 2..120 {
+            rt.frame(f64::from(frame) / 60.0);
+        }
+        let picture = rt
+            .elements()
+            .into_iter()
+            .find(|e| !e.exiting && e.role == "image")
+            .expect("the image");
+        assert_eq!(picture.rect[2], 3.0, "at its own width");
+        assert!(!alt_shown(&rt));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

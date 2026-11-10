@@ -110,6 +110,42 @@ fn range(s: &Reviewer, needle: &str) -> Range<usize> {
 }
 
 #[test]
+fn an_image_beside_the_document_draws_its_picture() {
+    let dir = std::env::temp_dir().join(format!("mdreview-image-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pic.png"),
+        [
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0, 2,
+            8, 6, 0, 0, 0, 157, 116, 102, 26, 0, 0, 0, 17, 73, 68, 65, 84, 120, 156, 99, 56, 161,
+            161, 241, 31, 134, 25, 144, 57, 0, 161, 45, 12, 139, 63, 134, 202, 182, 0, 0, 0, 0, 73,
+            69, 78, 68, 174, 66, 96, 130,
+        ],
+    )
+    .unwrap();
+    let state = Reviewer::new(Input {
+        origin: Origin::File(dir.join("doc.md").to_str().unwrap().into()),
+        source: "Intro.\n\n![a chart](pic.png)\n".into(),
+        out: None,
+    });
+    let mut rt = Runtime::new(state, view, (900.0, 900.0), Env::default());
+    rt.poll = Some(|s: &mut Reviewer, _, _| s.images.poll());
+    rt.state.images.start(std::sync::Arc::new(|| {}));
+    rt.frame(0.0);
+    rt.state.images.get("pic.png").unwrap().wait().unwrap();
+    for frame in 1..120 {
+        rt.frame(f64::from(frame) / 60.0);
+    }
+    let picture = rt
+        .elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.role == "image")
+        .expect("the image");
+    assert_eq!(picture.rect[2], 3.0, "at its own width");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn the_page_text_is_the_whole_documents() {
     let page = Page::new(SRC);
     let whole = rune_kit::markdown::RenderedText::new(SRC);

@@ -110,6 +110,46 @@ fn matches_mark_the_title_even_when_lowercasing_changes_its_length() {
     assert_eq!(palette_matches(TITLES, "run").len(), 2);
 }
 
+#[test]
+fn images_load_from_files_beside_the_document() {
+    use crate::markdown::Images;
+    let dir = std::env::temp_dir().join(format!("pane-ui-images-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("pic.png"),
+        [
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 3, 0, 0, 0, 2,
+            8, 6, 0, 0, 0, 157, 116, 102, 26, 0, 0, 0, 17, 73, 68, 65, 84, 120, 156, 99, 56, 161,
+            161, 241, 31, 134, 25, 144, 57, 0, 161, 45, 12, 139, 63, 134, 202, 182, 0, 0, 0, 0, 73,
+            69, 78, 68, 174, 66, 96, 130,
+        ],
+    )
+    .unwrap();
+    let images = Images::beside(Some(&dir.join("doc.md")));
+    assert!(
+        images.get("pic.png").is_none(),
+        "nothing loads before the app starts"
+    );
+    images.start(std::sync::Arc::new(|| {}));
+    assert!(images.get("https://example.com/pic.png").is_none());
+    assert!(images.get("data:image/png;base64,AAAA").is_none());
+
+    let picture = images.get("pic.png").expect("a local path");
+    assert_eq!(picture.wait().unwrap(), [3, 2]);
+    assert_eq!(
+        images.get("pic.png").unwrap().id(),
+        picture.id(),
+        "one decode per path"
+    );
+    assert!(images.poll(), "a finished image asks for a redraw");
+    assert!(!images.poll(), "only once");
+
+    let missing = images.get("missing.png").expect("a local path");
+    assert!(missing.wait().is_err(), "a missing file keeps its alt text");
+    assert!(images.poll());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// The accessibility node keyed `key` in a one-frame render of what `content` builds, as
 /// assistive technology reads it.
 fn a11y(content: fn(&Theme) -> rune::El, key: &str) -> serde_json::Value {
