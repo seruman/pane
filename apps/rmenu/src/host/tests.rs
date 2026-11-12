@@ -232,7 +232,7 @@ fn query_sync_preserves_edit_state_until_the_model_changes_the_value() {
     menu.handle(Event::SetQuery(menu.field.text.clone()), &mut Tx::default());
     menu.field.anchor = 1;
     menu.field.focus = 3;
-    menu.field.ime(&rune::Ime::Preedit("候補".into(), Some((0, 3))));
+    menu.field.ime(&rune::Ime::Preedit("候補".into(), Some((0, 3)), Vec::new()));
     menu.handle(Event::StdinDone, &mut Tx::default());
     assert_eq!(menu.model.query(), "alpha");
     assert_eq!((menu.field.anchor, menu.field.focus), (1, 3));
