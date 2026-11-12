@@ -71,6 +71,78 @@ fn sample_draws_clicks_and_keyboard() {
     shows(&keyboard, "Count: 1");
 }
 
+fn themed_runtime(dark: bool, error: Option<String>) -> rune::Runtime<State> {
+    let state = State {
+        tree: Some(Node::Column(vec![
+            Node::Text("Default script text".into()),
+            Node::Button {
+                label: "Action".into(),
+                message: "action".into(),
+            },
+        ])),
+        error,
+        ..State::default()
+    };
+    let mut rt = rune::Runtime::new(state, view, (640.0, 480.0), rune::Env::new(dark, 1.0));
+    rt.frame(0.0);
+    rt
+}
+
+fn text_color(rt: &rune::Runtime<State>, content: &str) -> Option<rune::Color> {
+    rt.elements()
+        .into_iter()
+        .find(|e| e.text.as_deref() == Some(content))
+        .unwrap_or_else(|| panic!("missing text {content:?}"))
+        .text_color
+}
+
+#[test]
+fn default_text_uses_resolved_theme_in_light_and_dark() {
+    for dark in [false, true] {
+        let rt = themed_runtime(dark, None);
+        let theme = Theme::current(dark);
+        assert_eq!(rt.elements()[0].fill, theme.background);
+        assert_eq!(
+            text_color(&rt, "Default script text"),
+            Some(theme.text),
+            "dark={dark}"
+        );
+        assert_eq!(
+            text_color(&rt, "Action"),
+            Some(theme.on_accent),
+            "dark={dark}"
+        );
+    }
+}
+
+#[test]
+fn error_text_uses_resolved_theme_and_semantic_colors_in_light_and_dark() {
+    for dark in [false, true] {
+        let rt = themed_runtime(dark, Some("Script failed".into()));
+        let theme = Theme::current(dark);
+        assert_eq!(
+            text_color(&rt, "Script paused — fix and save to recover"),
+            Some(theme.text),
+            "dark={dark}"
+        );
+        assert_eq!(
+            text_color(&rt, "Script failed"),
+            Some(theme.danger),
+            "dark={dark}"
+        );
+        assert_eq!(
+            text_color(&rt, "Default script text"),
+            Some(theme.text),
+            "dark={dark}"
+        );
+        assert_eq!(
+            text_color(&rt, "Action"),
+            Some(theme.on_accent),
+            "dark={dark}"
+        );
+    }
+}
+
 #[test]
 fn reload_preserves_counter_and_replaces_view() {
     let (_dir, mut rt) = runtime(SAMPLE);

@@ -145,7 +145,11 @@ pub(crate) fn spec() -> AppSpec<State> {
 
 fn render(node: &Node, key: &str, theme: &Theme) -> El {
     match node {
-        Node::Text(content) => text(content).key(key).font(theme.ty.body).w_full(),
+        Node::Text(content) => text(content)
+            .key(key)
+            .font(theme.ty.body)
+            .color(theme.text)
+            .w_full(),
         Node::Button { label, message } => {
             let message = message.clone();
             Button::new(label)
@@ -177,7 +181,11 @@ fn view(state: &State, cx: &mut Cx<State>) -> El {
                 .w_full()
                 .gap(8.0)
                 .padding(12.0)
-                .child(text("Script paused — fix and save to recover").font(theme.ty.strong))
+                .child(
+                    text("Script paused — fix and save to recover")
+                        .font(theme.ty.strong)
+                        .color(theme.text),
+                )
                 .child(
                     text(error)
                         .key("script-error-detail")
