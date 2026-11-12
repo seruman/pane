@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/pane-ui", "crates/vimkeys", "apps/mdview", "apps/gallery", "apps/mdreview"]
+members = ["crates/pane-ui", "crates/vimkeys", "crates/pane-script", "apps/mdview", "apps/gallery", "apps/mdreview"]
 
 [workspace.package]
 edition = "2024"
