@@ -44,3 +44,11 @@ return_self_not_must_use = "warn"
 too_many_lines = "warn"
 # Require consuming builder results, not an annotation on every pure query.
 must_use_candidate = "allow"
+
+# Rune builds against its own patched copies of these crates. A dependency's patch table does
+# not reach this workspace, so it is repeated here. Keep it in step with Rune's root Cargo.toml.
+[patch.crates-io]
+accesskit_windows = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/accesskit_windows" }
+parley_engine = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/parley_engine" }
+wgpu-hal = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/wgpu-hal" }
+winit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/winit" }
