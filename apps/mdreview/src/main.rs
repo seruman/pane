@@ -406,10 +406,15 @@ fn tint(kind: Kind, theme: &Theme) -> rune::Color {
     }
 }
 
-fn highlights(s: &Reviewer, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize>>, Highlight)> {
+/// A highlight's ranges in the whole source, and the block that carries its key.
+type Mark = (Vec<Range<usize>>, Highlight, Option<usize>);
+
+/// Every highlight of the page, mapped to the source once. Mapping walks all blocks, so
+/// doing it per block made each keypress quadratic in the document's length.
+fn marks(s: &Reviewer, theme: &Theme) -> Vec<Mark> {
     let page = &s.page;
     let text = page.text();
-    let local = |range: Range<usize>| page.local_ranges(index, &page.source_ranges(range));
+    let local = |range: Range<usize>| page.source_ranges(range);
     let mut out = Vec::new();
     let current = s.current();
     for (id, c) in s.review.iter() {
@@ -417,28 +422,44 @@ fn highlights(s: &Reviewer, index: usize, theme: &Theme) -> Vec<(Vec<Range<usize
             continue;
         };
         let mut h = Highlight::new().bg(tint(c.kind(), theme));
+        let mut keyed = None;
         if current == Some(id) {
             h = h.ring(tint(c.kind(), theme).alpha(0.9), 1.0);
-            if page.block_at(range.start) == index {
-                h = h.key(CURRENT_MARK);
-            }
+            keyed = Some(page.block_at(range.start));
         }
-        out.push((local(range), h));
+        out.push((local(range), h, keyed));
     }
     if let Some(Target::New { range: Some(range) }) = s.composer() {
         out.push((
             local(range.clone()),
             Highlight::new().bg(tint(Kind::Comment, theme)),
+            None,
         ));
     }
-    out.extend(markdown::vim_highlights(
-        &s.vim,
-        text,
-        local,
-        s.composer().is_none(),
-        theme,
-    ));
-    out.retain(|(ranges, _)| !ranges.is_empty());
+    out.extend(
+        markdown::vim_highlights(&s.vim, text, local, s.composer().is_none(), theme)
+            .into_iter()
+            .map(|(ranges, h)| (ranges, h, None)),
+    );
+    out.retain(|(ranges, ..)| !ranges.is_empty());
+    out
+}
+
+/// The part of `marks` that falls in block `index`, in its own Markdown.
+fn highlights(page: &Page, marks: &[Mark], index: usize) -> Vec<(Vec<Range<usize>>, Highlight)> {
+    let mut out = Vec::new();
+    for (ranges, h, keyed) in marks {
+        let ranges = page.local_ranges(index, ranges);
+        if ranges.is_empty() {
+            continue;
+        }
+        let h = if *keyed == Some(index) {
+            h.clone().key(CURRENT_MARK)
+        } else {
+            h.clone()
+        };
+        out.push((ranges, h));
+    }
     out
 }
 
@@ -787,10 +808,11 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
     if let Some(general) = general_thread(s, &theme) {
         doc = doc.child(general);
     }
+    let marks = marks(s, &theme);
     for (i, block) in s.page.blocks.iter().enumerate() {
         let mut md = Markdown::new(block.markdown.as_str())
             .style(md_style.clone())
-            .highlights(highlights(s, i, &theme))
+            .highlights(highlights(&s.page, &marks, i))
             .tasks_read_only();
         // rune-kit rebuilds a block with an image loader every frame, so only image blocks get one.
         if block.markdown.contains("![") {
