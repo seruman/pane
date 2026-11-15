@@ -6,6 +6,9 @@ use std::{
 
 const COUNTER: &str = include_str!("../tests/fixtures/counter.luau");
 
+#[path = "board_tests.rs"]
+mod board_tests;
+
 fn runtime(source: &str) -> (tempfile::TempDir, rune::Runtime<State>) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("init.luau"), source).unwrap();

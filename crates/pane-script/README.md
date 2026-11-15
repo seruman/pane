@@ -11,6 +11,10 @@ cargo run -p pane-script -- crates/pane-script/examples/counter
 RUNE_TERMINAL=1 cargo run -p pane-script -- crates/pane-script/examples/counter
 ```
 
+`examples/counter` is now the live task-board demo: Now / Next / Done, a task-template
+picker, and a shipped count. It migrates a running counter's state; subsequent edits retain
+tasks, selection, and the open picker. Free-text entry is not exposed by this Luau host.
+
 The argument is a folder with an `init.luau`; a path to a `.luau` file means its folder.
 Terminal mode needs a controlling TTY, a GPU, and Kitty graphics support (e.g. Rex). Rune's
 headless flags work too: `--snap out.png`, `--tree out.json`.
@@ -26,7 +30,7 @@ Hot reload keeps the connection endpoint.
 
 ```sh
 python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"elements"}'
-python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"activate","key":"increment"}'
+python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"activate","key":"select-1"}'
 python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"screenshot"}' --output /tmp/pane-frame.png
 ```
 

@@ -3,7 +3,7 @@
 The bridge operates on the **same Script and Runtime as the running app**, without a second
 VM or a headless replica. Offscreen screenshots use Rune's `App::terminal_capture` API.
 It is off unless started with `--inspect DIR`. Requires Unix (macOS/Linux). The existing
-counter and I/O examples need no instrumentation.
+task-board (`examples/counter`) and I/O examples need no instrumentation.
 
 ```sh
 # Native window:
@@ -16,7 +16,7 @@ RUNE_TERMINAL=1 cargo run -p pane-script -- crates/pane-script/examples/counter 
 # In another shell, from the workspace root:
 python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"info"}'
 python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"elements"}'
-python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"activate","key":"increment"}'
+python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"activate","key":"select-1"}'
 ```
 
 Use a different directory for each process. Starting an inspected app requires a new launch;
