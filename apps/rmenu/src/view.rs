@@ -104,8 +104,11 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
 
 fn query_row(menu: &Menu, c: &Palette) -> El {
     let prompt = menu.model.prompt();
+    // The prompt names the field for screen readers; the placeholder disappears once typing starts.
+    let label = if prompt.is_empty() { "Search".to_owned() } else { prompt.clone() };
     let field = text_input(&menu.field, TITLE)
         .key("query")
+        .label(label)
         .single_line()
         .grow(1.0)
         .min_w(0.0)
