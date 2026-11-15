@@ -48,6 +48,7 @@ must_use_candidate = "allow"
 # Rune builds against its own patched copies of these crates. A dependency's patch table does
 # not reach this workspace, so it is repeated here. Keep it in step with Rune's root Cargo.toml.
 [patch.crates-io]
+accesskit_macos = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/accesskit_macos" }
 accesskit_windows = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/accesskit_windows" }
 parley_engine = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/parley_engine" }
 wgpu-hal = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/vendor/wgpu-hal" }
