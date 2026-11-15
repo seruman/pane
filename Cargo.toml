@@ -9,6 +9,7 @@ license = "MIT"
 [workspace.dependencies]
 rune = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune", default-features = false }
 rune-kit = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-kit" }
+rune-luau = { path = "../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/rune-luau" }
 pane-ui = { path = "crates/pane-ui" }
 vimkeys = { path = "crates/vimkeys" }
 pulldown-cmark = { version = "0.13", default-features = false }
