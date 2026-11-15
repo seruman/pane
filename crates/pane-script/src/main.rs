@@ -1,6 +1,7 @@
 //! Run a folder of Luau UI with upstream `rune-luau`, in a native window or Rune's terminal
 //! shell. Saving a `.luau` file in the folder reloads it in place.
 
+mod host;
 mod palette;
 
 use std::path::{Path, PathBuf};
@@ -15,11 +16,13 @@ pub(crate) struct State {
 
 /// Loads `dir` (its `init.luau`) and watches it. A missing folder or a script that fails to
 /// start still opens: the window shows the error card, and a later save recovers.
-pub(crate) fn open(dir: &Path) -> State {
+pub(crate) fn open(dir: &Path, capabilities: host::Capabilities) -> State {
     let name = dir
         .file_name()
         .map_or_else(|| "script".into(), |n| n.to_string_lossy().into_owned());
+    let root = std::path::absolute(dir).unwrap_or_else(|_| dir.to_owned());
     let options = ScriptOptions::new()
+        .setup(move |host| host::install(host, root.clone(), capabilities))
         .palette(palette::current())
         .on_log(|level, line| eprintln!("pane-script {level:?}: {line}"));
     let sources = Sources::from_dir(dir).unwrap_or_else(|error| {
@@ -69,15 +72,29 @@ fn folder(arg: &str) -> PathBuf {
     }
 }
 
-fn main() {
-    let args = rune::extra_args();
-    if args.len() != 1 {
-        eprintln!("usage: pane-script <folder with init.luau> [Rune flags]");
-        std::process::exit(2);
+fn arguments(args: &[String]) -> Result<(PathBuf, host::Capabilities), String> {
+    let mut capabilities = host::Capabilities::default();
+    let mut dir = None;
+    for arg in args {
+        match arg.as_str() {
+            "--allow-http" => capabilities.http = true,
+            "--allow-process" => capabilities.process = true,
+            "--allow-fs" => capabilities.fs = true,
+            value if value.starts_with('-') => return Err(format!("unknown option: {value}")),
+            value if dir.is_none() => dir = Some(folder(value)),
+            _ => return Err("expected one script folder".into()),
+        }
     }
-    let dir = folder(&args[0]);
+    Ok((dir.ok_or("missing script folder")?, capabilities))
+}
+
+fn main() {
+    let (dir, capabilities) = arguments(&rune::extra_args()).unwrap_or_else(|error| {
+        eprintln!("{error}\nusage: pane-script <folder> [--allow-http] [--allow-process] [--allow-fs] [Rune flags]");
+        std::process::exit(2);
+    });
     rune::App::new(spec())
-        .init(move || open(&dir))
+        .init(move || open(&dir, capabilities))
         .tab_visits_controls(true)
         .run();
 }

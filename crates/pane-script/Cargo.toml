@@ -9,6 +9,14 @@ description = "Run a folder of Luau UI with upstream rune-luau, hot reloading on
 pane-ui.workspace = true
 rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-luau = { workspace = true, features = ["watch"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "process", "fs", "io-util", "sync", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
+serde_json = "1"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.30", features = ["signal", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

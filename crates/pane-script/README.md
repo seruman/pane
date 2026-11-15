@@ -15,6 +15,25 @@ The argument is a folder with an `init.luau`; a path to a `.luau` file means its
 Terminal mode needs a controlling TTY, a GPU, and Kitty graphics support (e.g. Rex). Rune's
 headless flags work too: `--snap out.png`, `--tree out.json`.
 
+## Native I/O
+
+HTTP, process, and filesystem access are opt-in for **trusted scripts**.
+`--allow-fs` grants **unsandboxed filesystem access** (including absolute paths and `..`).
+`--allow-process` runs commands **as your user, with your full user permissions**.
+These flags grant capabilities, not a security sandbox; only enable them for code you trust:
+
+```sh
+cargo run -p pane-script -- crates/pane-script/examples/io \
+  --allow-http --allow-process --allow-fs
+```
+
+`@pane/http`, `@pane/process`, and `@pane/fs` suspend the calling task without blocking the UI.
+HTTP bodies, files, and **separate stdout/stderr** use the same Reader interface; `readAll()` and
+`proc:collect()` collect streams when wanted. `@pane/json` is always available. The example has
+click-to-run HTTP, `gh`, filesystem, and streaming-output demos.
+
+See [HOST_API.md](HOST_API.md) for the complete API, errors, limits, cancellation, and trust model.
+
 ## Scripts
 
 This is a thin runner; the script contract, UI nodes, limits and reload behaviour are all

@@ -9,7 +9,12 @@ const COUNTER: &str = include_str!("../examples/counter/init.luau");
 fn runtime(source: &str) -> (tempfile::TempDir, rune::Runtime<State>) {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join("init.luau"), source).unwrap();
-    let mut rt = rune::Runtime::new(open(dir.path()), view, (640.0, 480.0), rune::Env::default());
+    let mut rt = rune::Runtime::new(
+        open(dir.path(), host::Capabilities::default()),
+        view,
+        (640.0, 480.0),
+        rune::Env::default(),
+    );
     rt.poll = Some(poll);
     rt.set_tab_visits_controls(true);
     rt.frame(0.0);
@@ -56,7 +61,37 @@ fn frames_until(
 }
 
 #[test]
-fn the_example_draws_and_counts_clicks_and_keys() {
+fn shipped_examples_start_and_render_without_script_errors() {
+    for name in ["counter", "io"] {
+        let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(name);
+        // Merely opening either example needs no I/O authority or external activity.
+        let state = open(&dir, host::Capabilities::default());
+        let mut rt = rune::Runtime::new(state, view, (640.0, 480.0), rune::Env::default());
+        rt.poll = Some(poll);
+        rt.frame(0.0);
+        rt.frame(0.1);
+        assert!(
+            rt.state.script.error().is_none(),
+            "{name}: {:?}",
+            rt.state.script.error()
+        );
+        assert!(
+            rt.state
+                .script
+                .log()
+                .iter()
+                .all(|line| line.level != rune_luau::LogLevel::Error),
+            "{name}: {:?}",
+            rt.state.script.log()
+        );
+        assert!(!texts(&rt).is_empty(), "{name} rendered no text");
+    }
+}
+
+#[test]
+fn a_counter_draws_and_counts_clicks() {
     let (_dir, mut rt) = runtime(COUNTER);
     assert!(shows(&rt, "Count: 0"), "{:?}", texts(&rt));
     assert!(shows(&rt, "• Save to reload"), "{:?}", texts(&rt));
@@ -148,7 +183,7 @@ fn a_script_that_fails_to_start_shows_the_error_card() {
 #[test]
 fn a_missing_folder_still_opens() {
     let dir = tempfile::tempdir().unwrap();
-    let state = open(&dir.path().join("missing"));
+    let state = open(&dir.path().join("missing"), host::Capabilities::default());
     assert!(state.script.error().is_some());
 }
 
