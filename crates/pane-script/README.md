@@ -15,6 +15,25 @@ The argument is a folder with an `init.luau`; a path to a `.luau` file means its
 Terminal mode needs a controlling TTY, a GPU, and Kitty graphics support (e.g. Rex). Rune's
 headless flags work too: `--snap out.png`, `--tree out.json`.
 
+## Live agent inspection
+
+Add `--inspect /tmp/pane-agent` to expose an opt-in, private local socket. Agents can query
+live trees, keyed geometry and logs, focus controls, dispatch keyboard activation/text, and
+scroll. In terminal mode, `screenshot` encodes Rune's retained offscreen frame as PNG—no OS
+screen capture, Rex integration, second VM, or duplicate render. Both hosts expose full
+accessibility/element trees; the lightweight `elements` operation remains partial geometry.
+Hot reload keeps the connection endpoint.
+
+```sh
+python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"elements"}'
+python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"activate","key":"increment"}'
+python3 scripts/pane-inspect.py /tmp/pane-agent '{"op":"screenshot"}' --output /tmp/pane-frame.png
+```
+
+PNG output is terminal-only for now. The client creates a new file, never overwriting one.
+
+See [INSPECTION.md](INSPECTION.md) for launch examples, protocol, limitations, and trust model.
+
 ## Native I/O
 
 HTTP, process, and filesystem access are opt-in for **trusted scripts**.

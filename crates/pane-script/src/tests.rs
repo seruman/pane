@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const COUNTER: &str = include_str!("../examples/counter/init.luau");
+const COUNTER: &str = include_str!("../tests/fixtures/counter.luau");
 
 fn runtime(source: &str) -> (tempfile::TempDir, rune::Runtime<State>) {
     let dir = tempfile::tempdir().unwrap();

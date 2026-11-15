@@ -2,6 +2,7 @@
 //! shell. Saving a `.luau` file in the folder reloads it in place.
 
 mod host;
+mod inspect;
 mod palette;
 
 use std::path::{Path, PathBuf};
@@ -89,14 +90,22 @@ fn arguments(args: &[String]) -> Result<(PathBuf, host::Capabilities), String> {
 }
 
 fn main() {
-    let (dir, capabilities) = arguments(&rune::extra_args()).unwrap_or_else(|error| {
-        eprintln!("{error}\nusage: pane-script <folder> [--allow-http] [--allow-process] [--allow-fs] [Rune flags]");
+    let (args, inspection) = inspect::arguments(rune::extra_args()).unwrap_or_else(|error| {
+        eprintln!("{error}");
         std::process::exit(2);
     });
-    rune::App::new(spec())
+    let (dir, capabilities) = arguments(&args).unwrap_or_else(|error| {
+        eprintln!("{error}\nusage: pane-script <folder> [--allow-http] [--allow-process] [--allow-fs] [--inspect DIR] [Rune flags]");
+        std::process::exit(2);
+    });
+    let app = rune::App::new(spec())
         .init(move || open(&dir, capabilities))
-        .tab_visits_controls(true)
-        .run();
+        .tab_visits_controls(true);
+    let (app, _inspection) = inspect::attach(app, inspection).unwrap_or_else(|error| {
+        eprintln!("pane-script inspection: {error}");
+        std::process::exit(2);
+    });
+    app.run();
 }
 
 /// `App::init` supplies the real state; this placeholder only satisfies `AppSpec::new`.

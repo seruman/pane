@@ -2471,9 +2471,11 @@ dependencies = [
 name = "pane-script"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "nix",
  "pane-ui",
+ "png 0.18.1",
  "reqwest",
  "rune",
  "rune-luau",
