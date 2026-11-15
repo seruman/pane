@@ -1,6 +1,8 @@
 //! Run a folder of Luau UI with upstream `rune-luau`, in a native window or Rune's terminal
 //! shell. Saving a `.luau` file in the folder reloads it in place.
 
+mod palette;
+
 use std::path::{Path, PathBuf};
 
 use rune::{AppSpec, Cx, El, Tx, Waker, col};
@@ -8,6 +10,7 @@ use rune_luau::{Script, ScriptOptions, Sources};
 
 pub(crate) struct State {
     script: Script,
+    terminal_colors: Option<rune::TerminalColors>,
 }
 
 /// Loads `dir` (its `init.luau`) and watches it. A missing folder or a script that fails to
@@ -16,8 +19,9 @@ pub(crate) fn open(dir: &Path) -> State {
     let name = dir
         .file_name()
         .map_or_else(|| "script".into(), |n| n.to_string_lossy().into_owned());
-    let options =
-        ScriptOptions::new().on_log(|level, line| eprintln!("pane-script {level:?}: {line}"));
+    let options = ScriptOptions::new()
+        .palette(palette::current())
+        .on_log(|level, line| eprintln!("pane-script {level:?}: {line}"));
     let sources = Sources::from_dir(dir).unwrap_or_else(|error| {
         eprintln!("pane-script: reading {}: {error}", dir.display());
         Sources::new()
@@ -26,7 +30,10 @@ pub(crate) fn open(dir: &Path) -> State {
     if let Err(error) = script.watch(dir) {
         eprintln!("pane-script: not watching {}: {error}", dir.display());
     }
-    State { script }
+    State {
+        script,
+        terminal_colors: rune::terminal_colors(),
+    }
 }
 
 fn view(state: &State, cx: &mut Cx<State>) -> El {
@@ -38,7 +45,14 @@ fn setup(state: &mut State, waker: Waker) {
 }
 
 fn poll(state: &mut State, now: f64, tx: &mut Tx) -> bool {
-    state.script.poll(now, tx)
+    let colors = rune::terminal_colors();
+    let changed = state.terminal_colors != colors;
+    if changed {
+        state.terminal_colors = colors;
+        // Color replies can arrive after the first memoized render, even in idle scripts.
+        tx.invalidate_memos_by_prefix(state.script.memo_prefix());
+    }
+    state.script.poll(now, tx) || changed
 }
 
 /// `pane-script examples/counter` and `pane-script examples/counter/init.luau` run the same
@@ -75,6 +89,7 @@ fn empty() -> State {
             "empty",
             Sources::single("return { render = function() return nil end }"),
         ),
+        terminal_colors: rune::terminal_colors(),
     }
 }
 

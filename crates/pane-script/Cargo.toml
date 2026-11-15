@@ -6,6 +6,7 @@ license.workspace = true
 description = "Run a folder of Luau UI with upstream rune-luau, hot reloading on save."
 
 [dependencies]
+pane-ui.workspace = true
 rune = { workspace = true, default-features = true, features = ["terminal"] }
 rune-luau = { workspace = true, features = ["watch"] }
 

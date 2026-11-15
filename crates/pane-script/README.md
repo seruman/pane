@@ -37,8 +37,12 @@ return {
 }
 ```
 
-- Colours are `rune-luau`'s default palette names (`bg`, `text`, `text-secondary`,
-  `control-off`, `hover`, `press`, ...), which follow light and dark, or `ui.hex("#rrggbb")`.
+- Colours use Pane's terminal-derived theme: `bg`, `card`, `card-border`, `text`,
+  `text-secondary`, `separator`, `control-off`, `control-track`, `indicator`, `hover`,
+  and `press`. `accent` follows the terminal cursor colour; `accent-hover`, `accent-text`,
+  and `on-accent` provide matching hover, text, and contrasting label colours. Without
+  terminal colours, the theme falls back to Merino light/dark. `ui.hex("#rrggbb")` still
+  supports explicit colours. Late terminal colour replies invalidate cached script views.
 - `saveHotState`/`loadHotState` carry state across a saved edit. A save that fails to compile
   or start keeps the running script; the error goes to stderr.
 - A render that raises shows an error card with a Reload button. Each entry into the script is

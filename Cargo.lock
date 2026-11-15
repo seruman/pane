@@ -2268,6 +2268,7 @@ dependencies = [
 name = "pane-script"
 version = "0.1.0"
 dependencies = [
+ "pane-ui",
  "rune",
  "rune-luau",
  "tempfile",
