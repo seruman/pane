@@ -21,11 +21,9 @@ See the [component reference](crates/pane-ui/README.md) and the
 ## Build against the local Rune checkout
 
 The workspace uses the terminal-shell changes in [seruman/rune](https://github.com/seruman/rune).
-The current dependency configuration requires a local worktree. The `rune` and
-`rune-kit` paths in `Cargo.toml` point to
-`../../../../tmp/worktrees/github.com/seruman/rune/terminal-shell/crates/`.
-A fresh clone without that checkout cannot build. A published dependency remains
-pending the repository's remote decision.
+The `rune`, `rune-kit` and `rune-luau` paths in `Cargo.toml`, and the vendored crates the
+`[patch.crates-io]` table names, point to a Rune checkout beside this one: `../rune`, on its
+`terminal-shell` branch. A fresh clone without that checkout cannot build.
 
 `rust-toolchain.toml` selects the Rust channel. `scripts/check.sh` compares that
 channel with the local Rune checkout before running Cargo. Update both toolchain
