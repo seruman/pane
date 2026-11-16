@@ -110,20 +110,25 @@ pub fn token(label: impl Into<String>, theme: &Theme) -> El {
     )
 }
 
+const KBD_TEXT: rune::TextStyle = rune::TextStyle::new(11.0, 400.0);
+const KBD_MIN_W: f32 = 20.0;
+const KBD_PAD: f32 = 5.0;
+
 /// Shortcut glyphs in an outlined box, as "⌃P".
 pub fn kbd(keys: impl Into<String>, theme: &Theme) -> El {
     let color = theme.text_tertiary;
-    el().min_w(20.0)
+    el().min_w(KBD_MIN_W)
         .h(18.0)
-        .px(5.0)
+        .px(KBD_PAD)
         .center()
         .radius(5.0)
         .border(1.0, color.alpha(0.45))
-        .child(
-            text(keys.into())
-                .font(rune::TextStyle::new(11.0, 400.0))
-                .color(color),
-        )
+        .child(text(keys.into()).font(KBD_TEXT).color(color))
+}
+
+/// The width [`kbd`] takes for `keys`, for laying out a row before building it.
+pub fn kbd_width(keys: &str) -> f32 {
+    (rune::text::measure(keys, &[], KBD_TEXT, None).0 + 2.0 * KBD_PAD).max(KBD_MIN_W)
 }
 
 /// What a program is doing, after Rex's Program Status Protocol (OSC 7501).

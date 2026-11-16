@@ -25,6 +25,9 @@ pub struct TextField<'a> {
     bind: Transform,
     placeholder: String,
     leading: Option<&'static Icon>,
+    prefix: Option<El>,
+    label: Option<String>,
+    invalid: bool,
     size: ControlSize,
     width: crate::layout::Width,
     extra: Vec<Transform>,
@@ -40,6 +43,9 @@ impl<'a> TextField<'a> {
             bind: Box::new(move |e: El| e.on_edit(bind)),
             placeholder: String::new(),
             leading: None,
+            prefix: None,
+            label: None,
+            invalid: false,
             size: ControlSize::Regular,
             width: crate::layout::Width::Prefer(200.0),
             extra: Vec::new(),
@@ -60,6 +66,21 @@ impl<'a> TextField<'a> {
     }
     pub fn icon(mut self, glyph: &'static Icon) -> Self {
         self.leading = Some(glyph);
+        self
+    }
+    /// An element before the text, after the icon, as a scope token.
+    pub fn prefix(mut self, prefix: El) -> Self {
+        self.prefix = Some(prefix);
+        self
+    }
+    /// The name screen readers announce, which stays after the placeholder disappears.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+    /// Outline the field in the theme's danger colour.
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.invalid = invalid;
         self
     }
     pub fn size(mut self, size: ControlSize) -> Self {
@@ -86,6 +107,12 @@ impl<'a> TextField<'a> {
         self
     }
 
+    /// Runs after each edit changes the text.
+    pub fn on_change<S: 'static>(mut self, f: impl Fn(&mut S, &mut Tx) + 'static) -> Self {
+        self.extra.push(Box::new(move |e: El| e.on_input_change(f)));
+        self
+    }
+
     /// Sees keys before the field edits with them; return true to take one.
     pub fn on_key<S: 'static>(
         mut self,
@@ -102,8 +129,13 @@ impl<'a> TextField<'a> {
             .key(key)
             .single_line()
             .grow(1.0)
+            .min_w(0.0)
             .color(theme.text)
+            .caret(theme.accent, theme.accent.alpha(0.3))
             .placeholder(self.placeholder, theme.text_tertiary);
+        if let Some(label) = self.label {
+            input = input.label(label);
+        }
         input = (self.bind)(input);
         for extra in self.extra {
             input = extra(input);
@@ -117,8 +149,14 @@ impl<'a> TextField<'a> {
             .fill(theme.field)
             .min_w(0.0);
         f = self.width.apply(f);
+        if self.invalid {
+            f = f.border(2.0, theme.danger);
+        }
         if let Some(glyph) = self.leading {
             f = f.child(icon(glyph, h * 0.5).color(theme.text_tertiary));
+        }
+        if let Some(prefix) = self.prefix {
+            f = f.child(prefix);
         }
         f.child(input)
     }
