@@ -3214,6 +3214,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "pane-ui",
  "rmenu-core",
  "rune",
  "serde_json",

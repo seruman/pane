@@ -27,6 +27,7 @@ assert_is_empty = "allow"
 
 [dependencies]
 libc.workspace = true
+pane-ui.workspace = true
 rmenu-core = { workspace = true, features = ["clap"] }
 rune = { workspace = true, default-features = true, features = ["terminal"] }
 serde_json.workspace = true

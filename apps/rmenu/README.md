@@ -37,7 +37,7 @@ Both exit with status 2.
 
 - Matching uses nucleo's query syntax, including `!x`, `^x`, `x$`, and `'x`, with smart case.
 - `--appearance system` uses the terminal's foreground and background colours when available.
-  `light` and `dark` use Rune's theme colours.
+  `light` and `dark` use pane-ui's Merino colours.
 - `--theme` and the configuration's `theme` field accept the compatibility values `rex` and `native` but do not change the colours.
 - rmenu accepts `cmd+<key>` bindings but warns that it cannot dispatch them. Use Ctrl chords instead.
 - Copy writes an OSC 52 clipboard request. The terminal must support and allow clipboard writes.
@@ -68,6 +68,8 @@ Ctrl-W opens worktrees, and Alt-N opens memos.
 Both examples use `target/release/rmenu` by default. Set `RMENU_BIN` to use another executable.
 
 ## Where the code lives
+
+The view draws with [pane-ui](../../crates/pane-ui/README.md): its theme, text field, and key hints.
 
 [`crates/rmenu-core/src/lib.rs`](../../crates/rmenu-core/src/lib.rs) declares the core modules.
 The model takes events and returns effects without drawing a UI.

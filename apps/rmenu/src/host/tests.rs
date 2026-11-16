@@ -412,7 +412,7 @@ fn footer_fits_labels_then_keycaps_then_drops_bindings() {
     .unwrap();
     let mut rt =
         rune::Runtime::new(menu_with_launch(launch), crate::view::view, (1200.0, 400.0), rune::Env::new(true, 1.0));
-    for (width, labelled, bindings) in [(1200.0, true, 3), (400.0, false, 3), (270.0, false, 1), (230.0, false, 0)] {
+    for (width, labelled, bindings) in [(1200.0, true, 3), (600.0, false, 3), (340.0, false, 1), (260.0, false, 0)] {
         rt.set_viewport((width, 400.0), 1.0);
         rt.frame(0.0);
         rt.frame(0.0);

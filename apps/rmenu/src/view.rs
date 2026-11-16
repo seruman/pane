@@ -2,11 +2,11 @@ use std::borrow::Cow;
 
 use rmenu_core::config::KeyChord;
 use rmenu_core::model::{BindingIndex, Event, ListState, Nav, Target};
-use rune::tok;
 use rune::{
     Color, Cx, El, Family, GrowthSpec, Key, KeyEvent, ScrollSpec, Span, TextStyle, Tx, col, el, rich, row, text,
-    text_input,
 };
+
+use pane_ui::{Palette, TextField, Theme, kbd, kbd_width};
 
 use crate::cli::Appearance;
 use crate::host::Menu;
@@ -14,7 +14,6 @@ use crate::host::Menu;
 pub const ROWS_KEY: &str = "rows";
 
 const FALLBACK_WIDTH: f32 = 640.0;
-const QUERY_H: f32 = 30.0;
 const ROW_H: f32 = 28.0;
 const ROW_SUB_H: f32 = 42.0;
 const FOOTER_H: f32 = 30.0;
@@ -25,59 +24,19 @@ const PREVIEW_W: f32 = 380.0;
 const TITLE: TextStyle = TextStyle::new(13.0, 400.0).lh(18.0);
 const SMALL: TextStyle = TextStyle::new(11.0, 400.0).lh(15.0);
 const CHIP: TextStyle = TextStyle::new(12.0, 500.0).lh(16.0);
-const KEYCAP: TextStyle = TextStyle::new(10.0, 500.0).lh(14.0);
 const MONO: TextStyle = TextStyle::new(11.0, 400.0).lh(15.0).family(Family::SystemMono);
 
-#[derive(Clone, Copy)]
-struct Palette {
-    background: Color,
-    foreground: Color,
-    secondary: Color,
-    input: Color,
-    accent: Color,
-    selected_text: Color,
-    separator: Color,
-    error: Color,
-}
-
-fn contrast_ink(background: Color) -> Color {
-    // WCAG relative-luminance contrast, https://www.w3.org/TR/WCAG22/#dfn-contrast-ratio
-    let luminance = background.luminance();
-    let black = (luminance + 0.05) / 0.05;
-    let white = 1.05 / (luminance + 0.05);
-    if black >= white { Color::BLACK } else { Color::WHITE }
-}
-
-fn palette(menu: &Menu, system_dark: bool) -> Palette {
-    let terminal = rune::terminal_colors().unwrap_or_default();
-    let dark = match menu.appearance {
-        Appearance::Light => false,
-        Appearance::Dark => true,
-        Appearance::System => {
-            terminal.dark.or(terminal.background.map(|b| contrast_ink(b) == Color::WHITE)).unwrap_or(system_dark)
-        }
-    };
-    let theme = tok::theme(dark);
-    let background = terminal.background.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.card);
-    let foreground = terminal.foreground.filter(|_| menu.appearance == Appearance::System).unwrap_or(theme.text);
-    let accent = terminal.cursor.or(terminal.palette[4]).unwrap_or_else(|| tok::accent(0, dark));
-    let selected_text = contrast_ink(accent);
-    let error = terminal.palette[if dark { 9 } else { 1 }].unwrap_or(Color { r: 0.85, g: 0.25, b: 0.2, a: 1.0 });
-    Palette {
-        background,
-        foreground,
-        secondary: foreground.alpha(if dark { 0.5 } else { 0.55 }),
-        input: foreground.alpha(if dark { 0.07 } else { 0.06 }),
-        accent,
-        selected_text,
-        separator: foreground.alpha(if dark { 0.1 } else { 0.12 }),
-        error,
+fn theme(menu: &Menu, system_dark: bool) -> Theme {
+    match menu.appearance {
+        Appearance::System => Theme::current(system_dark),
+        Appearance::Light => Theme::new(Palette::merino_light()),
+        Appearance::Dark => Theme::new(Palette::merino_dark()),
     }
 }
 
 pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
     cx.reduced_motion(true);
-    let c = palette(menu, cx.system_dark());
+    let c = theme(menu, cx.system_dark());
     let model = &menu.model;
     let width = cx.layout_with("root", |r| r[2].round()).unwrap_or(FALLBACK_WIDTH);
     let list = col()
@@ -102,53 +61,43 @@ pub fn view(menu: &Menu, cx: &mut Cx<Menu>) -> El {
     col().key("root").w_full().h_full().fill(c.background).child(body).child(footer(menu, &c, width))
 }
 
-fn query_row(menu: &Menu, c: &Palette) -> El {
+fn query_row(menu: &Menu, c: &Theme) -> El {
     let prompt = menu.model.prompt();
     // The prompt names the field for screen readers; the placeholder disappears once typing starts.
     let label = if prompt.is_empty() { "Search".to_owned() } else { prompt.clone() };
-    let field = text_input(&menu.field, TITLE)
-        .key("query")
+    let mut field = TextField::new(&menu.field, |m: &mut Menu| &mut m.field)
         .label(label)
-        .single_line()
-        .grow(1.0)
-        .min_w(0.0)
-        .color(c.foreground)
-        .caret(c.accent, c.accent.alpha(0.3))
-        .placeholder("Search", c.secondary)
-        .on_edit(|m: &mut Menu| &mut m.field)
-        .on_input_change(|m: &mut Menu, tx: &mut Tx| {
+        .placeholder("Search")
+        .fill()
+        .invalid(menu.refusal_until.is_some())
+        .on_change(|m: &mut Menu, tx: &mut Tx| {
             let query = m.field.text.clone();
             m.handle(Event::SetQuery(query), tx);
         })
-        .on_input_key(key);
-    let chip = match prompt.as_str() {
-        "" => None,
-        crate::cli::DEFAULT_PROMPT => Some(text(crate::cli::DEFAULT_PROMPT).font(TITLE).color(c.secondary)),
-        _ => Some(
-            row()
-                .h(20.0)
-                .px(7.0)
-                .radius(6.0)
-                .center_y()
-                .fill(c.secondary.alpha(0.16))
-                .max_w(360.0)
-                .min_w(0.0)
-                .child(text(prompt).font(CHIP).color(c.foreground).truncate()),
-        ),
-    };
-    let mut line = row().h(QUERY_H).pl(5.0).pr(9.0).gap(6.0).center_y().radius(9.0).fill(c.input);
-    if menu.refusal_until.is_some() {
-        line = line.border(2.0, c.error);
+        .on_key(key);
+    match prompt.as_str() {
+        "" => {}
+        crate::cli::DEFAULT_PROMPT => {
+            field = field.prefix(text(crate::cli::DEFAULT_PROMPT).font(c.ty.body).color(c.text_secondary));
+        }
+        _ => {
+            field = field.prefix(
+                row()
+                    .h(20.0)
+                    .px(7.0)
+                    .radius(6.0)
+                    .center_y()
+                    .fill(c.pressed)
+                    .max_w(360.0)
+                    .min_w(0.0)
+                    .child(text(prompt).font(CHIP).color(c.text).truncate()),
+            );
+        }
     }
-    if let Some(chip) = chip {
-        line = line.child(chip);
-    } else {
-        line = line.pl(9.0);
-    }
-    el().w_full().padding(8.0).pb(5.0).child(line.child(field).w_full())
+    el().w_full().padding(8.0).pb(5.0).child(field.build("query", c))
 }
 
-fn source_strip(menu: &Menu, c: &Palette) -> El {
+fn source_strip(menu: &Menu, c: &Theme) -> El {
     let model = &menu.model;
     let sources: Vec<_> = model.options().configuration.sources().iter().filter(|s| !s.hidden).collect();
     if sources.len() < 2 || model.depth() > 0 {
@@ -163,20 +112,20 @@ fn source_strip(menu: &Menu, c: &Palette) -> El {
             .h(24.0)
             .px(8.0)
             .gap(6.0)
-            .radius(9.0)
+            .radius(c.radius.field)
             .center_y()
-            .fill(if active { c.input } else { Color::TRANSPARENT })
+            .fill(if active { c.field } else { Color::TRANSPARENT })
             .on_press_tx(move |m: &mut Menu, tx: &mut Tx| m.handle(Event::SwitchSource(id.clone()), tx))
-            .child(text(source.label.clone()).font(CHIP).color(if active { c.foreground } else { c.secondary }));
+            .child(text(source.label.clone()).font(CHIP).color(if active { c.text } else { c.text_secondary }));
         if let Some(chord) = source.key.as_ref() {
-            button = button.child(text(chord.display()).font(CHIP).color(c.secondary.alpha(0.6)));
+            button = button.child(text(chord.display()).font(CHIP).color(c.text_secondary.alpha(0.6)));
         }
         strip = strip.child(button);
     }
     strip
 }
 
-fn results(menu: &Menu, c: &Palette) -> El {
+fn results(menu: &Menu, c: &Theme) -> El {
     let model = &menu.model;
     let empty = |message: &str, color| {
         col()
@@ -188,12 +137,12 @@ fn results(menu: &Menu, c: &Palette) -> El {
     };
     let count = match model.list_state() {
         ListState::Rows(count) => count,
-        ListState::Failed(message) => return empty(message, c.error),
-        ListState::Loading => return empty("Loading…", c.secondary),
-        ListState::Searching => return empty("", c.secondary),
-        ListState::Empty => return empty("No matches", c.secondary),
+        ListState::Failed(message) => return empty(message, c.danger),
+        ListState::Loading => return empty("Loading…", c.text_secondary),
+        ListState::Searching => return empty("", c.text_secondary),
+        ListState::Empty => return empty("No matches", c.text_secondary),
     };
-    let c = *c;
+    let c = c.clone();
     let rows = col()
         .key(ROWS_KEY)
         .w_full()
@@ -209,31 +158,30 @@ fn results(menu: &Menu, c: &Palette) -> El {
     col().key("scroller").scroll(ScrollSpec { stick_bottom: false }).w_full().grow(1.0).min_h(0.0).pb(4.0).child(rows)
 }
 
-fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
+fn result_row(menu: &Menu, i: usize, c: &Theme) -> El {
     let model = &menu.model;
     let item = model.result(i);
     let selected = model.highlighted_row() == Some(i);
     let marked = model.is_marked(item);
     let subtitle = item.subtitle.as_deref().filter(|s| !s.is_empty());
-    let (text_color, meta) =
-        if selected { (c.selected_text, c.selected_text.alpha(0.75)) } else { (c.foreground, c.secondary) };
+    let (text_color, meta) = if selected { (c.on_accent, c.on_accent.alpha(0.75)) } else { (c.text, c.text_secondary) };
     let query = model.shown_query();
-    let mark = if selected { c.selected_text } else { c.accent };
+    let mark = if selected { c.on_accent } else { c.accent };
     let (title_marks, subtitle_marks) = rmenu_core::search::item_highlights(query, item);
     let mut labels =
         col().grow(1.0).min_w(0.0).gap(0.0).child(matched(item.title(), title_marks, TITLE, text_color, mark));
     if let Some(subtitle) = subtitle {
         labels = labels.child(matched(subtitle, subtitle_marks, SMALL, meta, mark));
     }
-    let mut line = row().w_full().h_full().px(10.0).gap(8.0).center_y().radius(8.0).fill(if selected {
+    let mut line = row().w_full().h_full().px(10.0).gap(8.0).center_y().radius(c.radius.row).fill(if selected {
         c.accent
     } else if marked {
-        c.accent.alpha(0.2)
+        c.accent_soft
     } else {
         Color::TRANSPARENT
     });
     if selected && marked {
-        line = line.border(1.0, c.selected_text.alpha(0.65));
+        line = line.border(1.0, c.on_accent.alpha(0.65));
     }
     if model.options().multi {
         line = line.child(text(if marked { "●" } else { "○" }).font(SMALL).color(if marked {
@@ -249,7 +197,7 @@ fn result_row(menu: &Menu, i: usize, c: &Palette) -> El {
     let id = item.id.clone();
     // A virtual row's position can change before its handler runs.
     let row_for = move |m: &Menu| m.model.listed_row(&id);
-    let line = if selected { line } else { line.hover(c.foreground.alpha(0.05)) };
+    let line = if selected { line } else { line.hover(c.hover) };
     el().w_full()
         .h(if subtitle.is_some() { ROW_SUB_H } else { ROW_H })
         .px(6.0)
@@ -270,17 +218,17 @@ fn matched(content: &str, marks: Vec<std::ops::Range<usize>>, style: TextStyle, 
     rich(content.to_owned(), spans).font(style).color(color).truncate_middle()
 }
 
-fn preview_pane(preview: &str, c: &Palette, width: f32) -> El {
+fn preview_pane(preview: &str, c: &Theme, width: f32) -> El {
     let body = preview.to_owned();
     col()
         .key("preview")
         .w(width)
         .h_full()
         .scroll(ScrollSpec { stick_bottom: false })
-        .child(el().px(12.0).py(10.0).child(text(body).font(MONO).color(c.foreground).wrap().selectable(true)))
+        .child(el().px(12.0).py(10.0).child(text(body).font(MONO).color(c.text).wrap().selectable(true)))
 }
 
-fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
+fn footer(menu: &Menu, c: &Theme, width: f32) -> El {
     let model = &menu.model;
     let status = if let Some(message) = model.message() {
         message.to_owned()
@@ -310,7 +258,12 @@ fn footer(menu: &Menu, c: &Palette, width: f32) -> El {
                 .on_press_tx(|m: &mut Menu, tx: &mut Tx| m.handle(Event::Nav(Nav::Back), tx)),
         )
         .child(
-            text(status).font(SMALL).color(if failed { c.error } else { c.secondary }).truncate().grow(1.0).min_w(0.0),
+            text(status)
+                .font(SMALL)
+                .color(if failed { c.danger } else { c.text_secondary })
+                .truncate()
+                .grow(1.0)
+                .min_w(0.0),
         );
     let bindings: Vec<(usize, &str, String)> = model
         .options()
@@ -350,25 +303,16 @@ const STATUS_MIN_W: f32 = 120.0;
 
 fn keycap_width(label: &str, key: &str) -> f32 {
     let label_w = if label.is_empty() { 0.0 } else { rune::text::measure(label, &[], SMALL, None).0 + 6.0 };
-    label_w + (rune::text::measure(key, &[], KEYCAP, None).0 + 10.0).max(18.0)
+    label_w + kbd_width(key)
 }
 
-fn keycap_button(label: &str, key: &str, enabled: bool, c: &Palette) -> El {
-    let ink = if enabled { c.secondary } else { c.secondary.alpha(0.45) };
+fn keycap_button(label: &str, key: &str, enabled: bool, c: &Theme) -> El {
     let mut b = row().h(20.0).gap(6.0).center_y();
     if !label.is_empty() {
-        b = b.child(text(label.to_owned()).font(SMALL).color(ink));
+        b = b.child(text(label.to_owned()).font(SMALL).color(c.text_secondary));
     }
-    b.child(
-        row()
-            .h(18.0)
-            .min_w(18.0)
-            .px(5.0)
-            .radius(4.5)
-            .center()
-            .border(1.0, c.foreground.alpha(0.16))
-            .child(text(key.to_owned()).font(KEYCAP).color(ink)),
-    )
+    let b = b.child(kbd(key, c));
+    if enabled { b } else { b.opacity(0.45) }
 }
 
 // Rune reports Ctrl as both `ctrl` and `cmd`. Terminal chords use only Control.
@@ -428,25 +372,10 @@ mod tests {
     use rune::Mods;
 
     #[test]
-    fn selection_ink_maximizes_contrast_and_meets_normal_text_minimum() {
-        for level in [0.0, 0.02, 0.18, 0.25, 0.36, 0.4, 0.8, 1.0] {
-            let background = Color { r: level, g: level, b: level, a: 1.0 };
-            let ink = contrast_ink(background);
-            let contrast = |color: Color| {
-                let l = color.luminance();
-                (l.max(level) + 0.05) / (l.min(level) + 0.05)
-            };
-            assert!(contrast(ink) >= contrast(Color::BLACK), "background={level}");
-            assert!(contrast(ink) >= contrast(Color::WHITE), "background={level}");
-            assert!(contrast(ink) >= 4.5, "background={level}");
-        }
-    }
-
-    #[test]
     fn a_keycap_claims_the_room_its_text_takes() {
         for (label, key) in [("Choose", "↩"), ("", "Esc"), ("WWWWWW", "W"), ("打开文件夹", "⌃⇧O")] {
             let label_w = if label.is_empty() { 0.0 } else { rune::text::measure(label, &[], SMALL, None).0 };
-            let key_w = rune::text::measure(key, &[], KEYCAP, None).0;
+            let key_w = rune::text::measure(key, &[], rune::TextStyle::new(11.0, 400.0), None).0;
             assert!(keycap_width(label, key) >= label_w + key_w, "{label:?} {key:?}");
         }
     }
