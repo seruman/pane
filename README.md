@@ -1,6 +1,6 @@
 # pane
 
-Markdown readers and review tools for [Rune](https://github.com/anomalyco/rune).
+Markdown readers, review tools, and a picker for [Rune](https://github.com/anomalyco/rune).
 The apps draw inside terminals that support the kitty graphics protocol, including
 Rex, Superlogical's terminal multiplexer. They use the terminal's colours.
 
@@ -11,6 +11,8 @@ Rex, Superlogical's terminal multiplexer. They use the terminal's colours.
 | `gallery` | An interactive page of pane-ui components. |
 | `mdview` | A Markdown reader with Vim navigation and task checkboxes that write changes to the open file. |
 | `mdreview` | A Markdown review app with comments under their document blocks. `:wq` writes the review as Markdown feedback. |
+| `rmenu` | A picker with mmenu's command-line contract. See [its README](apps/rmenu/README.md). |
+| `rmenu-core` | rmenu's data, matching, commands, and menu state. It does not depend on the renderer. |
 
 Both Markdown apps draw images from files, with paths relative to the open document. They do
 not fetch remote images, which show their alt text instead.

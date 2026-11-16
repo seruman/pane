@@ -1,0 +1,36 @@
+[package]
+name = "rmenu"
+publish = false
+description = "mmenu's command-line contract, drawn by Rune inside a terminal."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+# rmenu keeps the pedantic lint set it was written against, not the workspace's.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Accessors do not need annotations merely because their values can be ignored.
+must_use_candidate = "allow"
+# Public contracts document errors without mandatory Errors and Panics headings.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+# Owned callback arguments and consuming entry points keep ownership at their boundary.
+needless_pass_by_value = "allow"
+# CLI flags are independent, and FFI names follow the APIs they call.
+struct_excessive_bools = "allow"
+similar_names = "allow"
+# Short UI strings and fixtures prefer format! to infallible formatting boilerplate.
+format_collect = "allow"
+format_push_string = "allow"
+# Empty-collection asserts read better than assert_eq! against a typed empty array.
+assert_is_empty = "allow"
+
+[dependencies]
+libc.workspace = true
+rmenu-core = { workspace = true, features = ["clap"] }
+rune = { workspace = true, default-features = true, features = ["terminal"] }
+serde_json.workspace = true
+clap.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
