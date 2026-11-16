@@ -338,6 +338,33 @@ impl<A: Clone, O: Clone> Vim<A, O> {
         self.reset_pending();
     }
 
+    /// Selects bytes `range` of `text` in Visual mode, the cursor on its last character, as a
+    /// mouse selection does. An empty range puts the cursor at its start in Normal mode instead.
+    pub fn select(&mut self, range: Range<usize>, text: &str) {
+        let b = Buf::new(text);
+        if b.n() == 0 {
+            return;
+        }
+        if range.is_empty() {
+            self.set_cursor(range.start, text);
+            return;
+        }
+        // `index` rounds a byte inside a character up to the next one; the last character is the
+        // one before the end.
+        let end = range.end.min(text.len());
+        let first = b.index(range.start);
+        let last = b
+            .offs
+            .partition_point(|&o| o < end)
+            .saturating_sub(1)
+            .max(first);
+        self.anchor = b.byte(first);
+        self.cursor = b.byte(last);
+        self.goal_column = last - b.line_start(last);
+        self.mode = Mode::Visual(VisualMode::Character);
+        self.reset_pending();
+    }
+
     /// The selected bytes in visual modes.
     pub fn selection(&self, text: &str) -> Option<Range<usize>> {
         self.visual_mode()

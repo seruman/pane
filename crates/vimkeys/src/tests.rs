@@ -1110,3 +1110,33 @@ fn binding_a_lines_operator_in_visual_mode_panics() {
         None,
     );
 }
+
+#[test]
+fn a_mouse_selection_is_visual_and_operators_take_it() {
+    let text = "one twö three";
+    let mut v = Vim::default();
+    let at = text.find("twö").unwrap();
+    v.select(at..at + "twö".len(), text);
+    assert_eq!(v.mode(), VimMode::Visual);
+    assert_eq!(v.selection(text), Some(at..at + "twö".len()));
+    assert_eq!(
+        v.cursor(text),
+        at + 2..at + 4,
+        "the cursor sits on its last character"
+    );
+    assert_eq!(yanked(press_on(&mut v, text, "y")), "twö");
+    assert_eq!(v.mode(), VimMode::Normal);
+    v.select(at..at + 2, text);
+    press_on(&mut v, text, "l");
+    assert_eq!(
+        v.selection(text),
+        Some(at..at + "twö".len()),
+        "keys extend it as a Visual selection"
+    );
+    v.select(4..4, text);
+    assert_eq!(
+        (v.mode(), v.cursor(text)),
+        (VimMode::Normal, 4..5),
+        "an empty one is a click's caret"
+    );
+}
