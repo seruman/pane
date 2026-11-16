@@ -64,6 +64,8 @@ impl Block {
 pub struct Page {
     pub blocks: Vec<Block>,
     text: String,
+    /// Where each selectable text the page draws sits in [`Self::text`], in tree order.
+    pieces: Vec<Range<usize>>,
 }
 
 impl Page {
@@ -140,6 +142,12 @@ impl Page {
             }
             let text_at = page.text.len();
             page.text.push_str(rendered.text());
+            page.pieces.extend(
+                rendered
+                    .pieces()
+                    .iter()
+                    .map(|r| r.start + text_at..r.end + text_at),
+            );
             page.blocks.push(Block {
                 src,
                 markdown,
@@ -154,6 +162,55 @@ impl Page {
 
     pub fn text(&self) -> &str {
         &self.text
+    }
+
+    /// The bytes of [`Self::text`] that `t`, a piece of a mouse selection over the page's
+    /// blocks drawn as one selection group, covers.
+    pub fn selected(&self, t: &rune::SelectedText) -> Option<Range<usize>> {
+        let piece = self.pieces.get(t.index()?)?;
+        let at = |b: usize| (piece.start + b).min(piece.end);
+        Some(at(t.copied().start)..at(t.copied().end))
+    }
+
+    /// The byte of [`Self::text`] a click's caret in `t` is at: on the character after it, or
+    /// on the last one when the click was past a text's end.
+    pub fn clicked(&self, t: &rune::SelectedText) -> Option<usize> {
+        let piece = self.pieces.get(t.index()?)?;
+        let at = (piece.start + t.copied().start).min(piece.end);
+        if at < piece.end || piece.is_empty() {
+            return Some(at);
+        }
+        self.text[piece.clone()]
+            .char_indices()
+            .next_back()
+            .map(|(i, _)| piece.start + i)
+    }
+
+    /// Where the link drawn at bytes `range` of [`Self::text`] goes: a Markdown link's
+    /// destination (reference links resolved), or a bare web address the reader links.
+    pub fn link_at(&self, range: Range<usize>) -> Option<String> {
+        let block = &self.blocks[self.block_at(range.start)];
+        let own = block.text_range();
+        if range.start >= own.start && range.end <= own.end {
+            let local = range.start - own.start..range.end - own.start;
+            if let Some(at) = block.rendered.source_ranges(local).first().map(|r| r.start) {
+                let options = Options::ENABLE_STRIKETHROUGH
+                    | Options::ENABLE_TABLES
+                    | Options::ENABLE_TASKLISTS;
+                let link = Parser::new_ext(&block.markdown, options)
+                    .into_offset_iter()
+                    .find_map(|(event, span)| match event {
+                        Event::Start(Tag::Link { dest_url, .. }) if span.contains(&at) => {
+                            Some(dest_url.into_string())
+                        }
+                        _ => None,
+                    });
+                if link.is_some() {
+                    return link;
+                }
+            }
+        }
+        bare_address(&self.text, range.start)
     }
 
     /// The source byte ranges a range of [`Self::text`] was drawn from, in the whole source.
@@ -214,6 +271,25 @@ fn kind_of(tag: &Tag<'_>) -> BlockKind {
         Tag::BlockQuote(_) => BlockKind::Quote,
         Tag::Table(_) => BlockKind::Table,
         _ => BlockKind::Para,
+    }
+}
+
+/// The web address in the word of `text` holding byte `at`, as a reader links `https://…`,
+/// `http://…` and `www.…`, without the punctuation that ends a sentence around it.
+fn bare_address(text: &str, at: usize) -> Option<String> {
+    let start = text[..at].rfind(char::is_whitespace).map_or(0, |i| i + 1);
+    let end = text[at..]
+        .find(char::is_whitespace)
+        .map_or(text.len(), |i| at + i);
+    let word = text[start..end]
+        .trim_start_matches(['(', '<', '[', '"', '\''])
+        .trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '>', ']', '"', '\'']);
+    if word.starts_with("https://") || word.starts_with("http://") {
+        Some(word.to_owned())
+    } else if word.starts_with("www.") {
+        Some(format!("https://{word}"))
+    } else {
+        None
     }
 }
 

@@ -1099,3 +1099,135 @@ fn page_height(src: &str, by_block: bool) -> f32 {
         .map(|e| e.rect[3])
         .unwrap()
 }
+
+fn text_rect(rt: &Runtime<Reviewer>, shown: &str) -> [f32; 4] {
+    rt.elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.text.as_deref() == Some(shown))
+        .unwrap_or_else(|| panic!("no text {shown:?}"))
+        .rect
+}
+
+fn pointer_click(rt: &mut Runtime<Reviewer>, x: f32, y: f32) {
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+}
+
+const MOUSE: &str = "# Title\n\nalpha beta gamma\n\nSee [the docs](https://example.com/docs) and www.rust-lang.org.\n\n- one\n- two\n";
+
+#[test]
+fn a_click_moves_the_cursor_where_it_lands() {
+    let mut rt = runtime(MOUSE);
+    let r = text_rect(&rt, "alpha beta gamma");
+    // Past the end of the line: the cursor goes on its last character, as in Vim.
+    pointer_click(&mut rt, r[0] + r[2] - 1.0, r[1] + r[3] / 2.0);
+    assert_eq!(rt.state.vim.mode(), VimMode::Normal);
+    let at = rt.state.page.text().find("gamma").unwrap() + 4;
+    assert_eq!(rt.state.cursor(), at);
+    // The start of a line in another block.
+    let r = text_rect(&rt, "two");
+    pointer_click(&mut rt, r[0] + 0.5, r[1] + r[3] / 2.0);
+    assert_eq!(rt.state.cursor(), rt.state.page.text().find("two").unwrap());
+    assert_eq!(
+        rt.selection(),
+        None,
+        "the page shows Vim's cursor, not the pointer's caret"
+    );
+}
+
+#[test]
+fn a_drag_across_blocks_selects_in_visual_mode_and_comments_on_it() {
+    let mut rt = runtime(MOUSE);
+    let from = text_rect(&rt, "alpha beta gamma");
+    let to = text_rect(&rt, "one");
+    rt.pointer_down(from[0] + 0.5, from[1] + from[3] / 2.0);
+    rt.pointer_move(from[0] + 40.0, from[1] + from[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_move(to[0] + to[2] - 0.5, to[1] + to[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.pointer_up(to[0] + to[2] - 0.5, to[1] + to[3] / 2.0);
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.vim.mode(), VimMode::Visual);
+    let text = rt.state.page.text();
+    let selected = rt.state.vim.selection(text).map(|r| text[r].to_owned());
+    assert_eq!(
+        selected.as_deref(),
+        Some(&text[text.find("alpha").unwrap()..text.find("one").unwrap() + 3])
+    );
+    press(&mut rt, "c");
+    press(&mut rt, "x");
+    key(&mut rt, Key::Enter);
+    let out = feedback(&rt).unwrap();
+    assert!(
+        out.contains("alpha beta gamma") && out.contains("- one"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_double_click_selects_a_word() {
+    let mut rt = runtime(MOUSE);
+    let r = text_rect(&rt, "alpha beta gamma");
+    // The box spans the page; its text starts at its left edge.
+    let (x, y) = (r[0] + 2.0, r[1] + r[3] / 2.0);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    let text = rt.state.page.text();
+    assert_eq!(rt.state.vim.mode(), VimMode::Visual);
+    assert_eq!(
+        rt.state.vim.selection(text).map(|r| &text[r]),
+        Some("alpha")
+    );
+}
+
+#[test]
+fn gx_and_a_click_open_links() {
+    let mut rt = runtime(MOUSE);
+    let text = rt.state.page.text().to_owned();
+    rt.update(|s, _| s.vim.set_cursor(text.find("docs").unwrap(), &text));
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "gx");
+    rt.update(|s, _| s.vim.set_cursor(text.find("rust-lang").unwrap(), &text));
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "gx");
+    rt.update(|s, _| s.vim.set_cursor(text.find("alpha").unwrap(), &text));
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "gx");
+    assert_eq!(rt.state.note.as_deref(), Some("No link under the cursor"));
+    assert_eq!(
+        rt.take_url_requests(),
+        ["https://example.com/docs", "https://www.rust-lang.org"]
+    );
+    let r = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.text.as_deref().is_some_and(|t| t.starts_with("See ")))
+        .unwrap()
+        .rect;
+    // "See " is about four characters in: the link starts just after it.
+    pointer_click(&mut rt, r[0] + 40.0, r[1] + r[3] / 2.0);
+    assert_eq!(rt.take_url_requests(), ["https://example.com/docs"]);
+    assert_eq!(rt.state.vim.mode(), VimMode::Normal);
+}
+
+#[test]
+fn reference_links_and_bare_addresses_resolve() {
+    let page = Page::new(
+        "A [link][r] and <https://auto.example>, then (https://x.y/z).\n\n[r]: https://example.com/ref\n",
+    );
+    let text = page.text();
+    let at = |needle: &str| {
+        let i = text.find(needle).unwrap();
+        page.link_at(i..i + 1)
+    };
+    assert_eq!(at("link").as_deref(), Some("https://example.com/ref"));
+    assert_eq!(at("auto").as_deref(), Some("https://auto.example"));
+    assert_eq!(at("x.y").as_deref(), Some("https://x.y/z"));
+    assert_eq!(at("then"), None);
+}

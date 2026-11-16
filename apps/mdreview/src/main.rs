@@ -11,7 +11,10 @@
 //! `cc` and `dd` act on the cursor's line. `C` adds a general comment.
 //! `]c` and `[c` step through comments. Enter or `\e` edits a comment. `\x` deletes it.
 //! Tab lists the comments. The key panel shows continuations for a prefix or selection.
-//! `\?` shows every binding.
+//! `\?` shows every binding. `gx` opens the link under the cursor.
+//!
+//! The mouse works as in Vim: a click moves the cursor, a drag, double-click or triple-click
+//! selects in Visual mode for `c`, `d` and `gy`, and a click on a link opens it.
 //!
 //! In the editor, Enter saves, Shift-Enter adds a line and Escape cancels.
 //! `:wq`, `:x` and `ZZ` send the review and quit.
@@ -98,6 +101,7 @@ enum Act {
     CommandLine,
     SendAndQuit,
     QuitWithoutSending,
+    OpenLink,
 }
 
 fn keymap() -> Keymap<Act, Op> {
@@ -114,6 +118,7 @@ fn keymap() -> Keymap<Act, Op> {
         .action(&[Leader, C('x')], Act::Delete, "Delete the comment")
         .action(&[Stroke::Tab], Act::List, "List the comments")
         .action(&[Leader, C('?')], Act::Keys, "Every key")
+        .action(&[C('g'), C('x')], Act::OpenLink, "Open the link")
         .action(&[C(':')], Act::CommandLine, None)
         .action(
             &[C('Z'), C('Z')],
@@ -813,6 +818,9 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         let mut md = Markdown::new(block.markdown.as_str())
             .style(md_style.clone())
             .highlights(highlights(&s.page, &marks, i))
+            .selectable(true)
+            .join_selection_group()
+            .on_link_tx(|s: &mut Reviewer, url, tx| open_link(s, url, tx))
             .tasks_read_only();
         // rune-kit rebuilds a block with an image loader every frame, so only image blocks get one.
         if block.markdown.contains("![") {
@@ -835,7 +843,18 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         .w_full()
         .h_full()
         .padding(24.0)
-        .child(doc)
+        .child(
+            doc.selection_group(true)
+                .on_background_press_tx(pointed)
+                .on_selection_change(
+                    |s: &mut Reviewer, change: &rune::SelectionChange, tx: &mut Tx| {
+                        // A drag selects once it lets go.
+                        if !change.dragging() && change.selection().is_some() {
+                            pointed(s, tx);
+                        }
+                    },
+                ),
+        )
         .scroll(ScrollSpec {
             stick_bottom: false,
         });
@@ -1097,7 +1116,47 @@ fn act(s: &mut Reviewer, action: Act, tx: &mut Tx) {
         Act::CommandLine => s.mode = Mode::Command(String::new()),
         Act::SendAndQuit => s.execute(Command::SendAndQuit, tx),
         Act::QuitWithoutSending => s.execute(Command::ForceQuit, tx),
+        Act::OpenLink => {
+            let text = s.page.text();
+            let at = s.vim.cursor(text);
+            match s.page.link_at(at) {
+                Some(url) => open_link(s, &url, tx),
+                None => s.note = Some("No link under the cursor".into()),
+            }
+        }
     }
+}
+
+fn open_link(s: &mut Reviewer, url: &str, tx: &mut Tx) {
+    s.note = Some(match tx.open_url(url) {
+        Ok(()) => format!("Opening {url}"),
+        Err(e) => format!("Can't open {url}: {e}"),
+    });
+}
+
+/// The mouse as in Vim: a press that left a selection selects it in Visual mode, and one that
+/// left a caret moves the cursor there.
+fn pointed(s: &mut Reviewer, tx: &mut Tx) {
+    if matches!(s.mode, Mode::Composing(_) | Mode::Command(_)) {
+        return;
+    }
+    let text = s.page.text();
+    let range = if let Some(selection) = tx.text_selection() {
+        let mut ranges = selection.texts().iter().filter_map(|t| s.page.selected(t));
+        let Some(first) = ranges.next() else { return };
+        let end = ranges.next_back().map_or(first.end, |r| r.end);
+        first.start..end
+    } else if let Some(at) = tx.text_caret().and_then(|c| s.page.clicked(c)) {
+        at..at
+    } else {
+        return;
+    };
+    s.mode = Mode::Normal;
+    s.note = None;
+    s.selected = None;
+    s.vim.select(range, text);
+    // The page shows the selection as Vim's, not as the pointer left it.
+    tx.clear_text_selection();
 }
 
 fn list_key_press(s: &mut Reviewer, at: usize, k: &KeyEvent, tx: &mut Tx) {
