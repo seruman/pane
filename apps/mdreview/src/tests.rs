@@ -325,7 +325,7 @@ fn select_comment_save_edit_and_delete() {
         rt.find("composer-field").is_some(),
         "c on a selection opens the composer"
     );
-    assert!(texts_under(&rt, "composer").contains(&"Some bold".to_owned()));
+    assert_eq!(selected_comment_range(&rt), "Some bold");
     press(&mut rt, "Too loud");
     assert!(
         texts_under(&rt, "composer-field").contains(&"Too loud".to_owned()),
@@ -565,7 +565,7 @@ fn which_key_shows_what_can_follow() {
 fn comment_and_remove_are_operators() {
     let mut rt = runtime(SRC);
     press(&mut rt, "jcw");
-    assert!(texts_under(&rt, "composer").contains(&"Some".to_owned()));
+    assert_eq!(selected_comment_range(&rt), "Some ");
     press(&mut rt, "a");
     key(&mut rt, Key::Enter);
     assert_eq!(
@@ -578,7 +578,7 @@ fn comment_and_remove_are_operators() {
     assert!(texts_under(&rt, &card_key(&rt, 2)).contains(&"Remove".to_owned()));
     assert!(feedback(&rt).unwrap().ends_with("## 2. Remove this (lines 5 to 6, under `Title`)\n\n```markdown\n- one\n- two\n```\n\nI don't want this in the document.\n"));
     press(&mut rt, "gg2cc");
-    assert!(texts_under(&rt, "composer").contains(&"Title".to_owned()));
+    assert!(selected_comment_range(&rt).starts_with("Title"));
     press(&mut rt, "b");
     key(&mut rt, Key::Enter);
     assert!(texts_under(&rt, &card_key(&rt, 1)).contains(&"b".to_owned()));
@@ -724,7 +724,7 @@ fn counts_work_in_visual_mode() {
     press(&mut rt, "jv2e");
     assert_eq!(feedback(&rt), None);
     press(&mut rt, "c");
-    assert!(texts_under(&rt, "composer").contains(&"Some bold".to_owned()));
+    assert_eq!(selected_comment_range(&rt), "Some bold");
 }
 
 #[test]
@@ -1379,4 +1379,19 @@ fn the_composer_floats_where_it_can_be_seen_inside_a_long_block() {
             "{needle}: the composer {card:?} fits in the body {body:?}"
         );
     }
+}
+
+/// The text the open composer comments on: no longer quoted in the box, only highlighted.
+fn selected_comment_range(rt: &Runtime<Reviewer>) -> String {
+    let Some(Target::New { range: Some(range) }) = rt.state.composer() else {
+        panic!("no composer on a range");
+    };
+    rt.state.page.text()[range.clone()].to_owned()
+}
+
+#[test]
+fn the_composer_does_not_repeat_the_selection() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jveec");
+    assert!(!texts_under(&rt, "composer").contains(&"Some bold".to_owned()));
 }

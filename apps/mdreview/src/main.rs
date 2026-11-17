@@ -576,7 +576,7 @@ fn highlights(page: &Page, marks: &[Mark], index: usize) -> Vec<(Vec<Range<usize
     out
 }
 
-fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &Theme) -> El {
+fn composer_view(draft: &TextEdit, title: &str, theme: &Theme) -> El {
     let field = text_input(draft, theme.ty.body)
         .key("composer-field")
         .w_full()
@@ -612,7 +612,7 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
             tx.blur();
         })
         .build("composer-cancel", theme);
-    let mut card = col()
+    let card = col()
         .key("composer")
         .w_full()
         .gap(8.0)
@@ -625,9 +625,6 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
                 .font(theme.ty.strong)
                 .color(theme.text),
         );
-    if let Some(q) = quote {
-        card = card.child(quote_view(q, theme));
-    }
     card.child(
         el().w_full()
             .padding(8.0)
@@ -744,12 +741,7 @@ fn thread(cards: Vec<El>, theme: &Theme) -> El {
 
 fn thread_card(s: &Reviewer, id: CommentId, number: usize, c: &Comment, theme: &Theme) -> El {
     if s.composer() == Some(&Target::Edit(id)) {
-        composer_view(
-            &s.draft,
-            &format!("Edit #{number} · {}", c.title()),
-            None,
-            theme,
-        )
+        composer_view(&s.draft, &format!("Edit #{number} · {}", c.title()), theme)
     } else {
         comment_view(id, number, c, s.current() == Some(id), theme)
     }
@@ -960,9 +952,6 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         });
     let mut body = el().key(BODY).w_full().grow(1.0).min_h(0.0).child(content);
     if let Some(Target::New { range }) = s.composer() {
-        let quote = range
-            .as_ref()
-            .map(|r| s.page.text().get(r.clone()).unwrap_or_default());
         let title = if range.is_some() {
             "New comment"
         } else {
@@ -980,7 +969,7 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
                     )
                 });
         body = body.child(
-            composer_view(&s.draft, title, quote, &theme)
+            composer_view(&s.draft, title, &theme)
                 .w(width)
                 .fill(theme.popover)
                 .shadow(12.0, 32.0, theme.shadow_strong)
