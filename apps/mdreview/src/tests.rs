@@ -22,10 +22,16 @@ fn press(rt: &mut Runtime<Reviewer>, keys: &str) {
     }
 }
 
+/// A key. Enter in the open comment box comes with Ctrl, which saves it; plain Enter there
+/// adds a line (see `enter_adds_a_line_and_ctrl_enter_saves`).
 fn key(rt: &mut Runtime<Reviewer>, k: Key) {
+    let ctrl = k == Key::Enter && rt.state.composer().is_some();
     rt.key(KeyEvent {
         key: k,
-        mods: Mods::default(),
+        mods: Mods {
+            ctrl,
+            ..Mods::default()
+        },
     });
     rt.frame(1.0 / 60.0);
 }
@@ -338,7 +344,7 @@ fn select_comment_save_edit_and_delete() {
     assert!(texts_under(&rt, &card_key(&rt, 1)).contains(&"Too loud".to_owned()));
 
     key(&mut rt, Key::Enter);
-    assert!(texts_under(&rt, "composer").contains(&"Edit #1 · Comment".to_owned()));
+    assert!(texts_under(&rt, "composer-field").contains(&"Too loud".to_owned()));
     press(&mut rt, "!");
     key(&mut rt, Key::Escape);
     assert!(rt.find("composer").is_none());
@@ -389,7 +395,6 @@ fn several_general_comments_listed_and_stepped_through() {
 
     press(&mut rt, "]c");
     key(&mut rt, Key::Enter);
-    assert!(texts_under(&rt, "composer").contains(&"Edit #1 · General".to_owned()));
     assert!(texts_under(&rt, "composer-field").contains(&"First".to_owned()));
 }
 
@@ -1394,4 +1399,54 @@ fn the_composer_does_not_repeat_the_selection() {
     let mut rt = runtime(SRC);
     press(&mut rt, "jveec");
     assert!(!texts_under(&rt, "composer").contains(&"Some bold".to_owned()));
+}
+
+#[test]
+fn enter_adds_a_line_and_ctrl_enter_saves() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "C");
+    press(&mut rt, "one");
+    rt.key(KeyEvent {
+        key: Key::Enter,
+        mods: Mods::default(),
+    });
+    rt.frame(1.0 / 60.0);
+    press(&mut rt, "two");
+    assert!(
+        rt.state.composer().is_some(),
+        "plain Enter keeps the box open"
+    );
+    assert_eq!(rt.state.draft.text, "one\ntwo");
+    key(&mut rt, Key::Enter);
+    assert!(rt.state.composer().is_none());
+    assert_eq!(
+        feedback(&rt).as_deref(),
+        Some("# Review\n\n## General\n\n> one\n> two\n")
+    );
+}
+
+#[test]
+fn a_click_outside_the_comment_box_cancels_it() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jveec");
+    press(&mut rt, "draft");
+    let r = text_rect(&rt, "Title");
+    pointer_click(&mut rt, r[0] + 2.0, r[1] + 2.0);
+    assert!(rt.state.composer().is_none());
+    assert_eq!(rt.state.review.len(), 0);
+    assert_eq!(rt.state.note.as_deref(), Some("Cancelled"));
+    assert_eq!(
+        rt.state.vim.mode(),
+        VimMode::Normal,
+        "the click didn't also select"
+    );
+}
+
+#[test]
+fn the_comment_box_has_no_heading_and_an_accent_caret() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jveec");
+    for heading in ["New comment", "General comment"] {
+        assert!(!texts_under(&rt, "composer").contains(&heading.to_owned()));
+    }
 }

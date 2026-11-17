@@ -16,7 +16,8 @@
 //! The mouse works as in Vim: a click moves the cursor, a drag, double-click or triple-click
 //! selects in Visual mode for `c`, `d` and `gy`, and a click on a link opens it.
 //!
-//! In the editor, Enter saves, Shift-Enter adds a line and Escape cancels.
+//! In the comment box, Enter adds a line, Ctrl-Enter saves and Escape cancels. A click outside
+//! it cancels too.
 //! `:wq`, `:x` and `ZZ` send the review and quit. `:w` and `\w` write it to the `-o` file and
 //! keep reviewing. `:q` and `\q` quit when nothing is left unwritten. `:q!`, `ZQ` and Ctrl-C quit
 //! without sending.
@@ -288,6 +289,14 @@ impl Reviewer {
         self.note = None;
     }
 
+    /// Closes the composer without saving.
+    fn cancel(&mut self) {
+        if self.composer().is_some() {
+            self.mode = Mode::Normal;
+            self.note = Some("Cancelled".into());
+        }
+    }
+
     /// Empty comments are discarded. Removals may have no body.
     fn save(&mut self) {
         let Some(target) = self.composer().cloned() else {
@@ -447,6 +456,8 @@ const BODY: &str = "body";
 const COMPOSER_W: f32 = 560.0;
 const COMPOSER_GAP: f32 = 6.0;
 const COMPOSER_MARGIN: f32 = 12.0;
+/// The comment box's corners, close to the 6 pt of code blocks, key caps and badges.
+const COMPOSER_RADIUS: f32 = 8.0;
 
 /// Where the floating composer goes in the body, `(left, top, width)`: under the selection's
 /// end when that's on screen with room below, else over its start when that is, else at the
@@ -576,24 +587,35 @@ fn highlights(page: &Page, marks: &[Mark], index: usize) -> Vec<(Vec<Range<usize
     out
 }
 
-fn composer_view(draft: &TextEdit, title: &str, theme: &Theme) -> El {
+/// Ctrl+Enter, or Cmd+Enter where the platform has Cmd: saves the comment. Plain Enter adds
+/// a line, as it does in a chat box that takes long messages.
+fn saves(k: &KeyEvent) -> bool {
+    k.key == Key::Enter && (k.mods.ctrl || k.mods.cmd)
+}
+
+fn composer_view(draft: &TextEdit, theme: &Theme) -> El {
     let field = text_input(draft, theme.ty.body)
         .key("composer-field")
         .w_full()
         .color(theme.text)
+        .caret(theme.accent, theme.accent.alpha(0.3))
         .placeholder("Leave a comment", theme.text_tertiary)
         .label("Comment")
         .on_edit(|s: &mut Reviewer| &mut s.draft)
-        .on_submit(|s: &mut Reviewer, tx: &mut Tx| {
-            s.save();
-            tx.blur();
-        })
         .on_input_key(|s: &mut Reviewer, k: &KeyEvent, tx: &mut Tx| {
+            if saves(k) {
+                s.save();
+                tx.blur();
+                return true;
+            }
+            if k.key == Key::Enter && !k.mods.shift && !k.mods.alt {
+                s.draft.undo_group(|edit| edit.insert("\n"));
+                return true;
+            }
             if k.key != Key::Escape {
                 return false;
             }
-            s.mode = Mode::Normal;
-            s.note = Some("Cancelled".into());
+            s.cancel();
             tx.blur();
             true
         });
@@ -603,51 +625,50 @@ fn composer_view(draft: &TextEdit, title: &str, theme: &Theme) -> El {
             s.save();
             tx.blur();
         })
-        .build("composer-save", theme);
+        .build("composer-save", theme)
+        .radius(COMPOSER_RADIUS - 2.0);
     let cancel = Button::new("Cancel")
         .small()
         .gray()
         .on_press_tx(|s: &mut Reviewer, tx: &mut Tx| {
-            s.mode = Mode::Normal;
+            s.cancel();
             tx.blur();
         })
-        .build("composer-cancel", theme);
-    let card = col()
+        .build("composer-cancel", theme)
+        .radius(COMPOSER_RADIUS - 2.0);
+    col()
         .key("composer")
         .w_full()
         .gap(8.0)
-        .padding(10.0)
-        .radius(theme.radius.group)
+        .padding(8.0)
+        .radius(COMPOSER_RADIUS)
         .fill(theme.group)
         .border(1.0, theme.accent.alpha(0.6))
         .child(
-            text(title.to_owned())
-                .font(theme.ty.strong)
-                .color(theme.text),
-        );
-    card.child(
-        el().w_full()
-            .padding(8.0)
-            .radius(theme.radius.field)
-            .fill(theme.field)
-            .child(rune::auto_grow(field, 2, 8)),
-    )
-    .child(
-        row()
-            .w_full()
-            .gap(8.0)
-            .center_y()
-            .child(
-                text("Enter saves · Shift-Enter new line · Esc cancels")
-                    .font(theme.ty.caption)
-                    .color(theme.text_tertiary)
-                    .truncate()
-                    .shrink(),
-            )
-            .child(el().grow(1.0))
-            .child(cancel)
-            .child(save),
-    )
+            el().w_full()
+                .px(10.0)
+                .py(8.0)
+                .radius(COMPOSER_RADIUS - 2.0)
+                .fill(theme.field)
+                .child(rune::auto_grow(field, 2, 8)),
+        )
+        .child(
+            row()
+                .w_full()
+                .gap(8.0)
+                .pl(4.0)
+                .center_y()
+                .child(
+                    text("⌃↩ saves · Esc cancels")
+                        .font(theme.ty.caption)
+                        .color(theme.text_tertiary)
+                        .truncate()
+                        .shrink(),
+                )
+                .child(el().grow(1.0))
+                .child(cancel)
+                .child(save),
+        )
 }
 
 fn quote_view(q: &str, theme: &Theme) -> El {
@@ -741,7 +762,7 @@ fn thread(cards: Vec<El>, theme: &Theme) -> El {
 
 fn thread_card(s: &Reviewer, id: CommentId, number: usize, c: &Comment, theme: &Theme) -> El {
     if s.composer() == Some(&Target::Edit(id)) {
-        composer_view(&s.draft, &format!("Edit #{number} · {}", c.title()), theme)
+        composer_view(&s.draft, theme)
     } else {
         comment_view(id, number, c, s.current() == Some(id), theme)
     }
@@ -951,12 +972,7 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
             stick_bottom: false,
         });
     let mut body = el().key(BODY).w_full().grow(1.0).min_h(0.0).child(content);
-    if let Some(Target::New { range }) = s.composer() {
-        let title = if range.is_some() {
-            "New comment"
-        } else {
-            "General comment"
-        };
+    if let Some(Target::New { .. }) = s.composer() {
         let card_h = cx.layout_size("composer").map_or(180.0, |size| size[1]);
         let (left, top, width) =
             cx.window_layout(BODY)
@@ -969,7 +985,7 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
                     )
                 });
         body = body.child(
-            composer_view(&s.draft, title, &theme)
+            composer_view(&s.draft, &theme)
                 .w(width)
                 .fill(theme.popover)
                 .shadow(12.0, 32.0, theme.shadow_strong)
@@ -1259,7 +1275,14 @@ fn open_link(s: &mut Reviewer, url: &str, tx: &mut Tx) {
 /// The mouse as in Vim: a press that left a selection selects it in Visual mode, and one that
 /// left a caret moves the cursor there.
 fn pointed(s: &mut Reviewer, tx: &mut Tx) {
-    if matches!(s.mode, Mode::Composing(_) | Mode::Command(_)) {
+    if s.composer().is_some() {
+        // A press outside the comment box closes it, as a popover closes.
+        s.cancel();
+        tx.blur();
+        tx.clear_text_selection();
+        return;
+    }
+    if matches!(s.mode, Mode::Command(_)) {
         return;
     }
     let text = s.page.text();
