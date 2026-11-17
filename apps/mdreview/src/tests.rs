@@ -1333,3 +1333,50 @@ fn the_title_bar_keeps_clear_of_the_window_controls() {
         "the title moves past the traffic lights"
     );
 }
+
+fn rect_of(rt: &Runtime<Reviewer>, key: &str) -> [f32; 4] {
+    rt.elements()
+        .into_iter()
+        .find(|e| !e.exiting && e.key.as_deref() == Some(key))
+        .unwrap_or_else(|| panic!("no {key} on screen"))
+        .visible
+}
+
+#[test]
+fn the_composer_floats_where_it_can_be_seen_inside_a_long_block() {
+    let code: String = (0..60).map(|i| format!("let x{i} = {i};\n")).collect();
+    let src = format!("# Long\n\nIntro line.\n\n```rust\n{code}```\n\nAfter.\n");
+    for needle in ["let x0", "let x30", "let x59", "Intro"] {
+        let mut rt = Runtime::new(
+            app(&src),
+            view,
+            (900.0, 600.0),
+            Env {
+                system_dark: true,
+                scale: 1.0,
+            },
+        );
+        rt.on_key = Some(on_key);
+        rt.frame(0.0);
+        let text = rt.state.page.text().to_owned();
+        rt.update(|s, tx| {
+            s.vim.set_cursor(text.find(needle).unwrap(), &text);
+            tx.scroll_into_view(VIM_CURSOR);
+        });
+        for _ in 0..30 {
+            rt.frame(1.0 / 60.0);
+        }
+        press(&mut rt, "cc");
+        for _ in 0..10 {
+            rt.frame(1.0 / 60.0);
+        }
+        let body = rect_of(&rt, "body");
+        let card = rect_of(&rt, "composer");
+        let field = rect_of(&rt, "composer-field");
+        assert!(field[3] > 0.0, "{needle}: the field is drawn, at {field:?}");
+        assert!(
+            card[1] >= body[1] && card[1] + card[3] <= body[1] + body[3],
+            "{needle}: the composer {card:?} fits in the body {body:?}"
+        );
+    }
+}

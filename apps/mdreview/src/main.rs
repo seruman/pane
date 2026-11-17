@@ -441,6 +441,45 @@ impl Reviewer {
 }
 
 const CURRENT_MARK: &str = "current-comment";
+const ANCHOR_START: &str = "composer-anchor-start";
+const ANCHOR_END: &str = "composer-anchor-end";
+const BODY: &str = "body";
+const COMPOSER_W: f32 = 560.0;
+const COMPOSER_GAP: f32 = 6.0;
+const COMPOSER_MARGIN: f32 = 12.0;
+
+/// Where the floating composer goes in the body, `(left, top, width)`: under the selection's
+/// end when that's on screen with room below, else over its start when that is, else at the
+/// body's foot. `card_h` is its last laid-out height.
+fn composer_place(
+    body: [f32; 4],
+    start: Option<[f32; 4]>,
+    end: Option<[f32; 4]>,
+    card_h: f32,
+) -> (f32, f32, f32) {
+    let width = COMPOSER_W.min(body[2] - 2.0 * COMPOSER_MARGIN).max(0.0);
+    let shown = |r: [f32; 4]| r[1] >= body[1] && r[1] + r[3] <= body[1] + body[3];
+    let left_of = |r: [f32; 4]| {
+        (r[0] - body[0]).clamp(
+            COMPOSER_MARGIN,
+            (body[2] - width - COMPOSER_MARGIN).max(COMPOSER_MARGIN),
+        )
+    };
+    if let Some(e) = end.filter(|&e| shown(e)) {
+        let top = e[1] + e[3] - body[1] + COMPOSER_GAP;
+        if top + card_h <= body[3] - COMPOSER_MARGIN {
+            return (left_of(e), top, width);
+        }
+    }
+    if let Some(s) = start.filter(|&s| shown(s)) {
+        let top = s[1] - body[1] - COMPOSER_GAP - card_h;
+        if top >= COMPOSER_MARGIN {
+            return (left_of(s), top, width);
+        }
+    }
+    let at = end.or(start).map_or(COMPOSER_MARGIN, left_of);
+    (at, (body[3] - card_h - COMPOSER_MARGIN).max(0.0), width)
+}
 
 fn thread_key(id: CommentId) -> String {
     format!("thread-{id}")
@@ -490,6 +529,25 @@ fn marks(s: &Reviewer, theme: &Theme) -> Vec<Mark> {
             Highlight::new().bg(tint(Kind::Comment, theme)),
             None,
         ));
+        // The floating composer reads where the selection's ends are drawn.
+        let first = text[range.start..]
+            .chars()
+            .next()
+            .map_or(range.start, |c| range.start + c.len_utf8());
+        let last = text[..range.end]
+            .char_indices()
+            .next_back()
+            .map_or(range.end, |(i, _)| i);
+        for (key, ends) in [
+            (ANCHOR_START, range.start..first),
+            (ANCHOR_END, last..range.end),
+        ] {
+            out.push((
+                local(ends),
+                Highlight::new().bg(rune::Color::TRANSPARENT).key(key),
+                None,
+            ));
+        }
     }
     out.extend(
         markdown::vim_highlights(&s.vim, text, local, s.composer().is_none(), theme)
@@ -524,6 +582,7 @@ fn composer_view(draft: &TextEdit, title: &str, quote: Option<&str>, theme: &The
         .w_full()
         .color(theme.text)
         .placeholder("Leave a comment", theme.text_tertiary)
+        .label("Comment")
         .on_edit(|s: &mut Reviewer| &mut s.draft)
         .on_submit(|s: &mut Reviewer, tx: &mut Tx| {
             s.save();
@@ -706,12 +765,6 @@ fn block_thread(s: &Reviewer, index: usize, theme: &Theme) -> Option<El> {
             cards.push(thread_card(s, id, number + 1, c, theme));
         }
     }
-    if let Some(Target::New { range: Some(range) }) = s.composer()
-        && ends_here(range)
-    {
-        let quote = page.text().get(range.clone()).unwrap_or_default();
-        cards.push(composer_view(&s.draft, "New comment", Some(quote), theme));
-    }
     (!cards.is_empty()).then(|| thread(cards, theme))
 }
 
@@ -721,9 +774,6 @@ fn general_thread(s: &Reviewer, theme: &Theme) -> Option<El> {
         if c.range().is_none() {
             cards.push(thread_card(s, id, number + 1, c, theme));
         }
-    }
-    if matches!(s.composer(), Some(Target::New { range: None })) {
-        cards.push(composer_view(&s.draft, "General comment", None, theme));
     }
     (!cards.is_empty()).then(|| thread(cards, theme).mb(20.0))
 }
@@ -908,7 +958,35 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         .scroll(ScrollSpec {
             stick_bottom: false,
         });
-    let mut body = el().w_full().grow(1.0).min_h(0.0).child(content);
+    let mut body = el().key(BODY).w_full().grow(1.0).min_h(0.0).child(content);
+    if let Some(Target::New { range }) = s.composer() {
+        let quote = range
+            .as_ref()
+            .map(|r| s.page.text().get(r.clone()).unwrap_or_default());
+        let title = if range.is_some() {
+            "New comment"
+        } else {
+            "General comment"
+        };
+        let card_h = cx.layout_size("composer").map_or(180.0, |size| size[1]);
+        let (left, top, width) =
+            cx.window_layout(BODY)
+                .map_or((COMPOSER_MARGIN, COMPOSER_MARGIN, COMPOSER_W), |b| {
+                    composer_place(
+                        b,
+                        cx.window_layout(ANCHOR_START),
+                        cx.window_layout(ANCHOR_END),
+                        card_h,
+                    )
+                });
+        body = body.child(
+            composer_view(&s.draft, title, quote, &theme)
+                .w(width)
+                .fill(theme.popover)
+                .shadow(12.0, 32.0, theme.shadow_strong)
+                .pin(Some(left), Some(top), None, None),
+        );
+    }
     if let Some(at) = s.list() {
         body = body.child(
             col()
