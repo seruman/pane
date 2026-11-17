@@ -924,7 +924,7 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
         .w_full()
         .h_full()
         .fill(theme.background)
-        .child(bar(s, &theme))
+        .child(bar(s, cx.chrome_insets(), &theme))
         .child(el().h(1.0).w_full().fill(theme.separator))
         .child(body)
         .child(status_line(s, &theme))
@@ -1026,8 +1026,8 @@ fn which_key(s: &Reviewer, theme: &Theme) -> Option<El> {
     )
 }
 
-fn bar(s: &Reviewer, theme: &Theme) -> El {
-    markdown::title_bar(
+fn bar(s: &Reviewer, insets: rune::ChromeInsets, theme: &Theme) -> El {
+    markdown::window_title_bar(
         s.origin.title(),
         &[
             ("v", "select"),
@@ -1038,6 +1038,7 @@ fn bar(s: &Reviewer, theme: &Theme) -> El {
             (":wq", "send"),
             ("\\?", "keys"),
         ],
+        insets,
         theme,
     )
 }
@@ -1425,6 +1426,7 @@ fn main() {
         ..AppSpec::new("Review", (1000.0, 900.0), Reviewer::default, view)
     })
     .init(move || state)
+    .titlebar(rune::Titlebar::new(markdown::TITLE_BAR_HEIGHT))
     .on_quit(send)
     .run();
     if send_failed.get() {

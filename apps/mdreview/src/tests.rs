@@ -1314,3 +1314,22 @@ fn send_and_quit_after_a_write_does_not_write_again() {
     rt.update(send);
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "edited by hand");
 }
+
+#[test]
+fn the_title_bar_keeps_clear_of_the_window_controls() {
+    let mut rt = runtime(SRC);
+    let title = |rt: &Runtime<Reviewer>| text_rect(rt, "sample.md")[0];
+    let flush = title(&rt);
+    let mut insets = rune::ChromeInsets::default();
+    insets.leading = 78.0;
+    insets.height = markdown::TITLE_BAR_HEIGHT;
+    rt.set_chrome_insets(insets);
+    rt.frame(1.0 / 60.0);
+    // Layout moves glide; let it settle.
+    rt.frame(2.0);
+    assert_eq!(
+        title(&rt),
+        flush + 78.0,
+        "the title moves past the traffic lights"
+    );
+}

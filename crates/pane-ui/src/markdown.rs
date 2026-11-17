@@ -138,12 +138,30 @@ pub fn key_hint(key: &str, what: &str, theme: &Theme) -> El {
     )
 }
 
+/// The height [`title_bar`] takes, for `App::titlebar(Titlebar::new(TITLE_BAR_HEIGHT))`.
+pub const TITLE_BAR_HEIGHT: f32 = 40.0;
+
 pub fn title_bar(title: &str, hints: &[(&str, &str)], theme: &Theme) -> El {
+    window_title_bar(title, hints, rune::ChromeInsets::default(), theme)
+}
+
+/// [`title_bar`] as the window's own titlebar (`App::titlebar` with [`TITLE_BAR_HEIGHT`]): it
+/// moves the window and keeps clear of the window's controls, the macOS traffic lights or the
+/// Windows caption buttons, which `insets` (`Cx::chrome_insets`) says take its ends. In a
+/// terminal the insets are zero and it draws as [`title_bar`] does.
+pub fn window_title_bar(
+    title: &str,
+    hints: &[(&str, &str)],
+    insets: rune::ChromeInsets,
+    theme: &Theme,
+) -> El {
     let mut bar = row()
         .key("bar")
         .w_full()
-        .min_h(40.0)
-        .px(20.0)
+        .min_h(TITLE_BAR_HEIGHT)
+        .pl(20.0 + insets.leading)
+        .pr(20.0 + insets.trailing)
+        .window_drag()
         .py(6.0)
         .gap(10.0)
         .center_y()
