@@ -44,8 +44,9 @@ RUNE_TERMINAL=1 ./target/release/gallery
 ```
 
 `RUNE_TERMINAL=1` selects Rune's terminal shell. Without that setting, the apps open
-native windows. In mdreview, `:wq`, `:x`, and `ZZ` send the review. `:q!` and `ZQ`
-quit without sending it. The review app does not edit the document.
+native windows. In mdreview, `:wq`, `:x`, and `ZZ` send the review. `\w` and `:w` write it
+to the `-o` file and keep reviewing, and `\q` and `:q` quit once nothing is left unwritten.
+`:q!` and `ZQ` quit without sending it. The review app does not edit the document.
 
 ## Rename a crate or app
 

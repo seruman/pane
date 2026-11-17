@@ -465,6 +465,9 @@ fn run_command(rt: &mut Runtime<Reviewer>, command: &str) {
     }
 }
 
+const UNWRITTEN: &str =
+    "The review isn't written. \\w or :w writes it, :wq sends it, :q! drops it.";
+
 #[test]
 fn quitting_runs_the_send_hook_only_for_send_commands() {
     let dir = TempDir::new();
@@ -486,10 +489,7 @@ fn quitting_runs_the_send_hook_only_for_send_commands() {
         key(&mut rt, Key::Enter);
         run_command(&mut rt, ":q");
         assert_eq!(rt.shell_request, None);
-        assert!(
-            texts_under(&rt, "status")
-                .contains(&"The review isn't sent. :wq sends it, :q! drops it.".to_owned())
-        );
+        assert!(texts_under(&rt, "status").contains(&UNWRITTEN.to_owned()));
         run_command(&mut rt, command);
         assert_eq!(rt.shell_request, Some(rune::Shell::Quit), "{command}");
         rt.update(send);
@@ -1230,4 +1230,87 @@ fn reference_links_and_bare_addresses_resolve() {
     assert_eq!(at("auto").as_deref(), Some("https://auto.example"));
     assert_eq!(at("x.y").as_deref(), Some("https://x.y/z"));
     assert_eq!(at("then"), None);
+}
+
+fn leader(rt: &mut Runtime<Reviewer>, c: char) {
+    press(rt, &format!("\\{c}"));
+}
+
+#[test]
+fn leader_w_writes_and_keeps_reviewing_and_leader_q_quits_once_written() {
+    let dir = TempDir::new();
+    let file = dir.0.join("review.md");
+    let mut rt = runtime(SRC);
+    rt.state.out = Some(file.to_str().unwrap().into());
+
+    leader(&mut rt, 'w');
+    assert_eq!(rt.state.note.as_deref(), Some("Nothing to write yet"));
+    assert!(!file.exists());
+
+    press(&mut rt, "Cfirst");
+    key(&mut rt, Key::Enter);
+    leader(&mut rt, 'q');
+    assert_eq!(rt.shell_request, None, "an unwritten comment keeps it open");
+    assert_eq!(rt.state.note.as_deref(), Some(UNWRITTEN));
+
+    leader(&mut rt, 'w');
+    assert_eq!(rt.shell_request, None, "writing doesn't quit");
+    let first = "# Review\n\n## General\n\n> first\n";
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), first);
+    assert_eq!(
+        rt.state.note.as_deref(),
+        Some(&*format!("Wrote 1 comment to {}", file.display()))
+    );
+
+    press(&mut rt, "Csecond");
+    key(&mut rt, Key::Enter);
+    leader(&mut rt, 'q');
+    assert_eq!(
+        rt.shell_request, None,
+        "a comment after the write keeps it open"
+    );
+    run_command(&mut rt, ":w");
+    let both = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        both.contains("> first") && both.contains("> second"),
+        "{both}"
+    );
+
+    leader(&mut rt, 'q');
+    assert_eq!(rt.shell_request, Some(rune::Shell::Quit));
+    rt.update(send);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        both,
+        "quitting leaves the written review"
+    );
+}
+
+#[test]
+fn write_without_an_output_file_says_so_and_keeps_quit_guarded() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "Cnote");
+    key(&mut rt, Key::Enter);
+    leader(&mut rt, 'w');
+    assert_eq!(
+        rt.state.note.as_deref(),
+        Some("No file to write to: start with -o FILE, or :wq sends to stdout")
+    );
+    leader(&mut rt, 'q');
+    assert_eq!(rt.shell_request, None);
+}
+
+#[test]
+fn send_and_quit_after_a_write_does_not_write_again() {
+    let dir = TempDir::new();
+    let file = dir.0.join("review.md");
+    let mut rt = runtime(SRC);
+    rt.state.out = Some(file.to_str().unwrap().into());
+    press(&mut rt, "Conce");
+    key(&mut rt, Key::Enter);
+    leader(&mut rt, 'w');
+    std::fs::write(&file, "edited by hand").unwrap();
+    run_command(&mut rt, ":wq");
+    rt.update(send);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "edited by hand");
 }

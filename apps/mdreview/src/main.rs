@@ -17,8 +17,9 @@
 //! selects in Visual mode for `c`, `d` and `gy`, and a click on a link opens it.
 //!
 //! In the editor, Enter saves, Shift-Enter adds a line and Escape cancels.
-//! `:wq`, `:x` and `ZZ` send the review and quit.
-//! `:q` quits only when the review is empty. `:q!`, `ZQ` and Ctrl-C quit without sending.
+//! `:wq`, `:x` and `ZZ` send the review and quit. `:w` and `\w` write it to the `-o` file and
+//! keep reviewing. `:q` and `\q` quit when nothing is left unwritten. `:q!`, `ZQ` and Ctrl-C quit
+//! without sending.
 
 mod page;
 mod review;
@@ -102,6 +103,8 @@ enum Act {
     SendAndQuit,
     QuitWithoutSending,
     OpenLink,
+    Write,
+    Quit,
 }
 
 fn keymap() -> Keymap<Act, Op> {
@@ -118,6 +121,8 @@ fn keymap() -> Keymap<Act, Op> {
         .action(&[Leader, C('x')], Act::Delete, "Delete the comment")
         .action(&[Stroke::Tab], Act::List, "List the comments")
         .action(&[Leader, C('?')], Act::Keys, "Every key")
+        .action(&[Leader, C('w')], Act::Write, "Write the review")
+        .action(&[Leader, C('q')], Act::Quit, "Quit, once it's written")
         .action(&[C('g'), C('x')], Act::OpenLink, "Open the link")
         .action(&[C(':')], Act::CommandLine, None)
         .action(
@@ -139,6 +144,7 @@ enum Quit {
 }
 
 enum Command {
+    Write,
     Quit,
     ForceQuit,
     SendAndQuit,
@@ -147,6 +153,7 @@ enum Command {
 impl Command {
     fn parse(text: &str) -> Option<Self> {
         match text {
+            "w" | "write" => Some(Self::Write),
             "q" | "quit" => Some(Self::Quit),
             "q!" | "quit!" => Some(Self::ForceQuit),
             "wq" | "x" | "wq!" | "x!" => Some(Self::SendAndQuit),
@@ -182,6 +189,8 @@ struct Reviewer {
     quit: Quit,
     send_failed: Rc<Cell<bool>>,
     note: Option<String>,
+    /// The review as `:w` last wrote it, so quitting knows whether anything is left unwritten.
+    written: Option<String>,
 }
 
 impl Default for Reviewer {
@@ -219,6 +228,7 @@ impl Reviewer {
             quit: Quit::Drop,
             send_failed: Rc::new(Cell::new(false)),
             note: None,
+            written: None,
         }
     }
 
@@ -373,10 +383,50 @@ impl Reviewer {
         }
     }
 
+    /// The review as it would be sent now, `None` when it's empty.
+    fn feedback(&self) -> Option<String> {
+        self.review
+            .feedback(&self.source, &self.page, self.origin.name())
+    }
+
+    /// Whether quitting now would lose comments: the review isn't empty and isn't what `:w`
+    /// last wrote.
+    fn unwritten(&self) -> bool {
+        self.feedback()
+            .is_some_and(|f| self.written.as_ref() != Some(&f))
+    }
+
+    fn write(&mut self) {
+        let Some(path) = self.out.clone() else {
+            self.note =
+                Some("No file to write to: start with -o FILE, or :wq sends to stdout".into());
+            return;
+        };
+        let Some(feedback) = self.feedback() else {
+            self.note = Some("Nothing to write yet".into());
+            return;
+        };
+        match std::fs::write(&path, &feedback) {
+            Ok(()) => {
+                let n = self.review.len();
+                self.note = Some(format!(
+                    "Wrote {n} comment{} to {path}",
+                    if n == 1 { "" } else { "s" }
+                ));
+                self.written = Some(feedback);
+            }
+            Err(e) => self.note = Some(format!("Could not write {path}: {e}")),
+        }
+    }
+
     fn execute(&mut self, command: Command, tx: &mut Tx) {
         match command {
-            Command::Quit if !self.review.is_empty() => {
-                self.note = Some("The review isn't sent. :wq sends it, :q! drops it.".into());
+            Command::Write => self.write(),
+            Command::Quit if self.unwritten() => {
+                self.note = Some(
+                    "The review isn't written. \\w or :w writes it, :wq sends it, :q! drops it."
+                        .into(),
+                );
             }
             Command::Quit | Command::ForceQuit => {
                 self.quit = Quit::Drop;
@@ -890,7 +940,8 @@ fn pending_keys(s: &Reviewer) -> Option<(String, HintGroups)> {
             HintGroup::App,
             vec![
                 hint(":wq", "Send the review and quit"),
-                hint(":q", "Quit, with nothing to send"),
+                hint(":w", "Write the review"),
+                hint(":q", "Quit, once it's written"),
                 hint(":q!", "Quit without sending"),
             ],
         ));
@@ -982,8 +1033,9 @@ fn bar(s: &Reviewer, theme: &Theme) -> El {
             ("v", "select"),
             ("C", "general"),
             ("Tab", "comments"),
+            ("\\w", "write"),
+            ("\\q", "quit"),
             (":wq", "send"),
-            (":q!", "quit"),
             ("\\?", "keys"),
         ],
         theme,
@@ -1116,6 +1168,8 @@ fn act(s: &mut Reviewer, action: Act, tx: &mut Tx) {
         Act::CommandLine => s.mode = Mode::Command(String::new()),
         Act::SendAndQuit => s.execute(Command::SendAndQuit, tx),
         Act::QuitWithoutSending => s.execute(Command::ForceQuit, tx),
+        Act::Write => s.execute(Command::Write, tx),
+        Act::Quit => s.execute(Command::Quit, tx),
         Act::OpenLink => {
             let text = s.page.text();
             let at = s.vim.cursor(text);
@@ -1199,9 +1253,13 @@ fn send(s: &mut Reviewer, _: &mut Tx) {
         return;
     }
     s.save();
-    let Some(feedback) = s.review.feedback(&s.source, &s.page, s.origin.name()) else {
+    let Some(feedback) = s.feedback() else {
         return;
     };
+    // `:w` already wrote this to the file.
+    if s.out.is_some() && s.written.as_ref() == Some(&feedback) {
+        return;
+    }
     if let Err(e) = deliver(&feedback, s.out.as_deref(), &mut std::io::stdout()) {
         eprintln!("mdreview: {e}");
         s.send_failed.set(true);
