@@ -1140,3 +1140,19 @@ fn a_mouse_selection_is_visual_and_operators_take_it() {
         "an empty one is a click's caret"
     );
 }
+
+#[test]
+fn j_and_k_step_over_closed_folds() {
+    let text = "summary\n\nhidden one\n\nhidden two\n\nafter";
+    let mut vim = Vim::default().skip_blank_lines(true);
+    let start = text.find("hidden one").unwrap();
+    let end = text.find("hidden two").unwrap() + "hidden two".len();
+    vim.set_folds(std::iter::once(start..end).collect());
+    press_on(&mut vim, text, "j");
+    assert!(text[vim.cursor(text).start..].starts_with("after"));
+    press_on(&mut vim, text, "k");
+    assert!(text[vim.cursor(text).start..].starts_with("summary"));
+    vim.set_folds(Vec::new());
+    press_on(&mut vim, text, "j");
+    assert!(text[vim.cursor(text).start..].starts_with("hidden one"));
+}

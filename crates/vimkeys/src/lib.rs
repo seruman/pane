@@ -141,6 +141,8 @@ pub struct Vim<A = NoAction, O = A> {
 
     search: Search,
     skip_blank_lines: bool,
+    /// Byte ranges of the text that don't draw: closed folds.
+    folds: Vec<Range<usize>>,
     half_page_lines: usize,
     message: Option<String>,
 }
@@ -164,6 +166,7 @@ impl<A: Clone, O: Clone> Vim<A, O> {
             last_find: None,
             search: Search::default(),
             skip_blank_lines: false,
+            folds: Vec::new(),
             half_page_lines: 15,
             message: None,
         }
@@ -174,6 +177,13 @@ impl<A: Clone, O: Clone> Vim<A, O> {
     pub fn skip_blank_lines(mut self, on: bool) -> Self {
         self.skip_blank_lines = on;
         self
+    }
+
+    /// The byte ranges of the text closed folds hide. `j`, `k`, Ctrl-D and Ctrl-U step over
+    /// their lines as one; the app opens a fold another motion lands in (see
+    /// [`Self::cursor`]), as Vim's `foldopen` does.
+    pub fn set_folds(&mut self, folds: Vec<Range<usize>>) {
+        self.folds = folds;
     }
 
     /// Sets the page height in lines. Ctrl-D and Ctrl-U move half this many lines.
@@ -673,9 +683,16 @@ impl<A: Clone, O: Clone> Vim<A, O> {
                 };
                 let down = matches!(m, Motion::Down | Motion::HalfPageDown);
                 let line = b.line_of(cur);
-                let line = if self.skip_blank_lines {
+                let line = if self.skip_blank_lines || !self.folds.is_empty() {
+                    let folded = |line: usize| {
+                        let at = b.byte(b.nth_line(line));
+                        self.folds.iter().any(|f| f.contains(&at))
+                    };
                     let drawn_lines: Vec<usize> = (0..b.line_count())
-                        .filter(|&line| !b.blank_line(b.nth_line(line)))
+                        .filter(|&line| {
+                            !(self.skip_blank_lines && b.blank_line(b.nth_line(line)))
+                                && !folded(line)
+                        })
                         .collect();
                     let here = drawn_lines.partition_point(|&candidate| candidate < line);
                     let to = if down {
