@@ -1450,3 +1450,98 @@ fn the_comment_box_has_no_heading_and_an_accent_caret() {
         assert!(!texts_under(&rt, "composer").contains(&heading.to_owned()));
     }
 }
+
+fn at_cursor(rt: &Runtime<Reviewer>) -> String {
+    rt.state.page.text()[rt.state.cursor()..].to_owned()
+}
+
+const GFM: &str = "# Top\n\nA note[^n] here.\n\n<details>\n<summary>More</summary>\n\nHidden **words**.\n\n- [x] inside\n\n</details>\n\n> [!NOTE]\n> Careful.\n\n<p>raw</p>\n\n$$\nx^2\n$$\n\nAfter.\n\n[^n]: The note.\n";
+
+#[test]
+fn gfm_blocks_split_as_rune_kit_draws_them() {
+    let page = Page::new(GFM);
+    assert_eq!(
+        page.text(),
+        rune_kit::markdown::RenderedText::new(GFM).text()
+    );
+    let kinds: Vec<_> = page.blocks.iter().map(|b| b.kind).collect();
+    use page::BlockKind as K;
+    assert_eq!(
+        kinds,
+        [
+            K::Heading(1),
+            K::Para,
+            K::Details,
+            K::Quote,
+            K::Html,
+            K::Html,
+            K::Para,
+            K::Footnotes
+        ]
+    );
+    assert_eq!(page_height(GFM, true), page_height(GFM, false));
+}
+
+#[test]
+fn folds_open_and_close_and_j_steps_over_a_closed_one() {
+    let mut rt = runtime(GFM);
+    let drawn = |rt: &Runtime<Reviewer>| texts_under(rt, "page");
+    assert!(!drawn(&rt).iter().any(|t| t.contains("Hidden")));
+    // From the summary, j goes past the closed body.
+    let summary = range(&rt.state, "More").start;
+    rt.update(|s, _| s.vim.set_cursor(summary, s.page.text()));
+    press(&mut rt, "j");
+    assert!(at_cursor(&rt).starts_with("Careful"), "{}", at_cursor(&rt));
+    press(&mut rt, "kza");
+    assert!(drawn(&rt).iter().any(|t| t.contains("Hidden words.")));
+    press(&mut rt, "j");
+    assert!(at_cursor(&rt).starts_with("Hidden"), "{}", at_cursor(&rt));
+    // zc inside the body closes it and leaves the cursor on the summary.
+    press(&mut rt, "zc");
+    assert!(at_cursor(&rt).starts_with("More"), "{}", at_cursor(&rt));
+    assert!(!drawn(&rt).iter().any(|t| t.contains("Hidden")));
+    press(&mut rt, "zR");
+    assert!(drawn(&rt).iter().any(|t| t.contains("inside")));
+    press(&mut rt, "zM");
+    assert!(!drawn(&rt).iter().any(|t| t.contains("inside")));
+}
+
+#[test]
+fn a_search_into_a_closed_fold_opens_it() {
+    let mut rt = runtime(GFM);
+    press(&mut rt, "/words");
+    key(&mut rt, Key::Enter);
+    assert!(at_cursor(&rt).starts_with("words."), "{}", at_cursor(&rt));
+    assert!(
+        texts_under(&rt, "page")
+            .iter()
+            .any(|t| t.contains("Hidden words."))
+    );
+}
+
+#[test]
+fn gx_on_a_footnote_reference_goes_to_it_and_back() {
+    let mut rt = runtime(GFM);
+    let at = range(&rt.state, "A note").start + "A note".len();
+    rt.update(|s, _| s.vim.set_cursor(at, s.page.text()));
+    press(&mut rt, "gx");
+    assert!(
+        at_cursor(&rt).starts_with("The note."),
+        "{}",
+        at_cursor(&rt)
+    );
+    press(&mut rt, "gx");
+    assert_eq!(rt.state.cursor(), at);
+}
+
+#[test]
+fn clicking_the_disclosure_toggles_a_fold() {
+    let mut rt = runtime(GFM);
+    let r = rect_of(&rt, "disclosure");
+    pointer_click(&mut rt, r[0] + r[2] / 2.0, r[1] + r[3] / 2.0);
+    assert!(
+        texts_under(&rt, "page")
+            .iter()
+            .any(|t| t.contains("Hidden words."))
+    );
+}

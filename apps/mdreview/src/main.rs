@@ -11,7 +11,11 @@
 //! `cc` and `dd` act on the cursor's line. `C` adds a general comment.
 //! `]c` and `[c` step through comments. Enter or `\e` edits a comment. `\x` deletes it.
 //! Tab lists the comments. The key panel shows continuations for a prefix or selection.
-//! `\?` shows every binding. `gx` opens the link under the cursor.
+//! `\?` shows every binding. `gx` opens the link under the cursor; on a footnote reference it
+//! goes to the footnote, and in a footnote back to where the text refers to it.
+//! `<details>` sections fold: `za` toggles the one under the cursor, `zo` and `zc` open and
+//! close it, `zR` and `zM` open and close them all. `j` and `k` step over a closed one, and a
+//! search or jump into one opens it.
 //!
 //! The mouse works as in Vim: a click moves the cursor, a drag, double-click or triple-click
 //! selects in Visual mode for `c`, `d` and `gy`, and a click on a link opens it.
@@ -106,6 +110,16 @@ enum Act {
     OpenLink,
     Write,
     Quit,
+    Fold(FoldAct),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FoldAct {
+    Toggle,
+    Open,
+    Close,
+    OpenAll,
+    CloseAll,
 }
 
 fn keymap() -> Keymap<Act, Op> {
@@ -125,6 +139,27 @@ fn keymap() -> Keymap<Act, Op> {
         .action(&[Leader, C('w')], Act::Write, "Write the review")
         .action(&[Leader, C('q')], Act::Quit, "Quit, once it's written")
         .action(&[C('g'), C('x')], Act::OpenLink, "Open the link")
+        .action(
+            &[C('z'), C('a')],
+            Act::Fold(FoldAct::Toggle),
+            "Toggle the fold",
+        )
+        .action(&[C('z'), C('o')], Act::Fold(FoldAct::Open), "Open the fold")
+        .action(
+            &[C('z'), C('c')],
+            Act::Fold(FoldAct::Close),
+            "Close the fold",
+        )
+        .action(
+            &[C('z'), C('R')],
+            Act::Fold(FoldAct::OpenAll),
+            "Open every fold",
+        )
+        .action(
+            &[C('z'), C('M')],
+            Act::Fold(FoldAct::CloseAll),
+            "Close every fold",
+        )
         .action(&[C(':')], Act::CommandLine, None)
         .action(
             &[C('Z'), C('Z')],
@@ -215,13 +250,16 @@ impl Reviewer {
             Origin::File(path) => Some(std::path::Path::new(path)),
             Origin::Sample | Origin::Stdin => None,
         };
+        let page = Page::new(&source);
+        let mut vim = Vim::new(keymap()).skip_blank_lines(true);
+        vim.set_folds(page.closed());
         Reviewer {
             images: Images::beside(document),
             origin,
             out,
-            page: Page::new(&source),
+            page,
             source,
-            vim: Vim::new(keymap()).skip_blank_lines(true),
+            vim,
             review: Review::default(),
             mode: Mode::Normal,
             draft: TextEdit::default(),
@@ -249,6 +287,20 @@ impl Reviewer {
 
     fn cursor(&self) -> usize {
         self.vim.cursor(self.page.text()).start
+    }
+
+    /// Moves the cursor to byte `at` of the page, opening folds around it.
+    fn go_to(&mut self, at: usize, tx: &mut Tx) {
+        self.vim.set_cursor(at, self.page.text());
+        self.reveal_cursor();
+        tx.scroll_into_view(VIM_CURSOR);
+    }
+
+    /// Opens the folds the cursor is in, as Vim opens folds a jump or search lands in.
+    fn reveal_cursor(&mut self) {
+        if self.page.open_around(self.cursor()) {
+            self.vim.set_folds(self.page.closed());
+        }
     }
 
     fn current(&self) -> Option<CommentId> {
@@ -935,6 +987,16 @@ fn view(s: &Reviewer, cx: &mut Cx<Reviewer>) -> El {
             .join_selection_group()
             .on_link_tx(|s: &mut Reviewer, url, tx| open_link(s, url, tx))
             .tasks_read_only();
+        let (first_fold, folds) = s.page.block_folds(i);
+        if !folds.is_empty() {
+            md = md
+                .details_open(folds)
+                .on_details_tx(move |s: &mut Reviewer, n, tx| {
+                    s.vim
+                        .set_cursor(s.page.folds[first_fold + n].summary.start, s.page.text());
+                    fold(s, FoldAct::Toggle, tx);
+                });
+        }
         // rune-kit rebuilds a block with an image loader every frame, so only image blocks get one.
         if block.markdown.contains("![") {
             let images = s.images.clone();
@@ -1210,6 +1272,7 @@ fn on_key(s: &mut Reviewer, k: &KeyEvent, tx: &mut Tx) -> bool {
             if (s.cursor(), s.vim.mode()) != before {
                 s.selected = None;
             }
+            s.reveal_cursor();
             tx.scroll_into_view(VIM_CURSOR);
         }
         Some(VimEffect::Copy(yanked)) => tx.copy(yanked),
@@ -1257,15 +1320,73 @@ fn act(s: &mut Reviewer, action: Act, tx: &mut Tx) {
         Act::OpenLink => {
             let text = s.page.text();
             let at = s.vim.cursor(text);
-            match s.page.link_at(at) {
-                Some(url) => open_link(s, &url, tx),
-                None => s.note = Some("No link under the cursor".into()),
+            if let Some(url) = s.page.link_at(at.clone()) {
+                open_link(s, &url, tx);
+            } else if let Some(back) = s.page.footnote_reference(at.start) {
+                s.go_to(back, tx);
+            } else {
+                s.note = Some("No link under the cursor".into());
             }
         }
+        Act::Fold(how) => fold(s, how, tx),
     }
 }
 
+fn fold(s: &mut Reviewer, how: FoldAct, tx: &mut Tx) {
+    let at = s.cursor();
+    let folds = &mut s.page.folds;
+    match how {
+        FoldAct::OpenAll | FoldAct::CloseAll => {
+            if folds.is_empty() {
+                s.note = Some("No folds".into());
+                return;
+            }
+            for f in folds.iter_mut() {
+                f.open = how == FoldAct::OpenAll;
+            }
+        }
+        _ => {
+            let Some(i) = s.page.fold_at(at) else {
+                s.note = Some("No fold under the cursor".into());
+                return;
+            };
+            let f = &mut s.page.folds[i];
+            f.open = match how {
+                FoldAct::Open => true,
+                FoldAct::Close => false,
+                _ => !f.open,
+            };
+            if !f.open {
+                // The cursor stays on what still draws: the summary.
+                let summary = f.summary.start;
+                s.vim.set_cursor(summary, s.page.text());
+            }
+        }
+    }
+    if s.page.closed().iter().any(|r| r.contains(&s.cursor())) {
+        let summary = s
+            .page
+            .folds
+            .iter()
+            .rev()
+            .find(|f| !f.open && f.body.contains(&s.cursor()))
+            .map(|f| f.summary.start);
+        if let Some(summary) = summary {
+            s.vim.set_cursor(summary, s.page.text());
+        }
+    }
+    s.vim.set_folds(s.page.closed());
+    tx.scroll_into_view(VIM_CURSOR);
+}
+
 fn open_link(s: &mut Reviewer, url: &str, tx: &mut Tx) {
+    if let Some(label) = url.strip_prefix(rune_kit::markdown::FOOTNOTE_SCHEME) {
+        match s.page.footnote(label) {
+            Some(at) => s.go_to(at, tx),
+            None => s.note = Some(format!("No footnote {label}")),
+        }
+        return;
+    }
     s.note = Some(match tx.open_url(url) {
         Ok(()) => format!("Opening {url}"),
         Err(e) => format!("Can't open {url}: {e}"),
