@@ -15,7 +15,7 @@ use pane_ui::{
     SettingsGroup, SettingsRow, Slider, Status, Swatch, TextField, Theme, Toast, Toggle, Tone,
     heading, icons, kbd, modal_layer, palette_matches, progress_bar, spinner, toast_region, token,
 };
-use rune::{AppSpec, Color, Cx, El, Key, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
+use rune::{AppSpec, Color, Cx, El, KeyEvent, TextEdit, Tx, col, el, icon, row, text};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThemeChoice {
@@ -723,17 +723,15 @@ fn poll(s: &mut State, now: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut State, k: &KeyEvent, _: &mut Tx) -> bool {
-    match k.key {
-        Key::Command('p') if k.mods.ctrl => {
-            if s.overlay == Overlay::Palette {
-                s.close_palette();
-            } else {
-                s.open_palette();
-            }
-            true
-        }
-        _ => false,
+    if !rune::Chord::parse("ctrl+p").is_ok_and(|c| c.matches(k)) {
+        return false;
     }
+    if s.overlay == Overlay::Palette {
+        s.close_palette();
+    } else {
+        s.open_palette();
+    }
+    true
 }
 
 fn main() {

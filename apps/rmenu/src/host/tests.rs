@@ -97,14 +97,20 @@ fn quit_cancels_and_joins_work_and_keeps_input_failure() {
     }
 }
 
+/// Control with a letter as the terminal shell reports it: typed text with `ctrl` on macOS, where
+/// Command is the primary modifier, and `Command` with `ctrl` and `cmd` elsewhere.
+fn ctrl_key(c: char) -> rune::KeyEvent {
+    let mac = cfg!(target_os = "macos");
+    let key = if mac { rune::Key::Text(c.to_string()) } else { rune::Key::Command(c) };
+    rune::KeyEvent { key, mods: rune::Mods { ctrl: true, cmd: !mac, ..rune::Mods::default() } }
+}
+
 #[test]
 fn escape_and_control_c_finish_through_the_key_adapter() {
-    for (key, mods) in [
-        (rune::Key::Escape, rune::Mods::default()),
-        (rune::Key::Command('c'), rune::Mods { ctrl: true, cmd: true, ..rune::Mods::default() }),
-    ] {
+    let escape = rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() };
+    for event in [escape, ctrl_key('c')] {
         let mut menu = menu_without_stdin();
-        assert!(crate::view::key(&mut menu, &rune::KeyEvent { key, mods }, &mut Tx::default()));
+        assert!(crate::view::key(&mut menu, &event, &mut Tx::default()));
         assert_eq!(*menu.outcome.borrow(), Some(Outcome::Cancelled));
     }
 }
@@ -123,22 +129,22 @@ fn navigation_keys_drive_the_model_and_modified_arrows_pass_through() {
     poll_until(&mut menu, |m| m.model.result_count() == 10 && !m.model.is_searching());
     let plain = Mods::default();
     let shift = Mods { shift: true, ..plain };
-    let ctrl = Mods { ctrl: true, cmd: true, ..plain };
-    for (key, mods, expected) in [
-        (Key::Up, plain, Some(3)),
-        (Key::Down, plain, Some(5)),
-        (Key::PageUp, plain, Some(1)),
-        (Key::PageDown, plain, Some(7)),
-        (Key::Tab, plain, Some(5)),
-        (Key::Tab, shift, Some(3)),
-        (Key::Command('n'), ctrl, Some(5)),
-        (Key::Command('p'), ctrl, Some(3)),
-        (Key::Down, shift, None),
-        (Key::Up, ctrl, None),
-        (Key::Backspace, plain, Some(4)),
+    let ctrl = ctrl_key('n').mods;
+    let key = |key, mods| KeyEvent { key, mods };
+    for (event, expected) in [
+        (key(Key::Up, plain), Some(3)),
+        (key(Key::Down, plain), Some(5)),
+        (key(Key::PageUp, plain), Some(1)),
+        (key(Key::PageDown, plain), Some(7)),
+        (key(Key::Tab, plain), Some(5)),
+        (key(Key::Tab, shift), Some(3)),
+        (ctrl_key('n'), Some(5)),
+        (ctrl_key('p'), Some(3)),
+        (key(Key::Down, shift), None),
+        (key(Key::Up, ctrl), None),
+        (key(Key::Backspace, plain), Some(4)),
     ] {
         menu.handle(Event::Highlight(4), &mut Tx::default());
-        let event = KeyEvent { key, mods };
         assert_eq!(crate::view::key(&mut menu, &event, &mut Tx::default()), expected.is_some(), "{event:?}");
         assert_eq!(menu.model.highlighted_row(), Some(expected.unwrap_or(4)), "{event:?}");
     }

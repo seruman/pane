@@ -315,7 +315,7 @@ fn keycap_button(label: &str, key: &str, enabled: bool, c: &Theme) -> El {
     if enabled { b } else { b.opacity(0.45) }
 }
 
-// Rune reports Ctrl as both `ctrl` and `cmd`. Terminal chords use only Control.
+// Terminal chords use only Control: Rune reports it as `ctrl` (and as `cmd` off macOS).
 pub fn chord(event: &KeyEvent) -> Option<KeyChord> {
     let key = match &event.key {
         Key::Enter => "enter".to_owned(),
@@ -333,6 +333,11 @@ pub fn chord(event: &KeyEvent) -> Option<KeyChord> {
     Some(KeyChord { key, command: false, control: m.ctrl, option: m.alt, shift: m.shift })
 }
 
+/// Whether `event` is Control with `key`, as Rune's `Chord` matches it on this platform.
+fn ctrl(key: &str, event: &KeyEvent) -> bool {
+    rune::Chord::parse(&format!("ctrl+{key}")).is_ok_and(|c| c.matches(event))
+}
+
 pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
     if let Some(chord) = chord(event)
         && let Some(target) = menu.model.target(&chord)
@@ -346,7 +351,6 @@ pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
     }
     let m = event.mods;
     let plain = !m.ctrl && !m.alt && !m.shift;
-    let ctrl_only = m.ctrl && !m.alt && !m.shift;
     let nav = match &event.key {
         Key::Enter if plain => Nav::Accept,
         Key::Escape if plain => Nav::Back,
@@ -356,9 +360,9 @@ pub fn key(menu: &mut Menu, event: &KeyEvent, tx: &mut Tx) -> bool {
         Key::PageDown if plain => Nav::PageDown,
         Key::Tab if plain => Nav::Tab,
         Key::Tab if m.shift && !m.ctrl && !m.alt => Nav::BackTab,
-        Key::Command('n') if ctrl_only => Nav::Down,
-        Key::Command('p') if ctrl_only => Nav::Up,
-        Key::Command('c') if ctrl_only => Nav::Cancel,
+        _ if ctrl("n", event) => Nav::Down,
+        _ if ctrl("p", event) => Nav::Up,
+        _ if ctrl("c", event) => Nav::Cancel,
         Key::Backspace if plain && menu.field.text.is_empty() => Nav::PopIfEmpty,
         _ => return false,
     };
@@ -383,6 +387,9 @@ mod tests {
     #[test]
     fn terminal_ctrl_becomes_a_control_chord_without_command() {
         let event = KeyEvent { key: Key::Command('w'), mods: Mods { ctrl: true, cmd: true, ..Mods::default() } };
+        assert_eq!(chord(&event), Some(KeyChord::parse("ctrl+w").unwrap()));
+        // On macOS the terminal reports Control with a letter as typed text with `ctrl`.
+        let event = KeyEvent { key: Key::Text("w".into()), mods: Mods { ctrl: true, ..Mods::default() } };
         assert_eq!(chord(&event), Some(KeyChord::parse("ctrl+w").unwrap()));
         let event = KeyEvent { key: Key::Text("n".into()), mods: Mods { alt: true, ..Mods::default() } };
         assert_eq!(chord(&event), Some(KeyChord::parse("alt+n").unwrap()));
