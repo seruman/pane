@@ -746,12 +746,15 @@ fn comment_view(id: CommentId, number: usize, c: &Comment, current: bool, theme:
             s.selected = Some(id);
             s.open(Target::Edit(id));
         })
-        .build(&format!("edit-{id}"), theme);
+        .build(&format!("edit-{id}"), theme)
+        // The mouse's: keys edit with Enter and delete with \\x, and Tab lists the comments.
+        .focusable(false);
     let delete = Button::icon_only(&icons::TRASH, "Delete")
         .plain()
         .small()
         .on_press(move |s: &mut Reviewer| s.delete(id))
-        .build(&format!("delete-{id}"), theme);
+        .build(&format!("delete-{id}"), theme)
+        .focusable(false);
     let mut head = row()
         .w_full()
         .gap(8.0)
@@ -1285,6 +1288,14 @@ fn on_key(s: &mut Reviewer, k: &KeyEvent, tx: &mut Tx) -> bool {
             Op::Remove => s.remove(range),
         },
         Some(VimEffect::Action { action, .. }) => act(s, action, tx),
+        // Tab is the comment list's from Visual mode too, never a walk through the buttons.
+        None if k.key == Key::Tab && !k.mods.ctrl && !k.mods.cmd && !k.mods.alt => {
+            if !k.mods.shift {
+                let at = s.cursor();
+                s.vim.set_cursor(at, s.page.text());
+                s.open_list(tx);
+            }
+        }
         None => return false,
     }
     true

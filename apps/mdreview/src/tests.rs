@@ -1545,3 +1545,28 @@ fn clicking_the_disclosure_toggles_a_fold() {
             .any(|t| t.contains("Hidden words."))
     );
 }
+
+#[test]
+fn tab_lists_the_comments_from_visual_mode_and_never_focuses_their_buttons() {
+    let mut rt = runtime(SRC);
+    press(&mut rt, "jVc");
+    press(&mut rt, "one");
+    key(&mut rt, Key::Enter);
+    press(&mut rt, "v");
+    key(&mut rt, Key::Tab);
+    assert!(
+        rt.find("comment-list").is_some(),
+        "Tab in Visual mode lists the comments"
+    );
+    assert!(!rt.elements().iter().any(|e| e.focused));
+    key(&mut rt, Key::Escape);
+    assert!(
+        rt.elements()
+            .iter()
+            .filter(|e| e
+                .key
+                .as_deref()
+                .is_some_and(|k| k.starts_with("edit-") || k.starts_with("delete-")))
+            .all(|e| !e.focusable)
+    );
+}
