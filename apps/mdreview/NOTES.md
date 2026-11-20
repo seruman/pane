@@ -39,6 +39,12 @@ Rune's Markdown (our fork, `rune-kit/src/markdown`) now draws footnotes, alerts,
 - `<details>` fold: `za` `zo` `zc` `zR` `zM`, or click the triangle. `j`/`k` skip a closed one;
   a search or jump into one opens it.
 - Footnotes: `gx` on a reference goes to the note, `gx` in the note goes back.
+- Not cached: since the upstream merge (Rune `8b66b203`), Rune caches settled Markdown blocks
+  across rebuilds (`markdown/memo.rs`). Alerts, `<details>` and footnotes opt out (`HAS_GFM`;
+  `hash_block_direct` returns false), because their renderer (`render/gfm.rs`) draws nested
+  blocks through a fresh `blocks_with_dirs` call with no `PreBlock`s and its own `next_details`
+  counter. To cache them: digest their children like quotes (`rebuild_quote_meta`), hash
+  `details_open` and the `next_details` position, and pass the inner `PreBlock`s down.
 - Not done: math is shown as code, not typeset (not important). Sub/superscript are smaller text
   without a baseline shift, which Rune text can't do. Bare emails aren't linked (on purpose).
 
