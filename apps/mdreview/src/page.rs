@@ -24,7 +24,7 @@ pub enum BlockKind {
     Details,
     /// Footnote definitions in a row, which rune-kit draws under one rule.
     Footnotes,
-    /// An HTML block shown as its source, or display math, drawn as code.
+    /// An HTML block shown as its source, drawn as code.
     Html,
 }
 
@@ -85,8 +85,7 @@ const OPTIONS: Options = Options::ENABLE_STRIKETHROUGH
     .union(Options::ENABLE_TABLES)
     .union(Options::ENABLE_TASKLISTS)
     .union(Options::ENABLE_FOOTNOTES)
-    .union(Options::ENABLE_GFM)
-    .union(Options::ENABLE_MATH);
+    .union(Options::ENABLE_GFM);
 
 /// How many `<details>` an HTML block opens, less those it closes.
 fn details_balance(html: &str) -> isize {
@@ -368,26 +367,8 @@ fn split(source: &str) -> (Vec<(BlockKind, Range<usize>)>, String) {
     // The top-level block being read joins the last one found.
     let mut joining = false;
     let mut html = String::new();
-    let mut math_only = None;
     let mut events = Parser::new_ext(source, OPTIONS).into_offset_iter();
     for (event, range) in events.by_ref() {
-        if depth == 1
-            && let Some(only) = &mut math_only
-        {
-            *only = match &event {
-                Event::DisplayMath(_) => true,
-                Event::SoftBreak | Event::End(TagEnd::Paragraph) => *only,
-                Event::Text(t) => *only && t.trim().is_empty(),
-                _ => false,
-            };
-            if matches!(event, Event::End(TagEnd::Paragraph))
-                && math_only.take() == Some(true)
-                && !joining
-                && let Some(last) = found.last_mut()
-            {
-                last.0 = BlockKind::Html;
-            }
-        }
         if depth == 1
             && let Some(only) = &mut only_image
         {
@@ -415,7 +396,6 @@ fn split(source: &str) -> (Vec<(BlockKind, Range<usize>)>, String) {
                             && found.last().is_some_and(|l| l.0 == BlockKind::Footnotes));
                     if matches!(tag, Tag::Paragraph) {
                         only_image = Some(false);
-                        math_only = Some(false);
                     }
                     html.clear();
                     if !joining {

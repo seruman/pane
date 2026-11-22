@@ -1474,7 +1474,8 @@ fn gfm_blocks_split_as_rune_kit_draws_them() {
             K::Details,
             K::Quote,
             K::Html,
-            K::Html,
+            // `$$…$$` is text: rune-kit's math is its `math` feature, which mdreview leaves off.
+            K::Para,
             K::Para,
             K::Footnotes
         ]
