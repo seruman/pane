@@ -12,6 +12,8 @@ use crate::cli::Appearance;
 use crate::host::Menu;
 
 pub const ROWS_KEY: &str = "rows";
+/// The viewport the rows scroll in; a reveal is scoped to it.
+pub const SCROLLER_KEY: &str = "scroller";
 
 const FALLBACK_WIDTH: f32 = 640.0;
 const ROW_H: f32 = 28.0;
@@ -155,7 +157,7 @@ fn results(menu: &Menu, c: &Theme) -> El {
             move |m: &Menu, i| result_row(m, i, &c),
         )
         .virtual_rows_version((model.result_revision(), count));
-    col().key("scroller").scroll(ScrollSpec { stick_bottom: false }).w_full().grow(1.0).min_h(0.0).pb(4.0).child(rows)
+    col().key(SCROLLER_KEY).scroll(ScrollSpec { stick_bottom: false }).w_full().grow(1.0).min_h(0.0).pb(4.0).child(rows)
 }
 
 fn result_row(menu: &Menu, i: usize, c: &Theme) -> El {
